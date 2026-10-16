@@ -59,3 +59,10 @@ __pycache__/
 
 # Copie locale de crates tiers (patch versionné à part)
 tools/pst-probe/vendor/
+
+# Sorties de construction de l'interface
+app/dist/
+
+# Icônes de ThunderLook (originales) : exception à la règle *.png
+!app/src-tauri/icons/*.png
+!app/src-tauri/app-icon.png

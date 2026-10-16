@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["app/src-tauri", "app/ui", "crates/model"]
+default-members = ["app/src-tauri", "crates/model"]
+exclude = ["tools/pst-probe"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+
+[profile.release.package.thunderlook-ui]
+opt-level = "z"

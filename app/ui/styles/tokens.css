@@ -1,0 +1,78 @@
+/* Jetons de ThunderLook — palette DESIGN.md + jetons dérivés (notes/design-tokens.md). */
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #f6f7f9;
+  --border: #e3e6ea;
+  --border-strong: #899099;
+  --text: #1b1f24;
+  --text-2: #5b6470;
+  --accent: #2f6fde;
+  --accent-text: #2b67ce;
+  --on-accent: #ffffff;
+  --hover: #ebecee;
+  --selected: #e6eefb;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%);
+
+  /* Couleurs de catégories (puces) */
+  --cat-red: #d64545;
+  --cat-orange: #e07b24;
+  --cat-yellow: #d4a514;
+  --cat-green: #3a9b5c;
+  --cat-blue: #3b7dd8;
+  --cat-purple: #8a5cc7;
+
+  --font: "Inter Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --fs: 14px;
+  --fs-sm: 12px;
+  --fs-lg: 20px;
+  --lh: 1.5;
+  --radius: 6px;
+  --u: 4px; /* grille 4 px */
+  --target: 32px; /* cible cliquable minimale */
+
+  /* Densité confortable (défaut) */
+  --row-pad-y: 10px;
+  --row-gap: 2px;
+  --bar-h: 44px;
+}
+
+:root[data-density="compact"] {
+  --row-pad-y: 6px;
+  --row-gap: 0px;
+  --bar-h: 40px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #14171a;
+    --surface: #1c2024;
+    --border: #2b3036;
+    --border-strong: #646b73;
+    --text: #e8eaed;
+    --text-2: #9aa3ae;
+    --accent: #6ea0ff;
+    --accent-text: #6ea0ff;
+    --on-accent: #14171a;
+    --hover: #2a2e32;
+    --selected: #243043;
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #14171a;
+  --surface: #1c2024;
+  --border: #2b3036;
+  --border-strong: #646b73;
+  --text: #e8eaed;
+  --text-2: #9aa3ae;
+  --accent: #6ea0ff;
+  --accent-text: #6ea0ff;
+  --on-accent: #14171a;
+  --hover: #2a2e32;
+  --selected: #243043;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%);
+}

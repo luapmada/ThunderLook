@@ -1,6 +1,6 @@
 # PLAN — architecture, stack, jalons
 
-Statut : **proposition, en attente de ton accord avant tout code applicatif.**
+Statut : **validé le 2026-10-16** (§7 accepté tel quel : ruban simplifié par défaut avec mode classique, nom « ThunderLook », REA MCP repoussé à J6). **Modifié le même jour à ta demande (« plus il y a de Rust mieux c'est »)** : interface en Rust (Leptos → WebAssembly) au lieu de React/TypeScript, outillage cargo au lieu de npm. J0 terminé.
 Entrées : `SPEC.md` (priorités Q1 à Q4), `DESIGN.md`, `notes/ui-reference.md`, `notes/formats.md`, `notes/juridique.md`.
 
 ## 1. Principes
@@ -16,12 +16,12 @@ Entrées : `SPEC.md` (priorités Q1 à Q4), `DESIGN.md`, `notes/ui-reference.md`
 
 | Couche | Choix | Pourquoi (mesures et sources) |
 |---|---|---|
-| Application | **Tauri 2** : cœur Rust, interface web dans WebView2 | WebView2 155 déjà présent. Binaire léger. Une seule technologie pour l'interface, l'affichage HTML des mails et l'éditeur |
+| Application | **Tauri 2** : cœur Rust, interface dans WebView2 | WebView2 155 déjà présent. Binaire léger (8,4 Mo au J0) |
 | Lecture PST | **`outlook-pst`** (Microsoft, MIT, implémentation de [MS-PST]), avec notre correctif « sous-arbre absent » proposé en amont | Mesuré : 35 589 éléments en 1,2 s, 217 257 éléments (15 Go) en 54 s, 0 erreur, FAI lisibles. libpff : 43,6 s et 26 échecs, sans FAI |
 | MIME | `mail-parser` / `mail-builder` (Apache-2.0/MIT) | Conversion MAPI → `.eml` selon [MS-OXCMAIL] |
 | RTF | Décompression [MS-OXRTFCP] (crate `compressed-rtf`, licence à vérifier, sinon ~200 lignes) et dé-encapsulation [MS-OXRTFEX] | 633 messages RTF dans ton PST principal |
 | Base | SQLite (`rusqlite`, embarqué) + FTS5 | Index et recherche locale (pas Windows Search) |
-| Interface | TypeScript + React, TanStack Virtual (listes), TipTap/ProseMirror (éditeur), icônes Lucide (ISC), police Inter (OFL) | Écosystème mûr pour les listes de plus de 20 000 lignes et l'édition HTML |
+| Interface | **Leptos 0.8** (Rust compilé en WebAssembly, rendu client), construit par **Trunk** ; icônes Lucide via `icondata_lu` (MIT/ISC) ; police Inter (OFL) embarquée | Même langage et **mêmes types** (`crates/model`) que le cœur. Pas de Node. Liste virtualisée à écrire en Rust (J2). Éditeur HTML riche (J5) : seule exception JS envisagée si aucun équivalent Rust n'est viable |
 | Affichage des mails | `iframe` en bac à sable (`srcdoc`, sans scripts), CSP qui bloque le contenu distant par défaut | Même comportement qu'Outlook : images distantes bloquées, barre d'information |
 | IMAP / SMTP (jalon 7) | `async-imap` ou `imap-next`, `lettre` | Moins mûrs que MailKit (.NET). Risque accepté, car hors du premier jalon |
 
@@ -32,22 +32,21 @@ Entrées : `SPEC.md` (priorités Q1 à Q4), `DESIGN.md`, `notes/ui-reference.md`
   - il faudrait WebView2 de toute façon pour l'affichage et l'édition HTML, d'où deux technologies d'interface.
 
 **Outillage installé** :
-- Rust 1.99.1 dans `%USERPROFILE%\.cargo` (pas encore dans le PATH) ;
+- Rust 1.99.1 dans `%USERPROFILE%\.cargo` (ajouté au PATH utilisateur), cible `wasm32-unknown-unknown`, `trunk` 0.21.14, `cargo-tauri` 2.12.3 ;
 - MSVC 2019 Build Tools et SDK Windows 10.0.19041 déjà présents ;
 - Node 24.
 
 ## 3. Architecture
 
 ```
-app/                      Application Tauri
-  src-tauri/              Commandes IPC, fenêtres (principale, message, rédaction), thème Windows
-  ui/                     Interface TypeScript
-    shell/                Barre de commandes à onglets (classique / simplifiée, KeyTips), navigation basse, barre d'état
-    mail/                 Volet dossiers, liste virtualisée, volet de lecture, barre de dossier
-    compose/              Fenêtre de rédaction
-    dialogs/              Règles, actions rapides, paramètres d'affichage, recherche avancée…
-    theme/                Jetons DESIGN.md (clair/sombre, densité), contrôles WCAG AA
+app/                      Application Tauri (index.html + Trunk.toml pour l'interface)
+  src-tauri/              Cœur : commandes IPC, fenêtres (principale, message, rédaction), réglages
+  ui/                     Interface Leptos (crate thunderlook-ui → WebAssembly)
+    src/                  app (racine, raccourcis, volets), commandbar (registre des commandes, modes de barre),
+                          folders (arbre + navigation basse), list, reading, statusbar, splitter, menu, ipc
+    styles/               Jetons DESIGN.md (clair/sombre, densité), mise en page ; assets/ (police Inter)
 crates/
+  model/                  Types partagés cœur ↔ interface, formats français, groupes de dates, réglages, démo
   store/                  Schéma SQLite, migrations, magasin .eml, sac de propriétés MAPI brut
   import-pst/             outlook-pst → modèle (dossiers, messages, pièces jointes, drapeaux, catégories)
                           + FAI : catégories, vues, favoris, heures de travail, flux de règles
@@ -73,7 +72,7 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 
 | # | Jalon | Contenu | Critère de fin | Taille |
 |---|---|---|---|---|
-| J0 | Socle | Projet Tauri, jetons `DESIGN.md` clair/sombre, fenêtre à 3 volets statique, navigation basse, barre d'état, barre de commandes vide, police Inter, icônes Lucide | Contrastes AA vérifiés. Arbre UIA du clone relevé avec `tools/uia_dump.ps1` et comparé à la référence | S |
+| J0 ✅ | Socle | Projet Tauri, jetons `DESIGN.md` clair/sombre, fenêtre à 3 volets statique, navigation basse, barre d'état, barre de commandes vide, police Inter, icônes Lucide | Contrastes AA vérifiés. Arbre UIA du clone relevé avec `tools/uia_dump.ps1` et comparé à la référence | S |
 | J1 | Import PST (lecture seule) | Copie de travail, import vers SQLite + `.eml`, pièces jointes, lu, drapeaux, catégories, FAI de configuration, rapport d'import | Sur tes 3 copies (271 Ko, 3,9 Go, 15 Go) : effectifs identiques à `pst-probe`, 0 perte silencieuse, import de 15 Go en moins de 10 min | M |
 | J2 | Lecture | Volet dossiers (compteurs non lus / [total]), liste virtualisée (colonnes, tri, groupes par date, styles non lu et drapeau), volet de lecture (HTML isolé, texte, RTF, pièces jointes, images bloquées), raccourcis de lecture, F6 | Ouverture d'un dossier de 22 000 éléments en moins de 200 ms. Parcours clavier complet | M |
 | J3 | Organisation | Lu/non lu, supprimer, déplacer/copier, glisser-déposer, indicateurs, catégories, CRUD des dossiers, favoris, conversations, « Organiser par », filtres Tous/Non lus, paramètres d'affichage | Ruban Accueil, Dossier et Affichage fonctionnels (sous-ensemble de `ui-reference.md` §3) | M |

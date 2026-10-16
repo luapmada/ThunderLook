@@ -16,8 +16,9 @@ a REA work on MSoutlook21
 | 0. Cadrage : inventaire et priorités (`SPEC.md`) | Fait (2026-10-16) |
 | 1. Outillage : Ghidra, `rea setup`, `rea doctor` | Fait (2026-10-16) : Ghidra 12.1.4 et JDK 21 opérationnels pour REA |
 | 2. Analyse : interface, formats, `notes/` | Fait (2026-10-16) : `notes/ui-reference.md`, `notes/formats.md` |
-| 3. Plan : architecture et jalons (`PLAN.md`) | Proposé, en attente d'accord |
-| Code | Pas commencé (attend l'accord sur `PLAN.md`) |
+| 3. Plan : architecture et jalons (`PLAN.md`) | Validé (2026-10-16) ; interface passée en Rust (Leptos) |
+| J0. Socle : Tauri + Leptos, 3 volets, barre de commandes, thème, clavier | Fait (2026-10-16) |
+| J1. Import PST en lecture seule | À faire |
 
 ## Fichiers
 - `SPEC.md` : fonctions inventoriées et priorités (le mail d'abord).
@@ -25,4 +26,6 @@ a REA work on MSoutlook21
 - `REA-LIMITES.md` : ce qui marche et ce qui échoue avec REA.
 - `PLAN.md` : architecture, stack et jalons.
 - `notes/` : analyses (interface, formats) et points juridiques.
-- `tools/` : outils d'analyse (relevé UI Automation, en-têtes PST, sondes libpff et `outlook-pst`).
+- `app/` : application (cœur Tauri `app/src-tauri`, interface Leptos `app/ui`) ; `crates/model` : types partagés.
+- `tools/` : outils d'analyse et de vérification (relevé et test clavier UI Automation, contrastes, en-têtes PST, sondes libpff et `outlook-pst`).
+- `notes/dev.md` : construire et tester.
