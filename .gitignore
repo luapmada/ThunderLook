@@ -1,0 +1,54 @@
+# --- Données personnelles : ne jamais versionner ---
+*.pst
+*.ost
+*.bak
+*.bak2
+*.eml
+*.msg
+*.oft
+*.rwz
+*.ics
+*.vcf
+*.pab
+*.nst
+data/
+copies/
+
+# Captures d'écran et relevés de l'Outlook réel (courriels visibles)
+captures/
+**/captures/
+notes/uia-raw/
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.gif
+*.webp
+
+# Sorties brutes REA / Ghidra (peuvent contenir du code Microsoft décompilé)
+notes/rea-raw/
+*.gpr
+*.rep/
+ghidra-projects/
+*.evidence.json
+
+# Bases locales (index, stockage du clone sur données réelles)
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets et configuration locale
+.env
+.env.*
+.claude/settings.local.json
+
+# Outillage
+node_modules/
+dist/
+build/
+target/
+*.log
+.DS_Store
+Thumbs.db
