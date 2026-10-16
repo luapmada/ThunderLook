@@ -93,6 +93,15 @@ Chaque entrée : action → résultat → cause → contournement → source.
   - Contournement : le serveur MCP, qui garde la session ouverte. Il faut redémarrer Claude Code pour qu'il voie Ghidra.
 - Erreur d'usage, de ma part : un chemin contenant `..` est refusé (« Ambiguous Windows path component is unsupported »). C'est conforme à la doc. Toujours passer des chemins absolus normalisés.
 
+**Native `OUTLOOK.EXE` (copie, 46,6 Mo, x64) par la CLI**
+- `rea search OUTLOOK.EXE 'CRuleElement' --provider ghidra`, avec `REA_GHIDRA_STARTUP_TIMEOUT_MS=14400000` : **1 210 s (20 min)** pour l'import, l'analyse automatique Ghidra par défaut et la recherche. Sortie 0, pas d'erreur.
+  - Les essais de la doc REA dépassaient 900 et 1 800 s. Ici ça passe, sur Ryzen 7 7700 avec 63 Go de RAM.
+- Résultat : la chaîne `CRuleElement` a été trouvée à l'adresse `0x142216ad8`.
+  - C'est le nom de classe sérialisé dans le flux de règles et les `.rwz`.
+  - C'est le point d'entrée pour remonter aux fonctions de (dé)sérialisation des règles via `xrefs`.
+- Limite pratique : chaque requête CLI suivante (xrefs, décompilation) coûterait encore environ 20 min, puisque le snapshot ne garde pas la base.
+  - L'investigation est reportée au jalon J6, via le serveur MCP après redémarrage de Claude Code, et seulement si l'import des règles bute sur des champs inconnus.
+
 **Observation d'interface**
 - `observe_native_ui` et `capture_native_ui_scenario` sont macOS uniquement.
 - Contournement : `tools/uia_dump.ps1` (UI Automation + `PrintWindow`), `tools/uia_menu.ps1` et `tools/uia_summarize.py`.
