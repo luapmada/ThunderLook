@@ -14,8 +14,8 @@ a REA work on MSoutlook21
 | Étape | État |
 |---|---|
 | 0. Cadrage : inventaire et priorités (`SPEC.md`) | Fait (2026-10-16) |
-| 1. Outillage : Ghidra, `rea setup`, `rea doctor` | En cours : téléchargements en attente de confirmation |
-| 2. Analyse : interface, formats, `notes/` | À faire |
+| 1. Outillage : Ghidra, `rea setup`, `rea doctor` | Fait (2026-10-16) : Ghidra 12.1.4 et JDK 21 opérationnels pour REA |
+| 2. Analyse : interface, formats, `notes/` | En cours |
 | 3. Plan : architecture et jalons (`PLAN.md`) | À faire |
 | Code | Pas commencé (attend l'accord sur `PLAN.md`) |
 

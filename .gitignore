@@ -52,3 +52,7 @@ target/
 *.log
 .DS_Store
 Thumbs.db
+
+# Environnements Python
+.venv/
+__pycache__/
