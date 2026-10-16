@@ -77,6 +77,32 @@ Chaque entrée : action → résultat → cause → contournement → source.
   - Pas d'observation de l'interface Windows par REA.
   - Contournement : script UI Automation maison (étape 2).
 
+## 2026-10-16 — Étape 2 : analyse
+
+**Native `MSPST32.DLL` (copie, 3 Mo, x64) par la CLI**
+- `rea inspect --provider ghidra --snapshot …` : 87 s, puis `binary_overview` OK.
+  - 9 segments, 8 110 procédures, 2 594 chaînes.
+  - Profil d'analyse exposé : `no_return_repair: disabled-windows-p0`, `analyzer_preset: ghidra-default`.
+- `rea search … 'pst'` (chaînes) : **fonctionne**, contrairement à ce que la doc Windows P0 laissait craindre.
+  - Résultats utiles : `TardisPST::DiskFileOpenW`, `LargePST::DiskFileOpenW`, chemin source `src\outlook\mspst\ndb\fcache.cpp`, clés de registre `…\Outlook\PST`.
+- `rea search … --kind procedures 'Crypt'` : seules les importations sont nommées (binaire sans symboles). Les fonctions internes ne sont que des adresses.
+- **Limite majeure en CLI : le snapshot ne garde pas la base Ghidra.**
+  - Chaque commande réimporte et réanalyse le binaire : 85 à 87 s pour 3 Mo.
+  - Le fichier `.snapshot` fait 7,9 Ko, ce n'est pas une base d'analyse.
+  - Pour `OUTLOOK.EXE` (46,6 Mo), une investigation à plusieurs requêtes en CLI est irréaliste.
+  - Contournement : le serveur MCP, qui garde la session ouverte. Il faut redémarrer Claude Code pour qu'il voie Ghidra.
+- Erreur d'usage, de ma part : un chemin contenant `..` est refusé (« Ambiguous Windows path component is unsupported »). C'est conforme à la doc. Toujours passer des chemins absolus normalisés.
+
+**Observation d'interface**
+- `observe_native_ui` et `capture_native_ui_scenario` sont macOS uniquement.
+- Contournement : `tools/uia_dump.ps1` (UI Automation + `PrintWindow`), `tools/uia_menu.ps1` et `tools/uia_summarize.py`.
+- Ce n'est pas un test de REA, mais l'analyse d'interface Windows passe entièrement hors REA.
+
+**Décompilation devenue inutile pour les formats du jalon 1**
+- Ce qu'il faut importer est documenté : [MS-PST], [MS-OXOCFG], [MS-OXORULE], et la spec communautaire des règles `.rwz`.
+- Vérifié sur les FAI de la copie avec `tools/pst-probe`.
+- REA sur `OUTLOOK.EXE` reste justifié pour les quelques champs inconnus du flux de règles. C'est un test des limites de REA sur un très gros binaire.
+
 **Plan B, si la voie Windows échoue**
 1. REA sous WSL2 (Linux), avec Ghidra Linux, sur une copie du binaire. C'est la voie la plus documentée.
 2. Relever `REA_GHIDRA_STARTUP_TIMEOUT_MS` (3 600 000 ms ou plus) et analyser par fonctions ciblées.

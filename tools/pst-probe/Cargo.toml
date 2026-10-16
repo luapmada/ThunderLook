@@ -1,0 +1,11 @@
+[package]
+name = "pst-probe"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+outlook-pst = "1.2.0"
+
+[patch.crates-io]
+outlook-pst = { path = "vendor/outlook-pst" }

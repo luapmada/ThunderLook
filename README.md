@@ -15,12 +15,14 @@ a REA work on MSoutlook21
 |---|---|
 | 0. Cadrage : inventaire et priorités (`SPEC.md`) | Fait (2026-10-16) |
 | 1. Outillage : Ghidra, `rea setup`, `rea doctor` | Fait (2026-10-16) : Ghidra 12.1.4 et JDK 21 opérationnels pour REA |
-| 2. Analyse : interface, formats, `notes/` | En cours |
-| 3. Plan : architecture et jalons (`PLAN.md`) | À faire |
+| 2. Analyse : interface, formats, `notes/` | Fait (2026-10-16) : `notes/ui-reference.md`, `notes/formats.md` |
+| 3. Plan : architecture et jalons (`PLAN.md`) | Proposé, en attente d'accord |
 | Code | Pas commencé (attend l'accord sur `PLAN.md`) |
 
 ## Fichiers
 - `SPEC.md` : fonctions inventoriées et priorités (le mail d'abord).
 - `DESIGN.md` : direction visuelle.
 - `REA-LIMITES.md` : ce qui marche et ce qui échoue avec REA.
-- `notes/` : analyses et points juridiques.
+- `PLAN.md` : architecture, stack et jalons.
+- `notes/` : analyses (interface, formats) et points juridiques.
+- `tools/` : outils d'analyse (relevé UI Automation, en-têtes PST, sondes libpff et `outlook-pst`).

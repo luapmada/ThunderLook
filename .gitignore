@@ -56,3 +56,6 @@ Thumbs.db
 # Environnements Python
 .venv/
 __pycache__/
+
+# Copie locale de crates tiers (patch versionné à part)
+tools/pst-probe/vendor/
