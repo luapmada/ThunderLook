@@ -8,33 +8,77 @@ use crate::icons::{CHEVRON_DOWN, Svg};
 
 #[derive(Clone)]
 pub struct MenuEntry {
-    pub label: &'static str,
+    pub label: String,
     /// `Some(_)` : élément à cocher (menuitemradio).
     pub checked: Option<bool>,
     pub on_select: Option<Callback<()>>,
+    /// Sous-menu (menus contextuels) : remplace le menu courant, avec un retour.
+    pub children: Vec<MenuEntry>,
+    /// Pastille de couleur (catégories).
+    pub swatch: Option<String>,
+    /// Trait de séparation au-dessus.
+    pub separator: bool,
 }
 
 impl MenuEntry {
-    pub fn action(label: &'static str, on_select: impl Fn() + Send + Sync + 'static) -> Self {
-        Self { label, checked: None, on_select: Some(Callback::new(move |_| on_select())) }
+    fn new(label: impl Into<String>, checked: Option<bool>, on_select: Option<Callback<()>>) -> Self {
+        Self { label: label.into(), checked, on_select, children: Vec::new(), swatch: None, separator: false }
     }
 
-    pub fn radio(label: &'static str, checked: bool, on_select: impl Fn() + Send + Sync + 'static) -> Self {
-        Self { label, checked: Some(checked), on_select: Some(Callback::new(move |_| on_select())) }
+    pub fn action(label: impl Into<String>, on_select: impl Fn() + Send + Sync + 'static) -> Self {
+        Self::new(label, None, Some(Callback::new(move |_| on_select())))
+    }
+
+    pub fn radio(label: impl Into<String>, checked: bool, on_select: impl Fn() + Send + Sync + 'static) -> Self {
+        Self::new(label, Some(checked), Some(Callback::new(move |_| on_select())))
     }
 
     /// Commande prévue mais pas encore disponible (affichée désactivée).
-    pub fn pending(label: &'static str) -> Self {
-        Self { label, checked: None, on_select: None }
+    pub fn pending(label: impl Into<String>) -> Self {
+        Self::new(label, None, None)
+    }
+
+    pub fn submenu(label: impl Into<String>, children: Vec<MenuEntry>) -> Self {
+        Self { children, ..Self::new(label, None, None) }
+    }
+
+    pub fn with_swatch(mut self, color: Option<String>) -> Self {
+        self.swatch = Some(color.unwrap_or_default());
+        self
+    }
+
+    pub fn separated(mut self) -> Self {
+        self.separator = true;
+        self
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.on_select.is_some() || !self.children.is_empty()
     }
 }
 
-fn items(menu: &web_sys::HtmlDivElement) -> Vec<web_sys::HtmlElement> {
+/// Contenu d'un élément de menu : coche, pastille, libellé.
+pub fn entry_body(entry: &MenuEntry) -> impl IntoView + use<> {
+    let checked = entry.checked.unwrap_or(false);
+    let swatch = entry.swatch.clone().map(|c| {
+        let style = if c.is_empty() { String::new() } else { format!("background:{c}") };
+        let empty = c.is_empty();
+        view! { <span class="cat" class:nocolor=empty style=style></span> }
+    });
+    view! {
+        <span class="check">{checked.then(|| view! { <Svg icon=crate::icons::CHECK size=14 /> })}</span>
+        {swatch}
+        <span class="menu-label">{entry.label.clone()}</span>
+        {(!entry.children.is_empty()).then(|| view! { <Svg icon=crate::icons::CHEVRON_RIGHT size=12 /> })}
+    }
+}
+
+pub fn items(menu: &web_sys::HtmlDivElement) -> Vec<web_sys::HtmlElement> {
     let Ok(list) = menu.query_selector_all("[role^=menuitem]:not([aria-disabled=true])") else { return vec![] };
     (0..list.length()).filter_map(|i| list.item(i)?.dyn_into::<web_sys::HtmlElement>().ok()).collect()
 }
 
-fn move_focus(menu: &web_sys::HtmlDivElement, step: i32) {
+pub fn move_focus(menu: &web_sys::HtmlDivElement, step: i32) {
     let items = items(menu);
     if items.is_empty() {
         return;
@@ -52,7 +96,7 @@ fn move_focus(menu: &web_sys::HtmlDivElement, step: i32) {
 
 #[component]
 pub fn MenuButton(
-    label: &'static str,
+    #[prop(into)] label: Signal<String>,
     icon: Icon,
     #[prop(into)] entries: Signal<Vec<MenuEntry>>,
     /// Affiche le libellé à côté de l'icône.
@@ -131,7 +175,7 @@ pub fn MenuButton(
         }
     };
 
-    let tooltip = if title.is_empty() { label } else { title };
+    let tooltip = move || if title.is_empty() { label.get() } else { title.to_string() };
 
     view! {
         <div class="menu-wrap" node_ref=wrap>
@@ -151,7 +195,7 @@ pub fn MenuButton(
                 }
             >
                 <Svg icon=icon />
-                {show_label.then(|| view! { <span>{label}</span> })}
+                {show_label.then(|| view! { <span>{move || label.get()}</span> })}
                 <Svg icon=CHEVRON_DOWN size=12 />
             </button>
             <Show when=move || open.get()>
@@ -163,9 +207,10 @@ pub fn MenuButton(
                             .map(|entry| {
                                 let disabled = entry.on_select.is_none();
                                 let role = if entry.checked.is_some() { "menuitemradio" } else { "menuitem" };
-                                let checked = entry.checked.unwrap_or(false);
                                 let on_select = entry.on_select;
+                                let body = entry_body(&entry);
                                 view! {
+                                    {entry.separator.then(|| view! { <div class="menu-sep" role="separator"></div> })}
                                     <button
                                         role=role
                                         tabindex="-1"
@@ -178,8 +223,7 @@ pub fn MenuButton(
                                             }
                                         }
                                     >
-                                        <span class="check">{checked.then(|| view! { <Svg icon=crate::icons::CHECK size=14 /> })}</span>
-                                        {entry.label}
+                                        {body}
                                     </button>
                                 }
                             })

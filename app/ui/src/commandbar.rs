@@ -1,18 +1,23 @@
 //! Barre de commandes à onglets : mode compact (une rangée, défaut), complet (groupes nommés)
-//! ou onglets seuls. Les commandes sont décrites par un registre statique ; au J0 seules
-//! les commandes d'affichage sont actives, les autres sont présentes mais désactivées.
+//! ou onglets seuls. Les commandes sont décrites par un registre statique ; celles des jalons
+//! suivants sont présentes mais désactivées.
 
 use icondata_core::Icon;
 use leptos::prelude::*;
-use thunderlook_model::settings::{BarMode, Density, ReadingPane};
-
-use crate::{
-    icons::*,
-    menu::{MenuButton, MenuEntry},
-    state::{Module, Tab, use_ui},
+use thunderlook_model::{
+    FolderOp, MessageOp,
+    settings::{BarMode, Density, ReadingPane},
 };
 
-/// Comportement d'une commande au J0.
+use crate::{
+    actions::{self, folder_name, real_folder},
+    icons::*,
+    menu::{MenuButton, MenuEntry},
+    menus,
+    state::{ConfirmAction, Dialog, Module, PickPurpose, Tab, Ui, use_ui},
+};
+
+/// Comportement d'une commande.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     /// Prévue, pas encore disponible.
@@ -23,6 +28,91 @@ pub enum Action {
     FolderPaneMenu,
     /// Bascule de densité compacte.
     DensityToggle,
+    // J3 : organisation.
+    Delete,
+    Archive,
+    ToggleRead,
+    MoveMenu,
+    CategoriesMenu,
+    FlagMenu,
+    NewFolder,
+    RenameFolder,
+    MoveFolder,
+    DeleteFolder,
+    MarkAllRead,
+    EmptyFolder,
+    Favorite,
+}
+
+impl Action {
+    fn is_menu(self) -> bool {
+        matches!(self, Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu)
+    }
+}
+
+/// Exécute une commande simple (sans menu).
+fn perform(ui: Ui, action: Action) {
+    let folder = real_folder(&ui.folder.get_untracked());
+    let plain = ui.tree.with_untracked(|t| {
+        t.as_ref()
+            .and_then(|t| t.find_folder(&folder))
+            .is_some_and(|f| matches!(f.role, thunderlook_model::FolderRole::Folder | thunderlook_model::FolderRole::Archive))
+    });
+    let name = folder_name(ui, &folder);
+    match action {
+        Action::Delete => actions::delete(ui, false),
+        Action::Archive => actions::run(ui, MessageOp::Archive),
+        Action::ToggleRead => actions::run(ui, MessageOp::ToggleRead),
+        Action::DensityToggle => ui.update_settings(|s| {
+            s.density = if s.density == Density::Compact { Density::Comfortable } else { Density::Compact }
+        }),
+        Action::NewFolder => ui.dialog.set(Some(Dialog::NewFolder { parent: folder })),
+        Action::RenameFolder if plain => ui.dialog.set(Some(Dialog::Rename { id: folder, name })),
+        Action::MoveFolder if plain => {
+            ui.tree_focus.set(folder);
+            ui.dialog.set(Some(Dialog::PickFolder { purpose: PickPurpose::MoveFolder }));
+        }
+        Action::DeleteFolder if plain => ui.dialog.set(Some(Dialog::Confirm {
+            text: format!("Supprimer le dossier « {name} » et tout son contenu ?"),
+            action: ConfirmAction::DeleteFolder(folder),
+        })),
+        Action::RenameFolder | Action::MoveFolder | Action::DeleteFolder => {
+            ui.error.set(Some(format!("« {name} » est un dossier spécial : action impossible.")));
+        }
+        Action::MarkAllRead => actions::run_folder(ui, FolderOp::MarkAllRead { id: folder }),
+        Action::EmptyFolder => ui.dialog.set(Some(Dialog::Confirm {
+            text: format!("Supprimer tous les éléments du dossier « {name} » ?"),
+            action: ConfirmAction::EmptyFolder(folder),
+        })),
+        Action::Favorite => {
+            let op = if menus::is_favorite(ui, &folder) { FolderOp::RemoveFavorite { id: folder } } else { FolderOp::AddFavorite { id: folder } };
+            actions::run_folder(ui, op);
+        }
+        _ => {}
+    }
+}
+
+fn menu_entries(ui: Ui, action: Action) -> Vec<MenuEntry> {
+    match action {
+        Action::MoveMenu => menus::move_entries(ui),
+        Action::CategoriesMenu => menus::category_entries(ui),
+        Action::FlagMenu => menus::flag_entries(ui),
+        Action::ReadingPaneMenu => {
+            let current = ui.settings.get().reading_pane;
+            [(ReadingPane::Right, "À droite"), (ReadingPane::Bottom, "En bas"), (ReadingPane::Off, "Désactivé")]
+                .into_iter()
+                .map(|(v, label)| MenuEntry::radio(label, current == v, move || ui.update_settings(|s| s.reading_pane = v)))
+                .collect()
+        }
+        Action::FolderPaneMenu => {
+            let collapsed = ui.settings.get().folder_pane_collapsed;
+            vec![
+                MenuEntry::radio("Normal", !collapsed, move || ui.update_settings(|s| s.folder_pane_collapsed = false)),
+                MenuEntry::radio("Réduit", collapsed, move || ui.update_settings(|s| s.folder_pane_collapsed = true)),
+            ]
+        }
+        _ => Vec::new(),
+    }
 }
 
 pub struct Cmd {
@@ -46,6 +136,17 @@ const fn act(label: &'static str, icon: Icon, action: Action, menu: bool) -> Cmd
     Cmd { label, icon, shortcut: None, menu, compact: true, large: true, action }
 }
 
+/// Commande active, avec raccourci et visibilité.
+const fn wired(label: &'static str, icon: Icon, shortcut: Option<&'static str>, compact: bool, large: bool, action: Action) -> Cmd {
+    Cmd { label, icon, shortcut, menu: action.is_menu_const(), compact, large, action }
+}
+
+impl Action {
+    const fn is_menu_const(self) -> bool {
+        matches!(self, Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu)
+    }
+}
+
 pub struct Group {
     pub label: &'static str,
     pub cmds: &'static [Cmd],
@@ -65,8 +166,8 @@ const MAIL_HOME: &[Group] = &[
             cmd("Ignorer la conversation", MESSAGE_OFF, Some("Ctrl+Suppr"), false, false, false),
             cmd("Élaguer la conversation", SCISSORS, None, true, false, false),
             cmd("Indésirables", BAN, None, true, false, false),
-            cmd("Supprimer", TRASH, Some("Suppr"), false, true, true),
-            cmd("Archiver", ARCHIVE, None, false, true, true),
+            wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::Delete),
+            wired("Archiver", ARCHIVE, None, true, true, Action::Archive),
         ],
     },
     Group {
@@ -82,16 +183,16 @@ const MAIL_HOME: &[Group] = &[
     Group {
         label: "Déplacer",
         cmds: &[
-            cmd("Déplacer vers", FOLDER_INPUT, None, true, true, true),
+            wired("Déplacer vers", FOLDER_INPUT, Some("Ctrl+Maj+V"), true, true, Action::MoveMenu),
             cmd("Règles", LIST_FILTER, None, true, false, true),
         ],
     },
     Group {
         label: "Indicateurs",
         cmds: &[
-            cmd("Lu/Non lu", MAIL_OPEN, Some("Ctrl+Q / Ctrl+U"), false, true, true),
-            cmd("Catégories", TAGS, None, true, true, true),
-            cmd("Suivi", FLAG, Some("Inser"), true, true, true),
+            wired("Lu/Non lu", MAIL_OPEN, Some("Ctrl+Q / Ctrl+U"), true, true, Action::ToggleRead),
+            wired("Catégories", TAGS, None, true, true, Action::CategoriesMenu),
+            wired("Suivi", FLAG, Some("Inser"), true, true, Action::FlagMenu),
         ],
     },
     Group {
@@ -142,28 +243,28 @@ const FOLDER: &[Group] = &[
     Group {
         label: "Nouveau",
         cmds: &[
-            cmd("Nouveau dossier", FOLDER_PLUS, Some("Ctrl+Maj+E"), false, true, true),
+            wired("Nouveau dossier", FOLDER_PLUS, Some("Ctrl+Maj+E"), true, true, Action::NewFolder),
             cmd("Nouveau dossier virtuel", FOLDER_SEARCH, None, false, true, true),
         ],
     },
     Group {
         label: "Actions",
         cmds: &[
-            cmd("Renommer le dossier", PENCIL, None, false, true, false),
-            cmd("Déplacer le dossier", FOLDER_INPUT, None, false, false, false),
-            cmd("Supprimer le dossier", TRASH, None, false, false, false),
+            wired("Renommer le dossier", PENCIL, Some("F2"), true, false, Action::RenameFolder),
+            wired("Déplacer le dossier", FOLDER_INPUT, None, false, false, Action::MoveFolder),
+            wired("Supprimer le dossier", TRASH, None, false, false, Action::DeleteFolder),
         ],
     },
     Group {
         label: "Nettoyer",
         cmds: &[
-            cmd("Tout marquer comme lu", CHECK_CHECK, None, false, true, false),
+            wired("Tout marquer comme lu", CHECK_CHECK, None, true, false, Action::MarkAllRead),
             cmd("Exécuter les règles", LIST_CHECKS, None, false, false, false),
             cmd("Trier les dossiers de A à Z", SORT_AZ, None, false, false, false),
-            cmd("Vider le dossier", ERASER, None, false, false, false),
+            wired("Vider le dossier", ERASER, None, false, false, Action::EmptyFolder),
         ],
     },
-    Group { label: "Favoris", cmds: &[cmd("Ajouter aux favoris", STAR, None, false, true, true)] },
+    Group { label: "Favoris", cmds: &[wired("Ajouter aux favoris", STAR, None, true, true, Action::Favorite)] },
     Group { label: "Propriétés", cmds: &[cmd("Propriétés du dossier", INFO, None, false, false, true)] },
 ];
 
@@ -321,37 +422,42 @@ fn command_view(c: &'static Cmd, full: bool) -> AnyView {
                 aria-label=c.label
                 aria-pressed=move || (ui.settings.get().density == Density::Compact).to_string()
                 title=tooltip(c)
-                on:click=move |_| {
-                    ui.update_settings(|s| {
-                        s.density = if s.density == Density::Compact { Density::Comfortable } else { Density::Compact }
-                    })
-                }
+                on:click=move |_| perform(ui, Action::DensityToggle)
             >
                 <Svg icon=c.icon />
                 <span>{c.label}</span>
             </button>
         }
         .into_any(),
-        Action::ReadingPaneMenu => {
-            let entries = Signal::derive(move || {
-                let current = ui.settings.get().reading_pane;
-                [(ReadingPane::Right, "À droite"), (ReadingPane::Bottom, "En bas"), (ReadingPane::Off, "Désactivé")]
-                    .into_iter()
-                    .map(|(v, label)| MenuEntry::radio(label, current == v, move || ui.update_settings(|s| s.reading_pane = v)))
-                    .collect::<Vec<_>>()
-            });
-            view! { <MenuButton label=c.label icon=c.icon entries=entries class=class /> }.into_any()
+        Action::Favorite => view! {
+            <button
+                class=class
+                aria-label=move || if menus::is_favorite(ui, &ui.folder.get()) { "Retirer des favoris" } else { "Ajouter aux favoris" }
+                title=move || if menus::is_favorite(ui, &ui.folder.get()) { "Retirer des favoris" } else { "Ajouter aux favoris" }
+                on:click=move |_| perform(ui, Action::Favorite)
+            >
+                <Svg icon=c.icon />
+                <span>{move || if menus::is_favorite(ui, &ui.folder.get()) { "Retirer des favoris" } else { "Ajouter aux favoris" }}</span>
+            </button>
         }
-        Action::FolderPaneMenu => {
-            let entries = Signal::derive(move || {
-                let collapsed = ui.settings.get().folder_pane_collapsed;
-                vec![
-                    MenuEntry::radio("Normal", !collapsed, move || ui.update_settings(|s| s.folder_pane_collapsed = false)),
-                    MenuEntry::radio("Réduit", collapsed, move || ui.update_settings(|s| s.folder_pane_collapsed = true)),
-                ]
-            });
-            view! { <MenuButton label=c.label icon=c.icon entries=entries class=class /> }.into_any()
+        .into_any(),
+        a if a.is_menu() => {
+            let entries = Signal::derive(move || menu_entries(ui, a));
+            view! { <MenuButton label=c.label.to_string() icon=c.icon entries=entries class=class /> }.into_any()
         }
+        a => view! {
+            <button
+                class=class
+                aria-label=c.label
+                title=tooltip(c)
+                aria-keyshortcuts=c.shortcut.map(aria_shortcut)
+                on:click=move |_| perform(ui, a)
+            >
+                <Svg icon=c.icon />
+                <span>{c.label}</span>
+            </button>
+        }
+        .into_any(),
     }
 }
 
@@ -406,7 +512,11 @@ pub fn CommandBar() -> impl IntoView {
             .iter()
             .flat_map(|g| g.cmds.iter())
             .filter(|c| !c.compact)
-            .map(|c| MenuEntry::pending(c.label))
+            .map(|c| match c.action {
+                Action::Pending => MenuEntry::pending(c.label),
+                a if a.is_menu() => MenuEntry::pending(c.label),
+                a => MenuEntry::action(c.label, move || perform(ui, a)),
+            })
             .collect::<Vec<_>>()
     });
 

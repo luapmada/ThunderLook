@@ -4,6 +4,7 @@
 //! Rien n'est écrit ici, à part la migration de schéma appliquée à l'ouverture.
 
 mod message;
+mod ops;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -37,6 +38,7 @@ pub struct Mailbox {
     categories: HashMap<(i64, String), Option<String>>,
     views: BTreeMap<u64, Vec<i64>>,
     next_token: u64,
+    undo: Vec<ops::UndoEntry>,
 }
 
 /// Couleurs des 25 catégories prédéfinies ([MS-OXOCFG] : `preset0` à `preset24`). Teintes propres
@@ -168,7 +170,7 @@ impl Mailbox {
                 categories.insert((source, fold(&name)), category_color(color));
             }
         }
-        Ok(Self { data_dir: data_dir.to_path_buf(), conn, categories, views: BTreeMap::new(), next_token: 1 })
+        Ok(Self { data_dir: data_dir.to_path_buf(), conn, categories, views: BTreeMap::new(), next_token: 1, undo: Vec::new() })
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -244,17 +246,19 @@ impl Mailbox {
         }
 
         let mut sections = Vec::new();
-        let mut favorites = Vec::new();
+        let favorite_ids = self.favorite_ids()?;
+        let mut favorites: Vec<Folder> = Vec::new();
+        let mut built: HashMap<String, Folder> = HashMap::new();
         for (source, display, origin) in &sources {
             let Some(ipm) = folders.iter().find(|f| f.source == *source && f.role == "ipm") else { continue };
             let root = build(ipm, &children, &counts);
-            if favorites.is_empty() {
-                for role in [FolderRole::Inbox, FolderRole::Sent] {
-                    if let Some(f) = root.children.iter().find(|f| f.role == role) {
-                        favorites.push(Folder { id: format!("fav-{}", f.id), children: vec![], ..f.clone() });
-                    }
+            fn index(folders: &[Folder], out: &mut HashMap<String, Folder>) {
+                for f in folders {
+                    out.insert(f.id.clone(), f.clone());
+                    index(&f.children, out);
                 }
             }
+            index(&root.children, &mut built);
             // Deux sources au même nom affiché : on précise le fichier d'origine.
             let same_name = sources.iter().filter(|(_, d, _)| d == display).count() > 1;
             let name = if same_name {
@@ -264,6 +268,11 @@ impl Mailbox {
                 display.clone()
             };
             sections.push(FolderSection { id: format!("s{source}"), name, folders: root.children });
+        }
+        for id in favorite_ids {
+            if let Some(f) = built.get(&format!("f{id}")) {
+                favorites.push(Folder { id: format!("fav-{}", f.id), children: vec![], ..f.clone() });
+            }
         }
         if !favorites.is_empty() {
             sections.insert(0, FolderSection { id: "favorites".into(), name: "Favoris".into(), folders: favorites });

@@ -20,7 +20,8 @@ a REA work on MSoutlook21
 | J0. Socle : Tauri + Leptos, 3 volets, barre de commandes, thème, clavier | Fait (2026-10-16) |
 | J1. Import PST en lecture seule | Fait (2026-10-18) : 3 copies importées sans perte, 15 Go en 3 min (`PLAN.md` §5) |
 | J2. Lecture : dossiers, liste, volet de lecture sur les données importées | Fait (2026-10-19) : 22 188 éléments ouverts en 145 ms, HTML isolé, pièces jointes (`PLAN.md` §5) |
-| J3. Organisation : lu/non lu, déplacer, indicateurs, catégories, dossiers | À faire |
+| J3. Organisation : lu/non lu, déplacer, indicateurs, catégories, dossiers, favoris, annulation | Fait (2026-10-19), sans les conversations (J3b) |
+| J3b. Conversations et affichages | À faire |
 
 ## Fichiers
 - `SPEC.md` : fonctions inventoriées et priorités (le mail d'abord).

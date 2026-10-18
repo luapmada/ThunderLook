@@ -41,6 +41,8 @@ pub struct Settings {
     pub folder_pane_collapsed: bool,
     pub list_width: u32,
     pub list_height: u32,
+    /// Marquer un élément comme lu quand la sélection le quitte (défaut de la référence).
+    pub mark_read_on_leave: bool,
 }
 
 impl Default for Settings {
@@ -53,6 +55,7 @@ impl Default for Settings {
             folder_pane_collapsed: false,
             list_width: 440,
             list_height: 360,
+            mark_read_on_leave: true,
         }
     }
 }

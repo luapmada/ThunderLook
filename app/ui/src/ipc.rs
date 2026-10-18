@@ -1,7 +1,10 @@
 //! Appels au cœur Rust via l'IPC de Tauri (`window.__TAURI__.core.invoke`).
 
 use serde::{Serialize, de::DeserializeOwned};
-use thunderlook_model::{FolderTree, ListQuery, ListView, MessageSummary, MessageView, settings::Settings};
+use thunderlook_model::{
+    CategoryInfo, FolderOp, FolderTree, ListQuery, ListView, MessageOp, MessageSummary, MessageView, OpResult, Selection,
+    settings::Settings,
+};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -73,6 +76,33 @@ pub async fn list_rows(token: u64, start: u32, count: u32) -> Result<Vec<Message
 
 pub async fn message_view(id: &str, allow_remote: bool) -> Result<MessageView, String> {
     call("message_view", &ViewArg { id, allow_remote }).await
+}
+
+#[derive(Serialize)]
+struct OpArg<'a> {
+    selection: &'a Selection,
+    op: &'a MessageOp,
+}
+
+#[derive(Serialize)]
+struct FolderOpArg<'a> {
+    op: &'a FolderOp,
+}
+
+pub async fn apply_op(selection: &Selection, op: &MessageOp) -> Result<OpResult, String> {
+    call("apply_op", &OpArg { selection, op }).await
+}
+
+pub async fn folder_op(op: &FolderOp) -> Result<OpResult, String> {
+    call("folder_op", &FolderOpArg { op }).await
+}
+
+pub async fn undo() -> Result<Option<String>, String> {
+    call("undo", &NoArgs {}).await
+}
+
+pub async fn categories() -> Result<Vec<CategoryInfo>, String> {
+    call("categories", &NoArgs {}).await
 }
 
 pub async fn open_attachment(id: &str, index: u32) -> Result<(), String> {

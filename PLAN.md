@@ -1,6 +1,6 @@
 # PLAN — architecture, stack, jalons
 
-Statut : **validé le 2026-10-16** (§7 accepté tel quel : ruban simplifié par défaut avec mode classique, nom « ThunderLook », REA MCP repoussé à J6). **Modifié le même jour à ta demande (« plus il y a de Rust mieux c'est »)** : interface en Rust (Leptos → WebAssembly) au lieu de React/TypeScript, outillage cargo au lieu de npm. J0 terminé. J1 terminé le 2026-10-18, J2 le 2026-10-19 (mesures en §5). Lien avec ADI Facturation : §8.
+Statut : **validé le 2026-10-16** (§7 accepté tel quel : ruban simplifié par défaut avec mode classique, nom « ThunderLook », REA MCP repoussé à J6). **Modifié le même jour à ta demande (« plus il y a de Rust mieux c'est »)** : interface en Rust (Leptos → WebAssembly) au lieu de React/TypeScript, outillage cargo au lieu de npm. J0 terminé. J1 terminé le 2026-10-18, J2 et J3 (organisation, sans les conversations) le 2026-10-19 (mesures en §5). Lien avec ADI Facturation : §8.
 Entrées : `SPEC.md` (priorités Q1 à Q4), `DESIGN.md`, `notes/ui-reference.md`, `notes/formats.md`, `notes/juridique.md`.
 
 ## 1. Principes
@@ -75,7 +75,8 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | J0 ✅ | Socle | Projet Tauri, jetons `DESIGN.md` clair/sombre, fenêtre à 3 volets statique, navigation basse, barre d'état, barre de commandes vide, police Inter, icônes Lucide | Contrastes AA vérifiés. Arbre UIA du clone relevé avec `tools/uia_dump.ps1` et comparé à la référence | S |
 | J1 ✅ | Import PST (lecture seule) | Copie de travail, import vers SQLite + `.eml`, pièces jointes, lu, drapeaux, catégories, FAI de configuration, rapport d'import | Sur tes 3 copies (271 Ko, 3,9 Go, 15 Go) : effectifs identiques à `pst-probe`, 0 perte silencieuse, import de 15 Go en moins de 10 min | M |
 | J2 ✅ | Lecture | Volet dossiers (compteurs non lus / [total]), liste virtualisée (colonnes, tri, groupes par date, styles non lu et drapeau), volet de lecture (HTML isolé, texte, RTF, pièces jointes, images bloquées), raccourcis de lecture, F6 | Ouverture d'un dossier de 22 000 éléments en moins de 200 ms. Parcours clavier complet | M |
-| J3 | Organisation | Lu/non lu, supprimer, déplacer/copier, glisser-déposer, indicateurs, catégories, CRUD des dossiers, favoris, conversations, « Organiser par », filtres Tous/Non lus, paramètres d'affichage | Ruban Accueil, Dossier et Affichage fonctionnels (sous-ensemble de `ui-reference.md` §3) | M |
+| J3 ✅ | Organisation | Lu/non lu, supprimer, déplacer/copier, glisser-déposer, indicateurs, catégories, CRUD des dossiers, favoris, conversations, « Organiser par », filtres Tous/Non lus, paramètres d'affichage | Ruban Accueil, Dossier et Affichage fonctionnels (sous-ensemble de `ui-reference.md` §3) | M |
+| J3b | Conversations et affichages | « Afficher en conversations », « Organiser par » au-delà des 4 tris (catégories, indicateur, pièces jointes), boîte « Réglages de l'affichage », options de lecture (marquer comme lu) dans l'interface | Liste en conversations sur la Boîte de réception de 22 000 éléments en moins de 300 ms | M |
 | J4 | Recherche | Index FTS5, zone de recherche et portées, onglet Recherche, mots-clés, recherche avancée, dossiers de recherche (Non lus, Pour le suivi, personnalisés) | Moins de 300 ms sur l'archive de 217 000 éléments | M |
 | J5 | Rédaction (brouillons) | Fenêtre de rédaction HTML, réponse et transfert avec citation, signatures (import HTM), modèles `.oft`, brouillons | Réponse à tous fidèle (en-têtes, citation) enregistrée en brouillon | M |
 | J6 | Règles et actions rapides | Import du flux de règles et des `.rwz`, assistant de règles, « Exécuter maintenant », actions rapides (défauts plus éditeur) | Tes 2 `.rwz` et le flux du PST importés, et rejoués sur une copie | L |
@@ -140,6 +141,21 @@ Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nomb
 - **Rôles de dossiers dans l'archive** : « Courrier indésirable » est marqué Brouillons et « YouSendIt Outbox » Indésirables.
   - C'est ce que disent les EntryID de ce PST, sans doute hérités d'anciens profils.
   - On les respecte, mais l'ordre et les compteurs de ces dossiers en dépendent. À revoir au J3 (rôle modifiable).
+
+### Vérifications du J3 (2026-10-19)
+- **Tests d'intégration** (`crates/mailbox/tests/ops.rs`, données synthétiques) :
+  - lu et non lu, « marqué lu en quittant » sans entrée d'annulation ;
+  - indicateurs (dates de la semaine de travail), catégories (y compris sans définition) ;
+  - déplacer, copier (le `.eml` est dupliqué), supprimer en deux temps (corbeille, puis définitif avec effacement du `.eml`), archiver (dossier « Archives » créé au premier usage) ;
+  - dossiers : créer (doublon refusé), renommer (dossier spécial refusé), déplacer (pas dans lui-même), supprimer en deux temps ;
+  - favoris, tout marquer comme lu, vider le dossier, annulation de chaque opération.
+- **Dans l'application**, sur la base réelle (`tools/uia_keys.ps1`, et un vrai glisser à la souris) :
+  - marquer lu en quittant, Ctrl+U, Inser, Maj+↓ (3 éléments), Suppr puis Ctrl+Z ;
+  - Ctrl+Maj+E, F2, Suppr avec confirmation puis Ctrl+Z ;
+  - menu contextuel (Maj+F10) avec sous-menu de catégories en couleur ;
+  - glisser un message sur un dossier.
+- **Réimport** : `tl-import` refuse désormais de remplacer une source déjà importée sans `--replace`, puisque cela effacerait le classement fait dans ThunderLook.
+  - La suppression d'une source n'efface plus que les `.eml` de ses propres messages.
 
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).

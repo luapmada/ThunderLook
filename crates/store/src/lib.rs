@@ -13,7 +13,7 @@ pub use rusqlite;
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub const DB_FILE: &str = "thunderlook.db";
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 /// Schéma v1. Les dates sont en millisecondes depuis l'époque Unix (UTC).
 /// `props` : sac de propriétés MAPI brut (format décrit dans `thunderlook-import-pst::propbag`),
@@ -140,6 +140,15 @@ const SCHEMA_V2: &str = r#"
 CREATE INDEX IF NOT EXISTS message_folder_read ON message(folder_id, is_read, received_at);
 "#;
 
+/// v3 (J3) : favoris du volet des dossiers. Vide = favoris par défaut (réception et envoyés de la
+/// première source).
+const SCHEMA_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS favorite (
+    folder_id   INTEGER PRIMARY KEY REFERENCES folder(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL
+);
+"#;
+
 /// Ouvre (ou crée) la base du dossier de données et applique les migrations.
 pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(data_dir).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
@@ -147,9 +156,12 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
     let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version == 0 {
-        conn.execute_batch(&format!("BEGIN; {SCHEMA_V1} {SCHEMA_V2} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
-    } else if version == 1 {
-        conn.execute_batch(&format!("BEGIN; {SCHEMA_V2} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
+        conn.execute_batch(&format!("BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
+    } else if version < SCHEMA_VERSION {
+        // Migrations par ajout uniquement : la base est lue par d'autres outils (ADI Facturation).
+        let steps = [SCHEMA_V2, SCHEMA_V3];
+        let pending = steps[(version as usize - 1).min(steps.len())..].concat();
+        conn.execute_batch(&format!("BEGIN; {pending} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version > SCHEMA_VERSION {
         return Err(rusqlite::Error::InvalidParameterName(format!(
             "base créée par une version plus récente (schéma {version})"
@@ -185,9 +197,31 @@ pub fn find_source(conn: &Connection, origin_path: &str) -> rusqlite::Result<Opt
         .optional()
 }
 
-/// Supprime une source et tout ce qui en dépend (les `.eml` sont à effacer par l'appelant).
-pub fn delete_source(conn: &Connection, source_id: i64) -> rusqlite::Result<()> {
-    conn.execute("DELETE FROM source WHERE id = ?1", params![source_id]).map(|_| ())
+/// Supprime une source et tout ce qui en dépend, avec les `.eml` des messages qui se trouvent dans
+/// ses dossiers. Un message déplacé depuis cette source vers une autre garde son fichier.
+pub fn delete_source(conn: &Connection, data_dir: &Path, source_id: i64) -> rusqlite::Result<()> {
+    let paths: Vec<String> = conn
+        .prepare("SELECT m.eml_path FROM message m JOIN folder f ON f.id = m.folder_id WHERE f.source_id = ?1")?
+        .query_map(params![source_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    conn.execute("DELETE FROM source WHERE id = ?1", params![source_id])?;
+    for rel in paths {
+        let _ = std::fs::remove_file(resolve(data_dir, &rel));
+    }
+    remove_empty_dirs(&data_dir.join("eml").join(source_id.to_string()));
+    Ok(())
+}
+
+/// Retire les dossiers vides d'une arborescence (les autres restent).
+pub fn remove_empty_dirs(dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                remove_empty_dirs(&e.path());
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(dir);
 }
 
 #[cfg(test)]

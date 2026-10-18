@@ -10,7 +10,10 @@ use tauri::{AppHandle, Manager, State, WebviewWindowBuilder, webview::NewWindowR
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use thunderlook_mailbox::Mailbox;
-use thunderlook_model::{FolderTree, ListQuery, ListView, MessageSummary, MessageView, settings::Settings};
+use thunderlook_model::{
+    CategoryInfo, FolderOp, FolderTree, ListQuery, ListView, MessageOp, MessageSummary, MessageView, OpResult, Selection,
+    settings::Settings,
+};
 
 /// Boîte aux lettres ouverte à la première demande ; `Err` mémorise l'échec d'ouverture.
 struct Store(Mutex<Option<Result<Mailbox, String>>>);
@@ -71,6 +74,27 @@ fn list_rows(app: AppHandle, store: State<Store>, token: u64, start: u32, count:
 #[tauri::command(async)]
 fn message_view(app: AppHandle, store: State<Store>, id: String, allow_remote: bool) -> Result<MessageView, String> {
     with_mailbox(&app, &store, |mb| mb.message_view(&id, allow_remote))
+}
+
+#[tauri::command(async)]
+fn apply_op(app: AppHandle, store: State<Store>, selection: Selection, op: MessageOp) -> Result<OpResult, String> {
+    with_mailbox(&app, &store, |mb| mb.apply(&selection, &op))
+}
+
+#[tauri::command(async)]
+fn folder_op(app: AppHandle, store: State<Store>, op: FolderOp) -> Result<OpResult, String> {
+    with_mailbox(&app, &store, |mb| mb.folder_op(&op))
+}
+
+/// Annule la dernière opération ; renvoie son libellé (`None` : rien à annuler).
+#[tauri::command(async)]
+fn undo(app: AppHandle, store: State<Store>) -> Result<Option<String>, String> {
+    with_mailbox(&app, &store, |mb| mb.undo())
+}
+
+#[tauri::command(async)]
+fn categories(app: AppHandle, store: State<Store>) -> Result<Vec<CategoryInfo>, String> {
+    with_mailbox(&app, &store, |mb| mb.categories())
 }
 
 /// Nom de fichier sûr pour Windows.
@@ -183,6 +207,10 @@ pub fn run() {
             open_list,
             list_rows,
             message_view,
+            apply_op,
+            folder_op,
+            undo,
+            categories,
             open_attachment,
             save_attachment,
             load_settings,

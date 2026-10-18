@@ -7,11 +7,16 @@ use leptos::{prelude::*, task::spawn_local};
 use thunderlook_model::{FlagState, Importance, ListGroup, ListView, MessageSummary, SortField, settings::Density};
 
 use crate::{
+    actions::{self, ranges, select_single},
     icons::*,
     ipc,
     menu::{MenuButton, MenuEntry},
-    state::{Ui, use_ui},
+    menus,
+    state::{ContextMenuAt, ContextTarget, Dialog, PickPurpose, Ui, use_ui},
 };
+
+/// Type MIME interne du glisser-déposer d'éléments.
+pub const DRAG_MESSAGES: &str = "application/x-thunderlook-messages";
 
 /// Hauteur d'un en-tête de groupe (px), identique à `.group-head`.
 const GROUP_H: f64 = 28.0;
@@ -257,7 +262,47 @@ pub fn MessageList() -> impl IntoView {
         let Some(l) = layout.get_untracked() else { return };
         let page = ((viewport_h.get_untracked() / row_height(ui.settings.get_untracked().density)).floor() as i64 - 1).max(1);
         let cur = ui.selected_pos.get_untracked();
-        let target = match ev.key().as_str() {
+        let (ctrl, shift) = (ev.ctrl_key(), ev.shift_key());
+        let key = ev.key();
+        // Commandes propres à la liste.
+        match (ctrl, shift, key.as_str()) {
+            (true, false, "a" | "A") => {
+                let count = ui.view.with_untracked(|v| v.as_ref().map(|v| v.count).unwrap_or(0));
+                if count > 0 {
+                    ui.sel_ranges.set(vec![(0, count)]);
+                }
+                ev.prevent_default();
+                return;
+            }
+            (false, _, "Delete") | (true, false, "d" | "D") => {
+                ev.prevent_default();
+                actions::delete(ui, shift);
+                return;
+            }
+            (false, false, "ContextMenu") | (false, true, "F10") => {
+                ev.prevent_default();
+                if cur.is_none() {
+                    return;
+                }
+                let el = cur.and_then(|p| document().get_element_by_id(&msg_dom_id(p)));
+                match el {
+                    Some(el) => menus::open_at_element(ui, &el, ContextTarget::Messages),
+                    None => {
+                        if let Some(list) = ui.refs.list.get_untracked() {
+                            menus::open_at_element(ui, &list, ContextTarget::Messages);
+                        }
+                    }
+                }
+                return;
+            }
+            (true, true, "v" | "V") => {
+                ev.prevent_default();
+                ui.dialog.set(Some(Dialog::PickFolder { purpose: PickPurpose::MoveMessages }));
+                return;
+            }
+            _ => {}
+        }
+        let target = match key.as_str() {
             "ArrowDown" => l.step(cur, 1),
             "ArrowUp" => l.step(cur, -1),
             "PageDown" => l.step(cur, page),
@@ -267,8 +312,13 @@ pub fn MessageList() -> impl IntoView {
             _ => return,
         };
         ev.prevent_default();
-        if target.is_some() {
-            ui.selected_pos.set(target);
+        let Some(p) = target else { return };
+        if shift {
+            let anchor = ui.anchor.get_untracked().or(cur).unwrap_or(p);
+            ui.sel_ranges.set(ranges::span(anchor, p));
+            ui.selected_pos.set(Some(p));
+        } else {
+            select_single(ui, p);
         }
     };
 
@@ -372,23 +422,59 @@ pub fn MessageList() -> impl IntoView {
     }
 }
 
+/// Clic sur une ligne : simple, Ctrl (ajoute ou retire), Maj (plage depuis l'ancre).
+fn pick(ui: Ui, pos: u32, ev: &web_sys::MouseEvent) {
+    if ev.ctrl_key() {
+        ui.sel_ranges.update(|r| *r = ranges::toggle(r, pos));
+        ui.anchor.set(Some(pos));
+        ui.selected_pos.set(Some(pos));
+    } else if ev.shift_key() {
+        let anchor = ui.anchor.get_untracked().or(ui.selected_pos.get_untracked()).unwrap_or(pos);
+        ui.sel_ranges.set(ranges::span(anchor, pos));
+        ui.selected_pos.set(Some(pos));
+    } else {
+        select_single(ui, pos);
+    }
+    if let Some(l) = ui.refs.list.get_untracked() {
+        let _ = l.focus();
+    }
+}
+
+/// Début d'un glisser : la ligne saisie rejoint la sélection si elle n'en faisait pas partie.
+fn drag_start(ui: Ui, pos: u32, ev: &web_sys::DragEvent) {
+    if !ui.sel_ranges.with_untracked(|r| ranges::contains(r, pos)) {
+        select_single(ui, pos);
+    }
+    if let Some(dt) = ev.data_transfer() {
+        let n = ui.sel_ranges.with_untracked(|r| ranges::count(r)).max(1);
+        let _ = dt.set_data(DRAG_MESSAGES, &n.to_string());
+        let _ = dt.set_data("text/plain", &format!("{n} élément(s)"));
+        dt.set_effect_allowed("copyMove");
+    }
+}
+
+fn context(ui: Ui, pos: u32, ev: &web_sys::MouseEvent) {
+    ev.prevent_default();
+    if !ui.sel_ranges.with_untracked(|r| ranges::contains(r, pos)) {
+        select_single(ui, pos);
+    }
+    ui.context_menu.set(Some(ContextMenuAt { x: ev.client_x() as f64, y: ev.client_y() as f64, target: ContextTarget::Messages }));
+}
+
 #[component]
 fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoView {
     let ui = use_ui();
-    let selected = move || ui.selected_pos.get() == Some(pos);
+    let selected = move || ui.sel_ranges.with(|r| ranges::contains(r, pos)) || (ui.sel_ranges.with(|r| r.is_empty()) && ui.selected_pos.get() == Some(pos));
+    let focused = move || ui.selected_pos.get() == Some(pos);
     let style = format!("top: {top}px");
-    let pick = move |_| {
-        ui.selected_pos.set(Some(pos));
-        if let Some(l) = ui.refs.list.get_untracked() {
-            let _ = l.focus();
-        }
-    };
+    let pick = move |ev: leptos::ev::MouseEvent| pick(ui, pos, &ev);
     let Some(m) = m else {
         return view! {
             <div
                 role="option"
                 id=msg_dom_id(pos)
                 class="msg pending"
+                class:focused=focused
                 style=style
                 aria-selected=move || selected().to_string()
                 aria-posinset=pos + 1
@@ -420,13 +506,16 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
             id=msg_dom_id(pos)
             class="msg"
             class:unread=m.unread
-            class:focused=selected
+            class:focused=focused
             style=style
             aria-selected=move || selected().to_string()
             aria-posinset=pos + 1
             aria-setsize=total
             aria-label=label
+            draggable="true"
             on:click=pick
+            on:dragstart=move |ev| drag_start(ui, pos, &ev)
+            on:contextmenu=move |ev| context(ui, pos, &ev)
         >
             <span class="from">{m.from.clone()}</span>
             <span class="meta">

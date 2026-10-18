@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::{icons::*, state::use_ui};
+use crate::{actions, icons::*, state::use_ui};
 
 #[component]
 pub fn TopBar() -> impl IntoView {
@@ -13,7 +13,13 @@ pub fn TopBar() -> impl IntoView {
                 <button class="icon-btn" aria-disabled="true" tabindex="-1" aria-label="Tout envoyer et recevoir" title="Tout envoyer et recevoir (F9) — pas encore disponible">
                     <Svg icon=REFRESH />
                 </button>
-                <button class="icon-btn" aria-disabled="true" tabindex="-1" aria-label="Annuler" title="Annuler (Ctrl+Z) — pas encore disponible">
+                <button
+                    class="icon-btn"
+                    aria-label=move || ui.undo_label.get().map(|l| format!("Annuler : {l}")).unwrap_or_else(|| "Annuler".into())
+                    title=move || ui.undo_label.get().map(|l| format!("Annuler : {l} (Ctrl+Z)")).unwrap_or_else(|| "Annuler (Ctrl+Z)".into())
+                    aria-keyshortcuts="Control+Z"
+                    on:click=move |_| actions::undo(ui)
+                >
                     <Svg icon=UNDO />
                 </button>
             </div>

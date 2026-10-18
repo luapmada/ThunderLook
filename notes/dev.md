@@ -22,9 +22,10 @@ cd app; cargo tauri build --no-bundle
 cargo test -p thunderlook-mime -p thunderlook-store -p thunderlook-import-pst
 
 # Import PST en ligne de commande. Par défaut, copie de travail dans <données>\sources\ ;
-# --in-place lit le fichier sur place (refusé sous A:\Fichiers Outlook).
+# --in-place lit le fichier sur place (refusé sous A:\Fichiers Outlook) ;
+# --replace remplace une source déjà importée (perd le classement fait depuis dans ThunderLook).
 cargo build --release -p thunderlook-import-pst
-target\release\tl-import.exe <copie.pst> <dossier-de-données> [--in-place]
+target\release\tl-import.exe <copie.pst> <dossier-de-données> [--in-place] [--replace]
 
 # Vérification indépendante : relit chaque .eml avec mail-parser et le compare à la base
 cargo run --release -p thunderlook-import-pst --example verify_store -- <dossier-de-données>
@@ -33,7 +34,7 @@ cargo run --release -p thunderlook-import-pst --example verify_store -- <dossier
 cargo run --release -p thunderlook-import-pst --example attach_debug -- <copie.pst> <nid décimal>
 ```
 Le dossier de données contient des données personnelles : le garder sous `data/` (ignoré par git).
-Un nouvel import du même fichier d'origine remplace la source précédente (base et `.eml`).
+Un nouvel import du même fichier d'origine n'est accepté qu'avec `--replace`. Il remplace alors la source précédente (base et `.eml` de ses messages).
 
 **Piège** : si `NO_COLOR=1` est défini (c'est le cas dans l'environnement de Claude Code), `trunk` échoue avec « invalid value '1' for '--no-color' ». Faire `Remove-Item Env:NO_COLOR` avant le build.
 
@@ -77,6 +78,19 @@ Un nouvel import du même fichier d'origine remplace la source précédente (bas
 - Pièces jointes :
   - ouverture via un fichier temporaire (`%TEMP%\ThunderLook`) ;
   - types exécutables refusés à l'ouverture, mais « Enregistrer sous » reste possible.
+
+## Organisation (J3)
+- Écritures dans `crates/mailbox/src/ops.rs` : une transaction par opération.
+  - Les `.eml` ne sont effacés qu'après validation, et seulement pour une suppression définitive.
+- Annulation : pile de 50 opérations en mémoire (Ctrl+Z, bouton de la barre d'accès rapide). Elle est perdue à la fermeture.
+  - Une suppression définitive ne s'annule pas : elle est toujours confirmée.
+- Sélection multiple : plages de positions de la vue, envoyées telles quelles au cœur. Ctrl+A sur 22 000 éléments ne charge aucune ligne.
+- Raccourcis :
+  - **liste** : Suppr, Maj+Suppr (définitif), Ctrl+D, Ctrl+A, Ctrl+Maj+V, Maj+F10 ;
+  - **partout dans le courrier** : Ctrl+Q, Ctrl+U, Inser, Ctrl+Z, Ctrl+Maj+E ;
+  - **arborescence** : F2, Suppr, Maj+F10.
+- Glisser-déposer HTML5 : il faut `dragDropEnabled: false` sur la fenêtre (`tauri.conf.json`), sinon Tauri intercepte les dépôts sous Windows. Ctrl au dépôt copie au lieu de déplacer.
+- Schéma v3 : table `favorite`. Une liste vide ramène les favoris par défaut (réception et envoyés de la première source).
 
 ## Notes techniques
 - CSP stricte. Le chargeur de Trunk récupère le `.wasm` par `fetch`, d'où `connect-src 'self'` et `script-src 'wasm-unsafe-eval'`. Sans eux, la fenêtre reste vide.

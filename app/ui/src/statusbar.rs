@@ -27,6 +27,7 @@ pub fn StatusBar() -> impl IntoView {
                 <span class="badge-filter">"Filtre appliqué"</span>
             </Show>
             {move || ui.error.get().map(|e| view! { <span class="status-error" role="alert">{e}</span> })}
+            {move || (ui.error.get().is_none()).then(|| ui.status.get()).flatten().map(|m| view! { <span class="status-msg" role="status">{m}</span> })}
             <div class="end">
                 <button class="cmd" aria-disabled="true" tabindex="-1" title="Réglages de l'affichage — pas encore disponible">
                     <Svg icon=SETTINGS size=14 />

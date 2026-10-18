@@ -4,19 +4,22 @@ use std::collections::HashSet;
 
 use leptos::{prelude::*, task::spawn_local};
 use thunderlook_model::{
-    ListQuery,
+    FlagAction, ListQuery, MessageOp, Selection,
     settings::{Density, ReadingPane, Settings},
 };
 use wasm_bindgen::JsCast;
 
 use crate::{
+    actions::{self, real_folder, select_single},
     commandbar::CommandBar,
+    dialogs::Dialogs,
+    menus::ContextMenu,
     folders::FolderPane,
     ipc,
     list::{Layout, MessageList, PAGE, ensure_rows, row_height},
     reading::ReadingPane as ReadingPaneView,
     splitter::Splitter,
-    state::{Module, Ui, use_ui},
+    state::{Dialog, Module, Ui, use_ui},
     statusbar::StatusBar,
     topbar::TopBar,
 };
@@ -58,10 +61,55 @@ fn cycle_focus(ui: Ui, backward: bool) {
     let _ = targets[next as usize].focus();
 }
 
+/// Le focus est dans un champ de saisie (les raccourcis d'édition lui reviennent).
+fn typing() -> bool {
+    document().active_element().is_some_and(|a| matches!(a.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT"))
+}
+
 /// Raccourcis valables partout, y compris dans le corps d'un message (relayés depuis l'iframe).
 pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
     let key = ev.key();
     let (ctrl, alt, shift) = (ev.ctrl_key(), ev.alt_key(), ev.shift_key());
+    // Une boîte de dialogue ou un menu contextuel garde ses touches.
+    if ui.dialog.get_untracked().is_some() || ui.context_menu.get_untracked().is_some() {
+        return;
+    }
+    // Organisation (J3), hors saisie de texte.
+    if !typing() && ui.module.get_untracked() == Module::Mail {
+        let op = match (ctrl, alt, shift, key.as_str()) {
+            (true, false, false, "q" | "Q") => Some(MessageOp::Read { read: true }),
+            (true, false, false, "u" | "U") => Some(MessageOp::Read { read: false }),
+            (false, false, false, "Insert") => Some(MessageOp::Flag { action: FlagAction::Toggle }),
+            _ => None,
+        };
+        if let Some(op) = op {
+            ev.prevent_default();
+            actions::run(ui, op);
+            return;
+        }
+        if ctrl && !alt && !shift && key.eq_ignore_ascii_case("z") {
+            ev.prevent_default();
+            actions::undo(ui);
+            return;
+        }
+        if ctrl && shift && key.eq_ignore_ascii_case("e") {
+            ev.prevent_default();
+            ui.dialog.set(Some(Dialog::NewFolder { parent: real_folder(&ui.folder.get_untracked()) }));
+            return;
+        }
+        // Suppr depuis le volet de lecture (la liste et l'arborescence ont leur propre Suppr).
+        let in_reading = ui
+            .refs
+            .reading
+            .get_untracked()
+            .zip(document().active_element())
+            .is_some_and(|(r, a)| r.contains(Some(&a)));
+        if key == "Delete" && (in_reading || ev.target().is_some_and(|t| t.dyn_ref::<web_sys::Node>().is_some_and(|n| n.owner_document() != Some(document())))) {
+            ev.prevent_default();
+            actions::delete(ui, shift);
+            return;
+        }
+    }
     let module = match (ctrl, alt, key.as_str()) {
         (true, false, "1") => Some(Module::Mail),
         (true, false, "2") => Some(Module::Calendar),
@@ -96,8 +144,8 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
         let target = ui
             .view
             .with_untracked(|v| v.as_ref().and_then(|v| Layout::new(v, collapsed, row_h).step(ui.selected_pos.get_untracked(), delta)));
-        if target.is_some() {
-            ui.selected_pos.set(target);
+        if let Some(p) = target {
+            select_single(ui, p);
         }
         return;
     }
@@ -120,6 +168,8 @@ pub fn App() -> impl IntoView {
     provide_context(ui);
     let requested = StoredValue::new(HashSet::<(u64, u32)>::new());
     provide_context(requested);
+
+    actions::load_categories(ui);
 
     // Chargement initial : réglages puis arborescence ; ouverture de la Boîte de réception.
     spawn_local(async move {
@@ -149,6 +199,7 @@ pub fn App() -> impl IntoView {
         let folder = ui.folder.get();
         let unread_only = ui.unread_only.get();
         let (sort, descending) = ui.sort.get();
+        ui.view_epoch.track();
         if folder.is_empty() {
             return;
         }
@@ -182,11 +233,22 @@ pub fn App() -> impl IntoView {
                 return;
             }
             let count = view.count;
+            // Même dossier rouvert après une opération : groupes repliés et position gardés.
+            let same = ui.view.with_untracked(|v| v.is_some()) && ui.pending_select.get_untracked().is_some();
             requested.set_value(HashSet::from([(view.token, 0)]));
-            ui.collapsed_groups.set(HashSet::new());
+            if !same {
+                ui.collapsed_groups.set(HashSet::new());
+            }
             ui.rows.set(first.into_iter().map(|m| (m.pos, m)).collect());
             ui.view.set(Some(view));
-            ui.selected_pos.set((count > 0).then_some(0));
+            let pos = ui.pending_select.get_untracked().map(|p| p.min(count.saturating_sub(1))).unwrap_or(0);
+            ui.pending_select.set(None);
+            if count > 0 {
+                select_single(ui, pos);
+            } else {
+                ui.sel_ranges.set(Vec::new());
+                ui.selected_pos.set(None);
+            }
             request_animation_frame(move || {
                 let ms = now_ms() - t0;
                 let label = format!("ouverture {} : {count} éléments, tri {:?}, non lus {}", query.folder_id, query.sort, query.unread_only);
@@ -205,6 +267,31 @@ pub fn App() -> impl IntoView {
         if ui.selected.get_untracked() != id {
             ui.selected.set(id);
         }
+    });
+
+    // Marquer comme lu l'élément que la sélection quitte (réglage `mark_read_on_leave`).
+    Effect::new(move |prev: Option<Option<String>>| {
+        let current = ui.selected.get();
+        if let Some(Some(left)) = prev
+            && Some(&left) != current.as_ref()
+            && ui.settings.get_untracked().mark_read_on_leave
+        {
+            let unread = ui.rows.with_untracked(|r| r.values().find(|m| m.id == left).map(|m| (m.pos, m.unread)));
+            if let Some((pos, true)) = unread {
+                ui.rows.update(|r| {
+                    if let Some(m) = r.get_mut(&pos) {
+                        m.unread = false;
+                    }
+                });
+                spawn_local(async move {
+                    match ipc::apply_op(&Selection::ids(vec![left]), &MessageOp::Seen).await {
+                        Ok(_) => actions::refresh_tree(ui),
+                        Err(e) => ui.error.set(Some(e)),
+                    }
+                });
+            }
+        }
+        current
     });
 
     // Enregistrement des réglages à chaque modification, une fois chargés.
@@ -236,6 +323,8 @@ pub fn App() -> impl IntoView {
             <CommandBar />
             <Main />
             <StatusBar />
+            <ContextMenu />
+            <Dialogs />
         </div>
     }
 }

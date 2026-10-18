@@ -1,6 +1,6 @@
 //! Import PST en ligne de commande (mesures du J1).
 //!
-//! Usage : tl-import <fichier.pst> <dossier-de-données> [--in-place]
+//! Usage : tl-import <fichier.pst> <dossier-de-données> [--in-place] [--replace]
 
 use std::{env, io::Write, path::PathBuf, process::ExitCode, time::Instant};
 
@@ -10,10 +10,10 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     let [src, data] = positional[..] else {
-        eprintln!("Usage : tl-import <fichier.pst> <dossier-de-données> [--in-place]");
+        eprintln!("Usage : tl-import <fichier.pst> <dossier-de-données> [--in-place] [--replace]");
         return ExitCode::from(2);
     };
-    let options = Options { in_place: args.iter().any(|a| a == "--in-place") };
+    let options = Options { in_place: args.iter().any(|a| a == "--in-place"), replace: args.iter().any(|a| a == "--replace") };
     let t0 = Instant::now();
     let mut last = Instant::now();
     let result = import(&PathBuf::from(src), &PathBuf::from(data), &options, &mut |p| {

@@ -34,7 +34,10 @@ Statut : **proposition** (2026-10-19), à valider par Paul. ThunderLook et ADI F
 
 ## Déjà en place au J2
 - `thunderlook_store::open_read_only` ouvre la base de ThunderLook en lecture seule (`query_only`). C'est la porte d'entrée prévue pour ADI.
-- Le schéma est versionné (v2 au J2). La migration v1 → v2 ne fait qu'ajouter un index.
+- Le schéma est versionné (v3 au J3). Les migrations v1 → v2 → v3 ne font qu'ajouter un index puis une table.
+- Depuis le J3, ThunderLook écrit dans sa base : lu, indicateurs, catégories, classement.
+  - La base est en mode WAL : un lecteur comme ADI peut lire pendant que ThunderLook écrit, sans être bloqué.
+  - Il voit l'état validé de la dernière transaction.
 
 ## Questions pour Paul
 1. Où est le code source d'ADI Facturation (dépôt, dossier) ?

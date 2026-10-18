@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use leptos::{html, prelude::*};
-use thunderlook_model::{FolderTree, ListView, MessageSummary, SortField, settings::Settings};
+use thunderlook_model::{CategoryInfo, FolderTree, ListView, MessageSummary, SortField, settings::Settings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Module {
@@ -68,6 +68,47 @@ impl Tab {
     }
 }
 
+/// Boîte de dialogue ouverte (une seule à la fois).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Dialog {
+    /// Nouveau dossier sous `parent`.
+    NewFolder { parent: String },
+    Rename { id: String, name: String },
+    /// Choix d'un dossier de destination.
+    PickFolder { purpose: PickPurpose },
+    /// Confirmation d'une action destructrice.
+    Confirm { text: String, action: ConfirmAction },
+    NewCategory,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PickPurpose {
+    MoveMessages,
+    CopyMessages,
+    MoveFolder,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfirmAction {
+    DeletePermanently,
+    DeleteFolder(String),
+    EmptyFolder(String),
+}
+
+/// Menu contextuel ouvert à une position de la fenêtre.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContextMenuAt {
+    pub x: f64,
+    pub y: f64,
+    pub target: ContextTarget,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContextTarget {
+    Messages,
+    Folder(String),
+}
+
 /// Points d'arrêt du cycle F6 / Maj+F6.
 #[derive(Clone, Copy)]
 pub struct Refs {
@@ -106,6 +147,21 @@ pub struct Ui {
     pub expanded_nodes: RwSignal<HashSet<String>>,
     /// Messages dont le contenu distant a été autorisé pendant la session.
     pub remote_allowed: RwSignal<HashSet<String>>,
+    /// Sélection multiple : plages `[début, fin[` de positions, et point d'ancrage des Maj+clic.
+    pub sel_ranges: RwSignal<Vec<(u32, u32)>>,
+    pub anchor: RwSignal<Option<u32>>,
+    /// Incrémenté pour rouvrir la vue courante après une opération.
+    pub view_epoch: RwSignal<u64>,
+    /// Position à sélectionner à la prochaine ouverture de vue (au lieu de la première).
+    pub pending_select: RwSignal<Option<u32>>,
+    /// Dernier résultat d'opération (barre d'état) et ce que Ctrl+Z annulera.
+    pub status: RwSignal<Option<String>>,
+    pub undo_label: RwSignal<Option<String>>,
+    pub categories: RwSignal<Vec<CategoryInfo>>,
+    /// Dossiers récents de « Déplacer vers ».
+    pub recent_folders: RwSignal<Vec<String>>,
+    pub dialog: RwSignal<Option<Dialog>>,
+    pub context_menu: RwSignal<Option<ContextMenuAt>>,
     pub refs: Refs,
 }
 
@@ -131,6 +187,16 @@ impl Ui {
             collapsed_nodes: RwSignal::new(HashSet::new()),
             expanded_nodes: RwSignal::new(HashSet::new()),
             remote_allowed: RwSignal::new(HashSet::new()),
+            sel_ranges: RwSignal::new(Vec::new()),
+            anchor: RwSignal::new(None),
+            view_epoch: RwSignal::new(0),
+            pending_select: RwSignal::new(None),
+            status: RwSignal::new(None),
+            undo_label: RwSignal::new(None),
+            categories: RwSignal::new(Vec::new()),
+            recent_folders: RwSignal::new(Vec::new()),
+            dialog: RwSignal::new(None),
+            context_menu: RwSignal::new(None),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),

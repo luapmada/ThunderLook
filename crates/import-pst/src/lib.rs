@@ -51,6 +51,8 @@ const PR_ROAMING_XML_STREAM: u16 = 0x7C08;
 pub struct Options {
     /// Lire le fichier sur place au lieu d'en faire une copie de travail (refusé sous les dossiers protégés).
     pub in_place: bool,
+    /// Remplacer une source déjà importée depuis le même fichier (perd les changements faits depuis).
+    pub replace: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -187,7 +189,8 @@ fn working_copy(src: &Path, data_dir: &Path, progress: &mut dyn FnMut(&Progress)
     Ok(dest)
 }
 
-/// Importe un PST. Une source déjà importée depuis le même fichier d'origine est remplacée.
+/// Importe un PST. Une source déjà importée depuis le même fichier d'origine n'est remplacée
+/// qu'avec [`Options::replace`].
 pub fn import(src: &Path, data_dir: &Path, options: &Options, progress: &mut dyn FnMut(&Progress)) -> Result<Report, ImportError> {
     let origin = fs::canonicalize(src).map_err(|e| fail!("{} : {e}", src.display()))?;
     let origin_str = plain_path(&origin);
@@ -208,8 +211,14 @@ pub fn import(src: &Path, data_dir: &Path, options: &Options, progress: &mut dyn
     let mut conn = thunderlook_store::open(data_dir)?;
     conn.execute_batch("PRAGMA synchronous = OFF;")?;
     if let Some(old) = thunderlook_store::find_source(&conn, &origin_str)? {
-        thunderlook_store::delete_source(&conn, old)?;
-        let _ = fs::remove_dir_all(data_dir.join("eml").join(old.to_string()));
+        // Remplacer une source efface aussi ce qui a été fait dans ThunderLook (lu, classement, suppressions).
+        if !options.replace {
+            return Err(fail!(
+                "{origin_str} est déjà importé (source {old}). Le réimport remplace la source et perd les changements \
+                 faits depuis dans ThunderLook : relancer avec --replace pour confirmer."
+            ));
+        }
+        thunderlook_store::delete_source(&conn, data_dir, old)?;
     }
 
     let tx = conn.transaction()?;

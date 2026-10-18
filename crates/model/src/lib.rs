@@ -235,6 +235,108 @@ pub struct MessageView {
     pub item_kind: Option<String>,
 }
 
+/// Éléments visés par une opération : plages de positions d'une vue ouverte (`[début, fin[`)
+/// et/ou identifiants explicites. Une sélection de 20 000 éléments n'oblige pas à charger leurs lignes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Selection {
+    pub token: u64,
+    pub ranges: Vec<(u32, u32)>,
+    pub ids: Vec<String>,
+}
+
+impl Selection {
+    pub fn ids(ids: Vec<String>) -> Self {
+        Self { token: 0, ranges: Vec::new(), ids }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty() && self.ranges.iter().all(|(a, b)| b <= a)
+    }
+
+    pub fn len(&self) -> u32 {
+        self.ids.len() as u32 + self.ranges.iter().map(|(a, b)| b.saturating_sub(*a)).sum::<u32>()
+    }
+}
+
+/// Indicateur de suivi à poser ([MS-OXOFLAG] : début et échéance).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FlagAction {
+    Today,
+    Tomorrow,
+    ThisWeek,
+    NextWeek,
+    NoDate,
+    Complete,
+    Clear,
+    /// Touche Inser : pose « Aujourd'hui », ou marque terminé si déjà marqué.
+    Toggle,
+}
+
+impl FlagAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Today => "Aujourd'hui",
+            Self::Tomorrow => "Demain",
+            Self::ThisWeek => "Cette semaine",
+            Self::NextWeek => "La semaine prochaine",
+            Self::NoDate => "Sans date",
+            Self::Complete => "Marquer comme terminé",
+            Self::Clear => "Effacer l'indicateur",
+            Self::Toggle => "Assurer un suivi",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "op")]
+pub enum MessageOp {
+    Read { read: bool },
+    /// Marquage automatique quand la sélection quitte l'élément : hors historique d'annulation.
+    Seen,
+    /// Lu si au moins un élément est non lu, sinon non lu (bouton « Lu/Non lu »).
+    ToggleRead,
+    Flag { action: FlagAction },
+    Category { name: String, on: bool },
+    ClearCategories,
+    Move { folder_id: String },
+    Copy { folder_id: String },
+    /// Vers « Éléments supprimés » de la source ; définitif si l'élément y est déjà.
+    Delete,
+    DeletePermanently,
+    Archive,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "op")]
+pub enum FolderOp {
+    Create { parent_id: String, name: String },
+    Rename { id: String, name: String },
+    Move { id: String, parent_id: String },
+    Delete { id: String },
+    MarkAllRead { id: String },
+    Empty { id: String },
+    AddFavorite { id: String },
+    RemoveFavorite { id: String },
+}
+
+/// Résultat d'une opération : texte pour la barre d'état, et libellé de ce que Ctrl+Z annulera.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpResult {
+    pub affected: u32,
+    pub message: String,
+    pub undo_label: Option<String>,
+    /// Dossier créé, pour le sélectionner.
+    pub created_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CategoryInfo {
+    pub name: String,
+    pub color: Option<String>,
+}
+
 /// Initiales pour la pastille de l'expéditeur.
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphanumeric()));

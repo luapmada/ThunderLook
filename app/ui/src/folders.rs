@@ -3,12 +3,51 @@
 use std::collections::HashSet;
 
 use leptos::prelude::*;
-use thunderlook_model::{Folder, FolderTree};
+use thunderlook_model::{Folder, FolderOp, FolderRole, FolderTree, MessageOp};
 
 use crate::{
+    actions::{self, real_folder},
     icons::*,
-    state::{Module, use_ui},
+    list::DRAG_MESSAGES,
+    menus,
+    state::{ConfirmAction, ContextMenuAt, ContextTarget, Dialog, Module, Ui, use_ui},
 };
+
+/// Type MIME interne du glisser-déposer de dossiers.
+const DRAG_FOLDER: &str = "application/x-thunderlook-folder";
+
+fn role_of(ui: Ui, id: &str) -> FolderRole {
+    ui.tree.with_untracked(|t| t.as_ref().and_then(|t| t.find_folder(id)).map(|f| f.role).unwrap_or(FolderRole::Folder))
+}
+
+/// Dossier ordinaire (ni spécial ni favori) : peut être renommé, déplacé, supprimé.
+fn is_plain(ui: Ui, id: &str) -> bool {
+    !id.starts_with("fav-") && matches!(role_of(ui, id), FolderRole::Folder | FolderRole::Archive)
+}
+
+fn drop_on(ui: Ui, target: &str, ev: &web_sys::DragEvent) {
+    ev.prevent_default();
+    let Some(dt) = ev.data_transfer() else { return };
+    let target = real_folder(target);
+    if let Ok(src) = dt.get_data(DRAG_FOLDER)
+        && !src.is_empty()
+    {
+        if src != target {
+            actions::run_folder(ui, FolderOp::Move { id: src, parent_id: target });
+        }
+    } else if dt.get_data(DRAG_MESSAGES).is_ok_and(|d| !d.is_empty()) {
+        // Ctrl au moment du dépôt : copie, comme la référence.
+        let op = if ev.ctrl_key() { MessageOp::Copy { folder_id: target } } else { MessageOp::Move { folder_id: target } };
+        actions::run(ui, op);
+    }
+}
+
+fn accepts(ev: &web_sys::DragEvent) -> bool {
+    ev.data_transfer().is_some_and(|dt| {
+        let types = dt.types();
+        (0..types.length()).filter_map(|i| types.get(i).as_string()).any(|t| t == DRAG_MESSAGES || t == DRAG_FOLDER)
+    })
+}
 
 /// Nœud visible de l'arbre (sections et dossiers), dans l'ordre d'affichage.
 #[derive(Clone, PartialEq)]
@@ -127,10 +166,25 @@ pub fn FolderPane() -> impl IntoView {
                 }
             }
             "Enter" | " " if row.expandable => toggle(row.id.clone(), !row.expanded),
+            "F2" if !row.section && is_plain(ui, &row.id) => {
+                ui.dialog.set(Some(Dialog::Rename { id: row.id.clone(), name: row.label.clone() }));
+            }
+            "Delete" if !row.section && is_plain(ui, &row.id) => {
+                ui.dialog.set(Some(Dialog::Confirm {
+                    text: format!("Supprimer le dossier « {} » et tout son contenu ?", row.label),
+                    action: ConfirmAction::DeleteFolder(row.id.clone()),
+                }));
+            }
+            "ContextMenu" | "F10" if !row.section && (ev.key() != "F10" || ev.shift_key()) => {
+                if let Some(el) = document().get_element_by_id(&node_dom_id(&row.id)) {
+                    menus::open_at_element(ui, &el, ContextTarget::Folder(row.id.clone()));
+                }
+            }
             _ => return,
         }
         ev.prevent_default();
     };
+    let drop_over = RwSignal::new(None::<String>);
 
     let collapsed_pane = move || ui.settings.get().folder_pane_collapsed;
 
@@ -172,6 +226,14 @@ pub fn FolderPane() -> impl IntoView {
                                 let row_click = row.clone();
                                 let toggle_id = row.id.clone();
                                 let expanded = row.expanded;
+                                let section = row.section;
+                                let (drag_id, over_id, leave_id, drop_id, ctx_id) =
+                                    (row.id.clone(), row.id.clone(), row.id.clone(), row.id.clone(), row.id.clone());
+                                let is_over = {
+                                    let id = row.id.clone();
+                                    move || drop_over.get().as_deref() == Some(id.as_str())
+                                };
+                                let draggable = (!section && is_plain(ui, &row.id)).then_some("true");
                                 let indent = format!("padding-left: {}px", 4 + (row.level.saturating_sub(1)) * 16);
                                 view! {
                                     <div
@@ -185,6 +247,44 @@ pub fn FolderPane() -> impl IntoView {
                                         aria-expanded=row.expandable.then(|| row.expanded.to_string())
                                         aria-selected=(!row.section).then(move || is_selected().to_string())
                                         style=indent
+                                        class:drop-target=is_over
+                                        draggable=draggable
+                                        on:dragstart=move |ev| {
+                                            if let Some(dt) = ev.data_transfer() {
+                                                let _ = dt.set_data(DRAG_FOLDER, &drag_id);
+                                                dt.set_effect_allowed("move");
+                                            }
+                                        }
+                                        on:dragover=move |ev| {
+                                            if !section && accepts(&ev) {
+                                                ev.prevent_default();
+                                                if let Some(dt) = ev.data_transfer() {
+                                                    dt.set_drop_effect(if ev.ctrl_key() { "copy" } else { "move" });
+                                                }
+                                                drop_over.set(Some(over_id.clone()));
+                                            }
+                                        }
+                                        on:dragleave=move |_| {
+                                            if drop_over.get_untracked().as_deref() == Some(leave_id.as_str()) {
+                                                drop_over.set(None);
+                                            }
+                                        }
+                                        on:drop=move |ev| {
+                                            drop_over.set(None);
+                                            if !section {
+                                                drop_on(ui, &drop_id, &ev);
+                                            }
+                                        }
+                                        on:contextmenu=move |ev| {
+                                            ev.prevent_default();
+                                            if !section {
+                                                ui.context_menu.set(Some(ContextMenuAt {
+                                                    x: ev.client_x() as f64,
+                                                    y: ev.client_y() as f64,
+                                                    target: ContextTarget::Folder(ctx_id.clone()),
+                                                }));
+                                            }
+                                        }
                                         on:click=move |_| {
                                             focus_row(&row_click);
                                             if let Some(t) = ui.refs.tree.get_untracked() {
