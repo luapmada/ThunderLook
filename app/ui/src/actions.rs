@@ -187,6 +187,17 @@ pub fn run_folder(ui: Ui, op: FolderOp) {
                         });
                         reopen_view(ui);
                     }
+                    (FolderOp::SaveSearch { .. }, Some(id)) => {
+                        ui.folder.set(id.clone());
+                        ui.tree_focus.set(id);
+                    }
+                    (FolderOp::DeleteSearchFolder { .. }, _) => {
+                        if ui.folder.get_untracked().starts_with("s-") {
+                            if let Some(f) = ui.tree.with_untracked(|t| t.as_ref().and_then(|t| t.default_folder()).map(|f| f.id.clone())) {
+                                ui.folder.set(f);
+                            }
+                        }
+                    }
                     (FolderOp::MarkAllRead { .. }, _) => reload_rows(ui),
                     (FolderOp::Empty { .. } | FolderOp::Delete { .. }, _) => reopen_view(ui),
                     _ => {}

@@ -2,8 +2,8 @@
 
 use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
-    CategoryInfo, FolderOp, FolderTree, ListQuery, ListView, MessageOp, MessageSummary, MessageView, OpResult, Selection,
-    settings::Settings,
+    CategoryInfo, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp, MessageSummary, MessageView, OpResult,
+    SearchQuery, Selection, SortField, settings::Settings,
 };
 use wasm_bindgen::prelude::*;
 
@@ -95,6 +95,21 @@ pub async fn apply_op(selection: &Selection, op: &MessageOp) -> Result<OpResult,
 
 pub async fn folder_op(op: &FolderOp) -> Result<OpResult, String> {
     call("folder_op", &FolderOpArg { op }).await
+}
+
+#[derive(Serialize)]
+struct SearchArg<'a> {
+    query: &'a SearchQuery,
+    sort: SortField,
+    descending: bool,
+}
+
+pub async fn search(query: &SearchQuery, sort: SortField, descending: bool) -> Result<ListView, String> {
+    call("search", &SearchArg { query, sort, descending }).await
+}
+
+pub async fn index_status() -> Result<IndexStatus, String> {
+    call("index_status", &NoArgs {}).await
 }
 
 pub async fn undo() -> Result<Option<String>, String> {

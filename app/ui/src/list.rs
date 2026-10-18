@@ -537,6 +537,7 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
                     FlagState::Done => Some(view! { <span class="flag-done" title="Suivi terminé"><Svg icon=CHECK size=14 /></span> }.into_any()),
                     FlagState::None => None,
                 }}
+                {m.folder.clone().map(|f| view! { <span class="folder-tag" title="Dossier">{f}</span> })}
                 <span class="time">{m.time_label.clone()}</span>
             </span>
             <span class="subject">{subject}</span>

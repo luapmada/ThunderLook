@@ -17,8 +17,18 @@ pub fn StatusBar() -> impl IntoView {
         <footer class="statusbar" aria-label="Barre d'état">
             {move || match ui.module.get() {
                 Module::Mail => view! {
-                    <span>{move || format!("Éléments : {}", thousands(counts.get().0))}</span>
+                    <span>{move || {
+                        let label = if ui.search_text.get().is_empty() { "Éléments" } else { "Résultats" };
+                        format!("{label} : {}", thousands(counts.get().0))
+                    }}</span>
                     <span>{move || format!("Non lus : {}", thousands(counts.get().1))}</span>
+                    {move || {
+                        let s = ui.index.get();
+                        (s.running && s.total > 0).then(|| {
+                            let pct = (s.done as f64 / s.total as f64 * 100.0).floor();
+                            view! { <span class="status-msg" title="Les résultats de recherche se complètent pendant l'indexation">{format!("Indexation : {pct} %")}</span> }
+                        })
+                    }}
                 }
                 .into_any(),
                 other => view! { <span>{format!("{} : module prévu après le courrier", other.label())}</span> }.into_any(),

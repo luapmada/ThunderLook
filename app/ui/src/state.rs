@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use leptos::{html, prelude::*};
-use thunderlook_model::{CategoryInfo, FolderTree, ListView, MessageSummary, SortField, settings::Settings};
+use thunderlook_model::{CategoryInfo, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, settings::Settings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Module {
@@ -42,6 +42,8 @@ pub enum Tab {
     Folder,
     View,
     Help,
+    /// Onglet contextuel, présent pendant une recherche.
+    Search,
 }
 
 impl Tab {
@@ -54,6 +56,7 @@ impl Tab {
             Tab::Folder => "Dossier",
             Tab::View => "Affichage",
             Tab::Help => "Aide",
+            Tab::Search => "Rechercher",
         }
     }
 
@@ -64,6 +67,7 @@ impl Tab {
             Tab::Folder => "tab-folder",
             Tab::View => "tab-view",
             Tab::Help => "tab-help",
+            Tab::Search => "tab-search",
         }
     }
 }
@@ -79,6 +83,8 @@ pub enum Dialog {
     /// Confirmation d'une action destructrice.
     Confirm { text: String, action: ConfirmAction },
     NewCategory,
+    /// Enregistrer la recherche courante comme dossier de recherche.
+    SaveSearch,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -162,6 +168,10 @@ pub struct Ui {
     pub recent_folders: RwSignal<Vec<String>>,
     pub dialog: RwSignal<Option<Dialog>>,
     pub context_menu: RwSignal<Option<ContextMenuAt>>,
+    /// Recherche validée (vide : pas de recherche) et son étendue.
+    pub search_text: RwSignal<String>,
+    pub search_scope: RwSignal<SearchScope>,
+    pub index: RwSignal<IndexStatus>,
     pub refs: Refs,
 }
 
@@ -197,6 +207,9 @@ impl Ui {
             recent_folders: RwSignal::new(Vec::new()),
             dialog: RwSignal::new(None),
             context_menu: RwSignal::new(None),
+            search_text: RwSignal::new(String::new()),
+            search_scope: RwSignal::new(SearchScope::default()),
+            index: RwSignal::new(IndexStatus::default()),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),

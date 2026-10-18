@@ -22,6 +22,7 @@ a REA work on MSoutlook21
 | J2. Lecture : dossiers, liste, volet de lecture sur les données importées | Fait (2026-10-19) : 22 188 éléments ouverts en 145 ms, HTML isolé, pièces jointes (`PLAN.md` §5) |
 | J3. Organisation : lu/non lu, déplacer, indicateurs, catégories, dossiers, favoris, annulation | Fait (2026-10-19), sans les conversations (J3b) |
 | J3b. Conversations et affichages | À faire |
+| J4. Recherche : index plein texte, mots-clés, étendues, dossiers de recherche | Fait (2026-10-19) : 252 846 éléments indexés en 4 min 19, recherches en moins de 300 ms |
 
 ## Fichiers
 - `SPEC.md` : fonctions inventoriées et priorités (le mail d'abord).

@@ -1,6 +1,6 @@
 # PLAN — architecture, stack, jalons
 
-Statut : **validé le 2026-10-16** (§7 accepté tel quel : ruban simplifié par défaut avec mode classique, nom « ThunderLook », REA MCP repoussé à J6). **Modifié le même jour à ta demande (« plus il y a de Rust mieux c'est »)** : interface en Rust (Leptos → WebAssembly) au lieu de React/TypeScript, outillage cargo au lieu de npm. J0 terminé. J1 terminé le 2026-10-18, J2 et J3 (organisation, sans les conversations) le 2026-10-19 (mesures en §5). Lien avec ADI Facturation : §8.
+Statut : **validé le 2026-10-16** (§7 accepté tel quel : ruban simplifié par défaut avec mode classique, nom « ThunderLook », REA MCP repoussé à J6). **Modifié le même jour à ta demande (« plus il y a de Rust mieux c'est »)** : interface en Rust (Leptos → WebAssembly) au lieu de React/TypeScript, outillage cargo au lieu de npm. J0 terminé. J1 terminé le 2026-10-18, J2, J3 (organisation, sans les conversations) et J4 (recherche) le 2026-10-19 (mesures en §5). Lien avec ADI Facturation : §8.
 Entrées : `SPEC.md` (priorités Q1 à Q4), `DESIGN.md`, `notes/ui-reference.md`, `notes/formats.md`, `notes/juridique.md`.
 
 ## 1. Principes
@@ -77,7 +77,7 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | J2 ✅ | Lecture | Volet dossiers (compteurs non lus / [total]), liste virtualisée (colonnes, tri, groupes par date, styles non lu et drapeau), volet de lecture (HTML isolé, texte, RTF, pièces jointes, images bloquées), raccourcis de lecture, F6 | Ouverture d'un dossier de 22 000 éléments en moins de 200 ms. Parcours clavier complet | M |
 | J3 ✅ | Organisation | Lu/non lu, supprimer, déplacer/copier, glisser-déposer, indicateurs, catégories, CRUD des dossiers, favoris, conversations, « Organiser par », filtres Tous/Non lus, paramètres d'affichage | Ruban Accueil, Dossier et Affichage fonctionnels (sous-ensemble de `ui-reference.md` §3) | M |
 | J3b | Conversations et affichages | « Afficher en conversations », « Organiser par » au-delà des 4 tris (catégories, indicateur, pièces jointes), boîte « Réglages de l'affichage », options de lecture (marquer comme lu) dans l'interface | Liste en conversations sur la Boîte de réception de 22 000 éléments en moins de 300 ms | M |
-| J4 | Recherche | Index FTS5, zone de recherche et portées, onglet Recherche, mots-clés, recherche avancée, dossiers de recherche (Non lus, Pour le suivi, personnalisés) | Moins de 300 ms sur l'archive de 217 000 éléments | M |
+| J4 ✅ | Recherche | Index FTS5, zone de recherche et portées, onglet Recherche, mots-clés, recherche avancée, dossiers de recherche (Non lus, Pour le suivi, personnalisés) | Moins de 300 ms sur l'archive de 217 000 éléments | M |
 | J5 | Rédaction (brouillons) | Fenêtre de rédaction HTML, réponse et transfert avec citation, signatures (import HTM), modèles `.oft`, brouillons | Réponse à tous fidèle (en-têtes, citation) enregistrée en brouillon | M |
 | J6 | Règles et actions rapides | Import du flux de règles et des `.rwz`, assistant de règles, « Exécuter maintenant », actions rapides (défauts plus éditeur) | Tes 2 `.rwz` et le flux du PST importés, et rejoués sur une copie | L |
 | J7 | IMAP + SMTP (Hostinger) | Comptes, synchronisation, envoi, boîte d'envoi, F9, hors connexion, notifications, réponse automatique locale | Envoi et réception réels sur un compte de test | L |
@@ -156,6 +156,38 @@ Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nomb
   - glisser un message sur un dossier.
 - **Réimport** : `tl-import` refuse désormais de remplacer une source déjà importée sans `--replace`, puisque cela effacerait le classement fait dans ThunderLook.
   - La suppression d'une source n'efface plus que les `.eml` de ses propres messages.
+
+### Mesures du J4 (2026-10-19, base fusionnée de 252 846 éléments)
+- **Indexation plein texte** :
+  - **259 s**, soit 4 min 19, en tâche de fond, sur 16 fils ;
+  - corps limité à 200 000 caractères par message ;
+  - index sans contenu stocké (FTS5, insensible aux accents, préfixes de 2 et 3 caractères) ;
+  - reprise là où elle s'est arrêtée, nouvelles copies comprises.
+- **Recherche** sur « tous les fichiers de données », tri par date, cœur seul (`examples/bench.rs`) :
+
+  | Requête | Résultats | Temps |
+  |---|---|---|
+  | `facture` | 5 211 | 38 ms |
+  | `fact` (préfixe) | 8 046 | 55 ms |
+  | `"bon de commande"` | 316 | 6 ms |
+  | `de:paul` | 13 530 | 78 ms |
+  | `facture pj:oui` | 968 | 26 ms |
+  | `objet:devis reçu:2015` | 57 | 3 ms |
+  | `lu:non` | 38 627 | 88 ms |
+  | `suivi:oui` | 112 151 | 223 ms |
+  | `adresse:paul@adam-declic.fr` | 41 807 | 218 ms |
+  | `facture OU devis -relance` | 9 247 | 62 ms |
+  | Dossier de recherche « Pour le suivi » | 112 148 | 231 ms |
+
+  L'objectif de 300 ms est tenu partout.
+  - Pour y arriver sur les gros résultats : conditions écrites en clair (index partiels), index couvrant `message_flagged(folder_id, received_at)`, et une union plutôt qu'un OU pour `adresse:`.
+- **Dans l'application** : `facture pj:oui` dans le fichier de données courant donne 188 résultats affichés en **51 ms**.
+  - L'onglet Rechercher s'affiche, et chaque ligne indique son dossier.
+- La recherche ne couvre que les dossiers de courrier (ni calendrier, ni contacts, ni tâches).
+  - Les dossiers de recherche prédéfinis excluent « Éléments supprimés » et « Courrier indésirable ».
+- **Incident pendant les tests** : une fenêtre de HWiNFO64 (« Sauvegarder et fermer ») est passée au premier plan. Une saisie de test (`Ctrl+E`, « facture pj:oui », Entrée) lui a été envoyée.
+  - `tools/uia_keys.ps1` vérifie désormais, avant chaque touche, que la fenêtre au premier plan est bien celle de l'application testée.
+  - `tools/uia_search.ps1` saisit une recherche par UI Automation, sans clavier.
 
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).

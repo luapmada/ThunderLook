@@ -14,6 +14,18 @@ Statut : **proposition** (2026-10-19), à valider par Paul. ThunderLook et ADI F
 
   L'outil a refusé la lecture du dossier d'entreprise et du paquet installé (données d'entreprise). Il faut l'accord explicite de Paul, ou le chemin du dépôt de code.
 
+## Indice relevé au J4 dans tes données
+Dans « Éléments envoyés », des factures d'ADI (pièces jointes `ADI_2026_FACT….pdf`, catégorie « ADI ») partent avec
+l'objet **« Envoi d'un message : ADI_2026… »**. C'est l'objet que Windows met quand une application envoie un fichier par
+**Simple MAPI** (`MAPISendMail`) au client de messagerie par défaut, et ce client est Outlook.
+- Hypothèse forte : ADI envoie ses factures par MAPI. Seule la lecture du code d'ADI la confirmera.
+- Conséquence :
+  - pour remplacer Outlook **sans toucher à ADI**, ThunderLook doit s'enregistrer comme client MAPI de Windows. Cela
+    demande une DLL qui exporte `MAPISendMail`/`MAPISendMailW` et la déclaration sous `HKLM\Software\Clients\Mail`. La
+    DLL transmet ensuite le message à la fenêtre de rédaction de ThunderLook ;
+  - l'autre voie : qu'ADI appelle directement la ligne de commande de rédaction, ce qui est plus simple et plus robuste.
+  - À trancher avec Paul au J5.
+
 ## Principes
 1. **Chaque application reste maître de ses données.**
    - ThunderLook n'écrit jamais dans la base d'ADI, et ADI n'écrit jamais dans `thunderlook.db`.
@@ -28,7 +40,7 @@ Statut : **proposition** (2026-10-19), à valider par Paul. ThunderLook et ADI F
 | Sens | Besoin | Mécanisme proposé | Jalon |
 |---|---|---|---|
 | ADI → ThunderLook | Envoyer une facture ou un devis PDF à un client | Ligne de commande de rédaction : `thunderlook.exe --compose --to <adresse> --subject <objet> --body-file <html> --attach <pdf>`, plus des commutateurs compatibles Outlook (`/c ipm.note /m "mailto:…" /a <fichier>`). ThunderLook peut ainsi remplacer Outlook sans modifier ADI, si ADI pilote Outlook de cette façon | J5 (fenêtre de rédaction), J7 (envoi) |
-| ADI → ThunderLook | Afficher l'historique des mails d'un client depuis sa fiche | Lecture seule de `thunderlook.db` (`thunderlook_store::open_read_only`, ou SQLite en lecture seule côté Node), par adresse d'expéditeur ou de destinataire. Plus tard : `thunderlook.exe --show-address <adresse>` ouvre une recherche | J4 (index par adresse, recherche) |
+| ADI → ThunderLook | Afficher l'historique des mails d'un client depuis sa fiche | Lecture seule de `thunderlook.db` (`thunderlook_store::open_read_only`, ou SQLite en lecture seule côté Node). Depuis le J4 : index `message_from_addr` et index plein texte des destinataires ; dans ThunderLook, la recherche `adresse:client@exemple.fr` donne cet historique (218 ms sur 252 846 éléments). Plus tard : `thunderlook.exe --search "adresse:…"` | J4 fait pour la recherche ; ligne de commande au J5 |
 | ThunderLook → ADI | Voir, dans le volet de lecture, que l'expéditeur est un client d'ADI : nom, factures impayées, lien vers la fiche | Lecture seule de la base d'ADI, chemin configuré dans `config.json` (`adiDatabase`), connexion SQLite en lecture seule et version de schéma contrôlée | Après J4, quand le schéma d'ADI sera connu |
 | ThunderLook → ADI | Classer un mail ou une pièce jointe (bon de commande, règlement) dans le dossier du client | Commande d'ADI à définir (ligne de commande ou protocole `adi://`). ThunderLook ne touche pas aux fichiers d'ADI | À définir avec Paul |
 

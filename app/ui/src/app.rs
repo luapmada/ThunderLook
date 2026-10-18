@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use leptos::{prelude::*, task::spawn_local};
 use thunderlook_model::{
-    FlagAction, ListQuery, MessageOp, Selection,
+    FlagAction, ListQuery, MessageOp, SearchQuery, Selection,
     settings::{Density, ReadingPane, Settings},
 };
 use wasm_bindgen::JsCast;
@@ -19,7 +19,7 @@ use crate::{
     list::{Layout, MessageList, PAGE, ensure_rows, row_height},
     reading::ReadingPane as ReadingPaneView,
     splitter::Splitter,
-    state::{Dialog, Module, Ui, use_ui},
+    state::{Dialog, Module, Tab, Ui, use_ui},
     statusbar::StatusBar,
     topbar::TopBar,
 };
@@ -200,19 +200,29 @@ pub fn App() -> impl IntoView {
         let unread_only = ui.unread_only.get();
         let (sort, descending) = ui.sort.get();
         ui.view_epoch.track();
+        let search_text = ui.search_text.get();
+        let scope = ui.search_scope.get();
         if folder.is_empty() {
             return;
         }
+        let search = (!search_text.trim().is_empty()).then(|| SearchQuery { text: search_text.clone(), scope, folder_id: folder.clone() });
         let query = ListQuery { folder_id: folder, unread_only, sort, descending };
         let t0 = now_ms();
         spawn_local(async move {
             let q = query.clone();
+            let s = search.clone();
             let current = move || {
                 ui.folder.get_untracked() == q.folder_id
                     && ui.unread_only.get_untracked() == q.unread_only
                     && ui.sort.get_untracked() == (q.sort, q.descending)
+                    && ui.search_text.get_untracked() == s.as_ref().map(|s| s.text.clone()).unwrap_or_default()
+                    && s.as_ref().is_none_or(|s| ui.search_scope.get_untracked() == s.scope)
             };
-            let view = match ipc::open_list(&query).await {
+            let opened = match &search {
+                Some(s) => ipc::search(s, query.sort, query.descending).await,
+                None => ipc::open_list(&query).await,
+            };
+            let view = match opened {
                 Ok(v) => v,
                 Err(e) => {
                     ui.error.set(Some(e));
@@ -255,6 +265,55 @@ pub fn App() -> impl IntoView {
                 spawn_local(async move { ipc::perf_mark(&label, ms).await });
             });
         });
+    });
+
+    // Changer de dossier ferme la recherche, comme la référence.
+    Effect::new(move |prev: Option<String>| {
+        let f = ui.folder.get();
+        if prev.is_some_and(|p| p != f) && !ui.search_text.get_untracked().is_empty() {
+            ui.search_text.set(String::new());
+            if let Some(s) = ui.refs.search.get_untracked() {
+                s.set_value("");
+            }
+        }
+        f
+    });
+
+    // Onglet contextuel « Rechercher » pendant une recherche.
+    Effect::new(move |_| {
+        let active = !ui.search_text.get().is_empty();
+        if active {
+            ui.tab.set(Tab::Search);
+        } else if ui.tab.get_untracked() == Tab::Search {
+            ui.tab.set(Tab::Home);
+        }
+    });
+
+    // Suivi de l'indexation (toutes les 2 s tant qu'elle tourne).
+    let poll = StoredValue::new_local(None::<IntervalHandle>);
+    let check_index = move || {
+        spawn_local(async move {
+            if let Ok(s) = ipc::index_status().await {
+                let was = ui.index.get_untracked().running;
+                ui.index.set(s);
+                if !s.running && was {
+                    // Fin de l'indexation : une recherche en cours est relancée sur l'index complet.
+                    if !ui.search_text.get_untracked().is_empty() {
+                        actions::reopen_view(ui);
+                    }
+                }
+            }
+        });
+    };
+    if let Ok(h) = set_interval_with_handle(check_index, std::time::Duration::from_secs(2)) {
+        poll.set_value(Some(h));
+    }
+    on_cleanup(move || {
+        poll.update_value(|h| {
+            if let Some(h) = h.take() {
+                h.clear();
+            }
+        })
     });
 
     // Identifiant du message sélectionné, dès que sa ligne est reçue (chargée au besoin).

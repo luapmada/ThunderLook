@@ -22,7 +22,7 @@ fn role_of(ui: Ui, id: &str) -> FolderRole {
 
 /// Dossier ordinaire (ni spécial ni favori) : peut être renommé, déplacé, supprimé.
 fn is_plain(ui: Ui, id: &str) -> bool {
-    !id.starts_with("fav-") && matches!(role_of(ui, id), FolderRole::Folder | FolderRole::Archive)
+    !id.starts_with("fav-") && !id.starts_with("s-") && matches!(role_of(ui, id), FolderRole::Folder | FolderRole::Archive)
 }
 
 fn drop_on(ui: Ui, target: &str, ev: &web_sys::DragEvent) {
@@ -256,7 +256,7 @@ pub fn FolderPane() -> impl IntoView {
                                             }
                                         }
                                         on:dragover=move |ev| {
-                                            if !section && accepts(&ev) {
+                                            if !section && !over_id.starts_with("s-") && accepts(&ev) {
                                                 ev.prevent_default();
                                                 if let Some(dt) = ev.data_transfer() {
                                                     dt.set_drop_effect(if ev.ctrl_key() { "copy" } else { "move" });

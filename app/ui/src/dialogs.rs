@@ -49,6 +49,7 @@ pub fn Dialogs() -> impl IntoView {
         let d = ui.dialog.get();
         text.set(match &d {
             Some(Dialog::Rename { name, .. }) => name.clone(),
+            Some(Dialog::SaveSearch) => ui.search_text.get_untracked(),
             _ => String::new(),
         });
         picked.set(0);
@@ -100,6 +101,15 @@ pub fn Dialogs() -> impl IntoView {
                 }
             }
             Dialog::Confirm { action, .. } => actions::confirm(ui, action),
+            Dialog::SaveSearch => actions::run_folder(
+                ui,
+                FolderOp::SaveSearch {
+                    name: value,
+                    query: ui.search_text.get_untracked(),
+                    scope: ui.search_scope.get_untracked(),
+                    folder_id: real_folder(&ui.folder.get_untracked()),
+                },
+            ),
             Dialog::PickFolder { purpose } => {
                 let list = candidates();
                 let Some((id, ..)) = list.get(picked.get_untracked()).cloned() else { return };
@@ -159,6 +169,7 @@ pub fn Dialogs() -> impl IntoView {
         Some(Dialog::PickFolder { purpose: PickPurpose::MoveFolder }) => "Déplacer le dossier",
         Some(Dialog::Confirm { .. }) => "Confirmer",
         Some(Dialog::NewCategory) => "Nouvelle catégorie",
+        Some(Dialog::SaveSearch) => "Enregistrer la recherche",
         None => "",
     };
 
@@ -178,6 +189,14 @@ pub fn Dialogs() -> impl IntoView {
                                 <input type="text" prop:value=move || text.get() on:input=move |ev| text.set(event_target_value(&ev)) />
                             </label>
                             <p class="dialog-note">{format!("Dans « {} »", folder_name(ui, &parent))}</p>
+                        }
+                        .into_any(),
+                        Some(Dialog::SaveSearch) => view! {
+                            <label class="field">
+                                <span>"Nom du dossier de recherche"</span>
+                                <input type="text" prop:value=move || text.get() on:input=move |ev| text.set(event_target_value(&ev)) />
+                            </label>
+                            <p class="dialog-note">{move || format!("Recherche : {}", ui.search_text.get())}</p>
                         }
                         .into_any(),
                         Some(Dialog::Rename { .. }) | Some(Dialog::NewCategory) => view! {

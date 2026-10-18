@@ -13,7 +13,7 @@ pub use rusqlite;
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub const DB_FILE: &str = "thunderlook.db";
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 /// Schéma v1. Les dates sont en millisecondes depuis l'époque Unix (UTC).
 /// `props` : sac de propriétés MAPI brut (format décrit dans `thunderlook-import-pst::propbag`),
@@ -149,17 +149,44 @@ CREATE TABLE IF NOT EXISTS favorite (
 );
 "#;
 
+/// v4 (J4) : recherche.
+/// - `message_fts` : index plein texte sans contenu stocké (le texte reste dans les `.eml`), insensible aux
+///   accents, avec index de préfixes ; `rowid` = `message.id`. Rempli en tâche de fond (`message.indexed`).
+/// - Index sur l'adresse de l'expéditeur, pour retrouver l'historique d'un correspondant (ADI Facturation).
+/// - `search_folder` : dossiers de recherche enregistrés (requête et portée).
+const SCHEMA_V4: &str = r#"
+ALTER TABLE message ADD COLUMN indexed INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS message_unindexed ON message(id) WHERE indexed = 0;
+CREATE INDEX IF NOT EXISTS message_from_addr ON message(from_addr COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS message_flagged ON message(folder_id, received_at) WHERE flag_status = 2;
+CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+    subject, sender, recipients, body, attachments,
+    content = '', contentless_delete = 1,
+    tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3'
+);
+CREATE TABLE IF NOT EXISTS search_folder (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    query       TEXT NOT NULL,
+    scope       TEXT NOT NULL,              -- 'all' ou 'source:<id>'
+    position    INTEGER NOT NULL
+);
+"#;
+
 /// Ouvre (ou crée) la base du dossier de données et applique les migrations.
 pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(data_dir).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
     let conn = Connection::open(data_dir.join(DB_FILE))?;
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+    // Attente d'un verrou plutôt qu'un échec immédiat : l'indexation écrit en tâche de fond.
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 10000;")?;
     let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version == 0 {
-        conn.execute_batch(&format!("BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
+        conn.execute_batch(&format!(
+            "BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} {SCHEMA_V4} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
+        ))?;
     } else if version < SCHEMA_VERSION {
         // Migrations par ajout uniquement : la base est lue par d'autres outils (ADI Facturation).
-        let steps = [SCHEMA_V2, SCHEMA_V3];
+        let steps = [SCHEMA_V2, SCHEMA_V3, SCHEMA_V4];
         let pending = steps[(version as usize - 1).min(steps.len())..].concat();
         conn.execute_batch(&format!("BEGIN; {pending} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version > SCHEMA_VERSION {
@@ -204,6 +231,11 @@ pub fn delete_source(conn: &Connection, data_dir: &Path, source_id: i64) -> rusq
         .prepare("SELECT m.eml_path FROM message m JOIN folder f ON f.id = m.folder_id WHERE f.source_id = ?1")?
         .query_map(params![source_id], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
+    // L'index plein texte n'a pas de clé étrangère : on retire d'abord les lignes des messages de la source.
+    conn.execute(
+        "DELETE FROM message_fts WHERE rowid IN (SELECT m.id FROM message m JOIN folder f ON f.id = m.folder_id WHERE f.source_id = ?1)",
+        params![source_id],
+    )?;
     conn.execute("DELETE FROM source WHERE id = ?1", params![source_id])?;
     for rel in paths {
         let _ = std::fs::remove_file(resolve(data_dir, &rel));

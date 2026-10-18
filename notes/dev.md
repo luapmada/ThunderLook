@@ -92,6 +92,20 @@ Un nouvel import du même fichier d'origine n'est accepté qu'avec `--replace`. 
 - Glisser-déposer HTML5 : il faut `dragDropEnabled: false` sur la fenêtre (`tauri.conf.json`), sinon Tauri intercepte les dépôts sous Windows. Ctrl au dépôt copie au lieu de déplacer.
 - Schéma v3 : table `favorite`. Une liste vide ramène les favoris par défaut (réception et envoyés de la première source).
 
+## Recherche (J4)
+- Index : `message_fts` (FTS5 sans contenu stocké).
+  - Il est rempli par `thunderlook_mailbox::index_pending` dans un fil du cœur, lancé à l'ouverture de la base et après chaque copie.
+  - Pour l'indexer en ligne de commande : `cargo run --release -p thunderlook-mailbox --example index -- <données>`.
+- Syntaxe : voir l'en-tête de `crates/mailbox/src/search.rs`. Mots-clés en français et en anglais (`de:`/`from:`, `objet:`, `pj:oui`, `reçu:hier`, `adresse:`…), `OU`, `-mot`, phrases entre guillemets.
+- Étendues : dossier actif, sous-dossiers, fichier de données actuel (défaut), tous.
+  - Changer de dossier ferme la recherche, comme dans la référence.
+- Dossiers de recherche :
+  - prédéfinis : « Courrier non lu », « Pour le suivi » ;
+  - enregistrés : table `search_folder`, avec la requête et l'étendue ;
+  - identifiants `s-…` dans l'arborescence.
+- Tests d'interface sans clavier : `tools/uia_search.ps1 -Text '…'`.
+  - `tools/uia_keys.ps1` s'arrête si une autre application passe au premier plan.
+
 ## Notes techniques
 - CSP stricte. Le chargeur de Trunk récupère le `.wasm` par `fetch`, d'où `connect-src 'self'` et `script-src 'wasm-unsafe-eval'`. Sans eux, la fenêtre reste vide.
 - `aria-level` n'existe pas dans les attributs typés de Leptos 0.8 (tachys). On passe par la propriété DOM `ariaLevel`, que Chromium reflète en attribut.

@@ -88,6 +88,14 @@ fn folder_role(ui: Ui, id: &str) -> FolderRole {
 }
 
 pub fn folder_context(ui: Ui, id: String) -> Vec<MenuEntry> {
+    if id.starts_with("s-") {
+        let custom = id[2..].parse::<i64>().is_ok();
+        return vec![if custom {
+            MenuEntry::action("Supprimer le dossier de recherche", move || actions::run_folder(ui, FolderOp::DeleteSearchFolder { id: id.clone() }))
+        } else {
+            MenuEntry::pending("Dossier de recherche prédéfini")
+        }];
+    }
     let real = real_folder(&id);
     let special = folder_role(ui, &real) != FolderRole::Folder && folder_role(ui, &real) != FolderRole::Archive;
     let name = folder_name(ui, &real);

@@ -5,7 +5,7 @@
 use icondata_core::Icon;
 use leptos::prelude::*;
 use thunderlook_model::{
-    FolderOp, MessageOp,
+    FolderOp, MessageOp, SearchScope,
     settings::{BarMode, Density, ReadingPane},
 };
 
@@ -42,6 +42,12 @@ pub enum Action {
     MarkAllRead,
     EmptyFolder,
     Favorite,
+    // J4 : recherche.
+    Scope(SearchScope),
+    /// Ajoute un mot-clé à la recherche ; `true` : la valeur reste à taper.
+    Refine(&'static str, bool),
+    SaveSearch,
+    CloseSearch,
 }
 
 impl Action {
@@ -87,6 +93,25 @@ fn perform(ui: Ui, action: Action) {
         Action::Favorite => {
             let op = if menus::is_favorite(ui, &folder) { FolderOp::RemoveFavorite { id: folder } } else { FolderOp::AddFavorite { id: folder } };
             actions::run_folder(ui, op);
+        }
+        Action::Scope(scope) => ui.search_scope.set(scope),
+        Action::Refine(keyword, needs_value) => {
+            let Some(input) = ui.refs.search.get_untracked() else { return };
+            let current = input.value();
+            let text = if current.trim().is_empty() { keyword.to_string() } else { format!("{} {keyword}", current.trim_end()) };
+            input.set_value(&text);
+            if needs_value {
+                let _ = input.focus();
+            } else {
+                ui.search_text.set(text);
+            }
+        }
+        Action::SaveSearch => ui.dialog.set(Some(Dialog::SaveSearch)),
+        Action::CloseSearch => {
+            if let Some(s) = ui.refs.search.get_untracked() {
+                s.set_value("");
+            }
+            ui.search_text.set(String::new());
         }
         _ => {}
     }
@@ -292,6 +317,38 @@ const VIEW: &[Group] = &[
     Group { label: "Fenêtre", cmds: &[cmd("Fenêtre des rappels", CLOCK, None, false, false, true)] },
 ];
 
+const SEARCH_TAB: &[Group] = &[
+    Group {
+        label: "Étendue",
+        cmds: &[
+            wired("Dossier actif", FOLDER_INPUT, None, true, true, Action::Scope(SearchScope::Folder)),
+            wired("Sous-dossiers", FOLDER_SEARCH, None, true, false, Action::Scope(SearchScope::Subfolders)),
+            wired("Fichier de données actuel", ARCHIVE, None, true, false, Action::Scope(SearchScope::Source)),
+            wired("Tous les fichiers de données", SEARCH, None, true, false, Action::Scope(SearchScope::All)),
+        ],
+    },
+    Group {
+        label: "Affiner",
+        cmds: &[
+            wired("De", USERS, None, true, false, Action::Refine("de:", true)),
+            wired("Objet", PENCIL, None, true, false, Action::Refine("objet:", true)),
+            wired("Contient des pièces jointes", PAPERCLIP, None, true, false, Action::Refine("pj:oui", false)),
+            wired("Catégorisé", TAGS, None, false, false, Action::Refine("catégorie:", true)),
+            wired("Cette semaine", CALENDAR, None, false, false, Action::Refine("reçu:\"cette semaine\"", false)),
+            wired("Non lu", MAIL, None, true, false, Action::Refine("lu:non", false)),
+            wired("Avec indicateur", FLAG, None, true, false, Action::Refine("suivi:oui", false)),
+            wired("Important", CIRCLE_ALERT, None, false, false, Action::Refine("importance:haute", false)),
+        ],
+    },
+    Group {
+        label: "Options",
+        cmds: &[
+            wired("Enregistrer la recherche", FOLDER_PLUS, None, true, false, Action::SaveSearch),
+            wired("Fermer la recherche", SEARCH_X, Some("Échap"), true, true, Action::CloseSearch),
+        ],
+    },
+];
+
 const HELP: &[Group] = &[Group {
     label: "Aide",
     cmds: &[cmd("Aide", HELP_ICON, Some("F1"), false, true, true), cmd("Raccourcis clavier", INFO, None, false, true, true)],
@@ -359,6 +416,7 @@ pub fn groups(module: Module, tab: Tab) -> &'static [Group] {
         (Tab::Folder, _) => FOLDER,
         (Tab::View, _) => VIEW,
         (Tab::Help, _) => HELP,
+        (Tab::Search, _) => SEARCH_TAB,
     }
 }
 
@@ -441,6 +499,19 @@ fn command_view(c: &'static Cmd, full: bool) -> AnyView {
             </button>
         }
         .into_any(),
+        Action::Scope(scope) => view! {
+            <button
+                class=class
+                aria-label=c.label
+                aria-pressed=move || (ui.search_scope.get() == scope).to_string()
+                title=tooltip(c)
+                on:click=move |_| perform(ui, Action::Scope(scope))
+            >
+                <Svg icon=c.icon />
+                <span>{c.label}</span>
+            </button>
+        }
+        .into_any(),
         a if a.is_menu() => {
             let entries = Signal::derive(move || menu_entries(ui, a));
             view! { <MenuButton label=c.label.to_string() icon=c.icon entries=entries class=class /> }.into_any()
@@ -474,8 +545,12 @@ pub fn CommandBar() -> impl IntoView {
     };
 
     let on_tabs_key = move |ev: leptos::ev::KeyboardEvent| {
-        let idx = Tab::ALL.iter().position(|t| *t == ui.tab.get_untracked()).unwrap_or(0) as i32;
-        let n = Tab::ALL.len() as i32;
+        let mut tabs = Tab::ALL.to_vec();
+        if !ui.search_text.get_untracked().is_empty() {
+            tabs.push(Tab::Search);
+        }
+        let idx = tabs.iter().position(|t| *t == ui.tab.get_untracked()).unwrap_or(0) as i32;
+        let n = tabs.len() as i32;
         let next = match ev.key().as_str() {
             "ArrowRight" => (idx + 1).rem_euclid(n),
             "ArrowLeft" => (idx - 1).rem_euclid(n),
@@ -484,7 +559,7 @@ pub fn CommandBar() -> impl IntoView {
             _ => return,
         };
         ev.prevent_default();
-        let tab = Tab::ALL[next as usize];
+        let tab = tabs[next as usize];
         select_tab(tab);
         if let Some(el) = document().get_element_by_id(tab.dom_id()) {
             use wasm_bindgen::JsCast;
@@ -527,8 +602,11 @@ pub fn CommandBar() -> impl IntoView {
                     "Fichier"
                 </button>
                 <div role="tablist" aria-label="Barre de commandes" class="tablist" node_ref=ui.refs.tabs on:keydown=on_tabs_key>
-                    {Tab::ALL
+                    {move || {
+                        let searching = !ui.search_text.get().is_empty();
+                        Tab::ALL
                         .into_iter()
+                        .chain(searching.then_some(Tab::Search))
                         .map(|tab| {
                             let selected = move || ui.tab.get() == tab;
                             view! {
@@ -545,7 +623,8 @@ pub fn CommandBar() -> impl IntoView {
                                 </button>
                             }
                         })
-                        .collect_view()}
+                        .collect_view()
+                    }}
                 </div>
                 <div class="tabs-spacer"></div>
                 <MenuButton

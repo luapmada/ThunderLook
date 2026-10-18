@@ -3,7 +3,14 @@
 //! Dossier de données, par ordre de priorité : variable d'environnement `THUNDERLOOK_DATA`,
 //! `dataDir` dans `config.json` (dossier de configuration de l'application), sinon `<données locales>\data`.
 
-use std::{fs, path::PathBuf, sync::Mutex};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State, WebviewWindowBuilder, webview::NewWindowResponse};
@@ -11,12 +18,45 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use thunderlook_mailbox::Mailbox;
 use thunderlook_model::{
-    CategoryInfo, FolderOp, FolderTree, ListQuery, ListView, MessageOp, MessageSummary, MessageView, OpResult, Selection,
-    settings::Settings,
+    CategoryInfo, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp, MessageSummary, MessageView, OpResult,
+    SearchQuery, Selection, SortField, settings::Settings,
 };
 
 /// Boîte aux lettres ouverte à la première demande ; `Err` mémorise l'échec d'ouverture.
 struct Store(Mutex<Option<Result<Mailbox, String>>>);
+
+/// Indexation plein texte en tâche de fond (un seul fil à la fois).
+#[derive(Default)]
+struct Indexer {
+    status: Arc<Mutex<IndexStatus>>,
+    running: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Indexer {
+    /// Lance l'indexation des messages en attente, si elle ne tourne pas déjà.
+    fn ensure(&self, data_dir: &Path) {
+        if self.running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let (status, running, stop) = (self.status.clone(), self.running.clone(), self.stop.clone());
+        let dir = data_dir.to_path_buf();
+        std::thread::spawn(move || {
+            let mut update = |done, total| {
+                if let Ok(mut s) = status.lock() {
+                    *s = IndexStatus { done, total, running: true };
+                }
+            };
+            if let Err(e) = thunderlook_mailbox::index_pending(&dir, &stop, &mut update) {
+                log::warn!("indexation : {e}");
+            }
+            if let Ok(mut s) = status.lock() {
+                s.running = false;
+            }
+            running.store(false, Ordering::SeqCst);
+        });
+    }
+}
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -44,10 +84,16 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     }
 }
 
-/// Exécute `f` sur la boîte aux lettres, en l'ouvrant au besoin.
+/// Exécute `f` sur la boîte aux lettres, en l'ouvrant au besoin (l'indexation démarre alors).
 fn with_mailbox<T>(app: &AppHandle, store: &Store, f: impl FnOnce(&mut Mailbox) -> Result<T, String>) -> Result<T, String> {
     let mut guard = store.0.lock().map_err(|_| "verrou de la base empoisonné".to_string())?;
-    let mailbox = guard.get_or_insert_with(|| data_dir(app).and_then(|d| Mailbox::open(&d)));
+    let mailbox = guard.get_or_insert_with(|| {
+        let mb = data_dir(app).and_then(|d| Mailbox::open(&d));
+        if let Ok(mb) = &mb {
+            app.state::<Indexer>().ensure(mb.data_dir());
+        }
+        mb
+    });
     match mailbox {
         Ok(mb) => f(mb),
         Err(e) => Err(e.clone()),
@@ -78,7 +124,25 @@ fn message_view(app: AppHandle, store: State<Store>, id: String, allow_remote: b
 
 #[tauri::command(async)]
 fn apply_op(app: AppHandle, store: State<Store>, selection: Selection, op: MessageOp) -> Result<OpResult, String> {
-    with_mailbox(&app, &store, |mb| mb.apply(&selection, &op))
+    let copy = matches!(op, MessageOp::Copy { .. });
+    with_mailbox(&app, &store, |mb| {
+        let r = mb.apply(&selection, &op)?;
+        // Les copies sont de nouveaux messages, à indexer.
+        if copy {
+            app.state::<Indexer>().ensure(mb.data_dir());
+        }
+        Ok(r)
+    })
+}
+
+#[tauri::command(async)]
+fn search(app: AppHandle, store: State<Store>, query: SearchQuery, sort: SortField, descending: bool) -> Result<ListView, String> {
+    with_mailbox(&app, &store, |mb| mb.search(&query, sort, descending))
+}
+
+#[tauri::command]
+fn index_status(indexer: State<Indexer>) -> IndexStatus {
+    indexer.status.lock().map(|s| *s).unwrap_or_default()
 }
 
 #[tauri::command(async)]
@@ -180,6 +244,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Store(Mutex::new(None)))
+        .manage(Indexer::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -208,6 +273,8 @@ pub fn run() {
             list_rows,
             message_view,
             apply_op,
+            search,
+            index_status,
             folder_op,
             undo,
             categories,

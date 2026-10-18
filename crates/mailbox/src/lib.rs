@@ -1,10 +1,11 @@
-//! Lecture du stockage pour l'interface (J2) : arborescence avec compteurs, vues triées et groupées
-//! d'un dossier (lignes servies par tranches), message complet pour le volet de lecture.
-//!
-//! Rien n'est écrit ici, à part la migration de schéma appliquée à l'ouverture.
+//! Accès au stockage pour l'interface : arborescence avec compteurs, vues triées et groupées d'un dossier
+//! ou d'une recherche (lignes servies par tranches), message complet pour le volet de lecture (J2),
+//! opérations d'organisation (J3), recherche et indexation plein texte (J4).
 
+mod index;
 mod message;
 mod ops;
+mod search;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -14,10 +15,11 @@ use std::{
 use chrono::{DateTime, Local, TimeZone};
 use thunderlook_model::{
     CategoryChip, FlagState, Folder, FolderRole, FolderSection, FolderTree, Importance, ListGroup, ListQuery,
-    ListView, MessageSummary, SortField, format,
+    ListView, MessageSummary, SearchQuery, SearchScope, SortField, format,
 };
-use thunderlook_store::rusqlite::{Connection, params_from_iter};
+use thunderlook_store::rusqlite::{Connection, params_from_iter, types::Value};
 
+pub use index::index_pending;
 pub use message::{AttachmentData, BLOCKED_EXTENSIONS, is_blocked};
 
 pub type Result<T> = std::result::Result<T, String>;
@@ -36,10 +38,22 @@ pub struct Mailbox {
     conn: Connection,
     /// (source, nom) → couleur CSS.
     categories: HashMap<(i64, String), Option<String>>,
-    views: BTreeMap<u64, Vec<i64>>,
+    views: BTreeMap<u64, View>,
     next_token: u64,
     undo: Vec<ops::UndoEntry>,
 }
+
+/// Vue ouverte : ordre des éléments, et recherche ou non (les lignes indiquent alors leur dossier).
+struct View {
+    ids: Vec<i64>,
+    search: bool,
+}
+
+/// (id, date, clé de tri, libellé de groupe) d'un élément à trier.
+type Item = (i64, i64, String, String);
+
+/// Dossiers de recherche prédéfinis : identifiant, nom, requête.
+const BUILTIN_SEARCH_FOLDERS: [(&str, &str, &str); 2] = [("s-unread", "Courrier non lu", "lu:non"), ("s-flagged", "Pour le suivi", "suivi:oui")];
 
 /// Couleurs des 25 catégories prédéfinies ([MS-OXOCFG] : `preset0` à `preset24`). Teintes propres
 /// au projet, choisies pour rester lisibles en thème clair et sombre.
@@ -277,15 +291,23 @@ impl Mailbox {
         if !favorites.is_empty() {
             sections.insert(0, FolderSection { id: "favorites".into(), name: "Favoris".into(), folders: favorites });
         }
+        if !sources.is_empty() {
+            sections.push(FolderSection { id: "searches".into(), name: "Dossiers de recherche".into(), folders: self.search_folders()? });
+        }
         Ok(FolderTree { sections, data_dir: self.data_dir.display().to_string(), error: None })
     }
 
-    /// Ouvre une vue triée et groupée d'un dossier ; les lignes se lisent ensuite avec [`Self::rows`].
+    /// Ouvre une vue triée et groupée d'un dossier (ou d'un dossier de recherche, `s-…`) ;
+    /// les lignes se lisent ensuite avec [`Self::rows`].
     pub fn open_list(&mut self, q: &ListQuery) -> Result<ListView> {
         self.open_list_at(q, Local::now())
     }
 
     pub fn open_list_at(&mut self, q: &ListQuery, now: DateTime<Local>) -> Result<ListView> {
+        if q.folder_id.starts_with("s-") {
+            let (text, scope_sql, scope_params) = self.search_folder_def(&q.folder_id)?;
+            return self.search_view(&text, &scope_sql, scope_params, q.unread_only, q.sort, q.descending, now);
+        }
         let folder = folder_db_id(&q.folder_id)?;
         let (folder_total, folder_unread): (u32, u32) = self
             .conn
@@ -295,82 +317,90 @@ impl Mailbox {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .map_err(err)?;
-        let filter = if q.unread_only { " AND is_read = 0" } else { "" };
+        let filter = if q.unread_only { " AND m.is_read = 0" } else { "" };
+        // Tri par date : l'index couvrant suffit, sans lire les lignes.
+        let from = if q.sort == SortField::Date { "message m INDEXED BY message_folder_read" } else { "message m" };
+        let items = self.collect(&format!("{from} WHERE m.folder_id = ?{filter}"), &[Value::Integer(folder)], q.sort)?;
+        Ok(self.finish_view(items, q.sort, q.descending, now, (folder_total, folder_unread), false))
+    }
 
-        // (id, date, clé de tri secondaire, libellé de groupe)
-        let mut items: Vec<(i64, i64, String, String)> = Vec::new();
-        match q.sort {
-            SortField::Date => {
-                let sql = format!(
-                    "SELECT id, IFNULL(received_at, 0) FROM message INDEXED BY message_folder_read WHERE folder_id = ?1{filter}"
-                );
-                let mut stmt = self.conn.prepare_cached(&sql).map_err(err)?;
-                let rows = stmt.query_map([folder], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))).map_err(err)?;
-                for row in rows {
-                    let (id, date) = row.map_err(err)?;
-                    items.push((id, date, String::new(), String::new()));
-                }
+    /// Éléments à trier, avec les colonnes nécessaires au tri demandé.
+    fn collect(&self, from_where: &str, params: &[Value], sort: SortField) -> Result<Vec<Item>> {
+        let mut items: Vec<Item> = Vec::new();
+        if sort == SortField::Date {
+            let mut stmt = self.conn.prepare_cached(&format!("SELECT m.id, IFNULL(m.received_at, 0) FROM {from_where}")).map_err(err)?;
+            let rows = stmt.query_map(params_from_iter(params), |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))).map_err(err)?;
+            for row in rows {
+                let (id, date) = row.map_err(err)?;
+                items.push((id, date, String::new(), String::new()));
             }
-            SortField::From | SortField::Subject | SortField::Size => {
-                let sql = format!(
-                    "SELECT id, IFNULL(received_at, 0), from_name, from_addr, subject, size FROM message WHERE folder_id = ?1{filter}"
-                );
-                let mut stmt = self.conn.prepare_cached(&sql).map_err(err)?;
-                let rows = stmt
-                    .query_map([folder], |r| {
-                        Ok((
-                            r.get::<_, i64>(0)?,
-                            r.get::<_, i64>(1)?,
-                            r.get::<_, String>(2)?,
-                            r.get::<_, String>(3)?,
-                            r.get::<_, String>(4)?,
-                            r.get::<_, i64>(5)?,
-                        ))
-                    })
-                    .map_err(err)?;
-                for row in rows {
-                    let (id, date, from_name, from_addr, subject, size) = row.map_err(err)?;
-                    let (key, label) = match q.sort {
-                        SortField::From => {
-                            let label = if from_name.trim().is_empty() { from_addr } else { from_name };
-                            let label = if label.trim().is_empty() { "(expéditeur inconnu)".to_string() } else { label };
-                            (fold(&label), label)
-                        }
-                        SortField::Subject => {
-                            let label = normalized_subject(&subject).to_string();
-                            let label = if label.is_empty() { "(aucun objet)".to_string() } else { label };
-                            (fold(&label), label)
-                        }
-                        _ => {
-                            // Clé numérique de largeur fixe : l'ordre des chaînes suit celui des tailles.
-                            let size = size.max(0) as u64;
-                            (format!("{size:020}"), format::size_group(size).to_string())
-                        }
-                    };
-                    items.push((id, date, key, label));
-                }
-            }
+            return Ok(items);
         }
+        let mut stmt = self
+            .conn
+            .prepare_cached(&format!("SELECT m.id, IFNULL(m.received_at, 0), m.from_name, m.from_addr, m.subject, m.size FROM {from_where}"))
+            .map_err(err)?;
+        let rows = stmt
+            .query_map(params_from_iter(params), |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, i64>(5)?,
+                ))
+            })
+            .map_err(err)?;
+        for row in rows {
+            let (id, date, from_name, from_addr, subject, size) = row.map_err(err)?;
+            let (key, label) = match sort {
+                SortField::From => {
+                    let label = if from_name.trim().is_empty() { from_addr } else { from_name };
+                    let label = if label.trim().is_empty() { "(expéditeur inconnu)".to_string() } else { label };
+                    (fold(&label), label)
+                }
+                SortField::Subject => {
+                    let label = normalized_subject(&subject).to_string();
+                    let label = if label.is_empty() { "(aucun objet)".to_string() } else { label };
+                    (fold(&label), label)
+                }
+                _ => {
+                    // Clé numérique de largeur fixe : l'ordre des chaînes suit celui des tailles.
+                    let size = size.max(0) as u64;
+                    (format!("{size:020}"), format::size_group(size).to_string())
+                }
+            };
+            items.push((id, date, key, label));
+        }
+        Ok(items)
+    }
 
+    /// Tri, groupes et enregistrement de la vue.
+    fn finish_view(
+        &mut self,
+        mut items: Vec<Item>,
+        sort: SortField,
+        descending: bool,
+        now: DateTime<Local>,
+        (folder_total, folder_unread): (u32, u32),
+        search: bool,
+    ) -> ListView {
         // Tri principal dans le sens demandé ; à l'intérieur d'un groupe, toujours du plus récent au plus ancien.
-        match q.sort {
+        match sort {
             SortField::Date => items.sort_by(|a, b| {
                 let o = a.1.cmp(&b.1).then(a.0.cmp(&b.0));
-                if q.descending { o.reverse() } else { o }
-            }),
-            SortField::Size => items.sort_by(|a, b| {
-                let o = a.2.cmp(&b.2);
-                (if q.descending { o.reverse() } else { o }).then(b.1.cmp(&a.1)).then(b.0.cmp(&a.0))
+                if descending { o.reverse() } else { o }
             }),
             _ => items.sort_by(|a, b| {
                 let o = a.2.cmp(&b.2);
-                (if q.descending { o.reverse() } else { o }).then(b.1.cmp(&a.1)).then(b.0.cmp(&a.0))
+                (if descending { o.reverse() } else { o }).then(b.1.cmp(&a.1)).then(b.0.cmp(&a.0))
             }),
         }
 
         let mut groups: Vec<ListGroup> = Vec::new();
         for (i, (_, date, _, label)) in items.iter().enumerate() {
-            let label = match q.sort {
+            let label = match sort {
                 SortField::Date => match local(Some(*date).filter(|d| *d > 0)) {
                     Some(d) => format::date_group(&d, &now),
                     None => "Sans date".to_string(),
@@ -385,12 +415,132 @@ impl Mailbox {
 
         let token = self.next_token;
         self.next_token += 1;
-        self.views.insert(token, items.into_iter().map(|(id, ..)| id).collect());
+        let count = items.len() as u32;
+        self.views.insert(token, View { ids: items.into_iter().map(|(id, ..)| id).collect(), search });
         while self.views.len() > VIEW_CACHE {
             self.views.pop_first();
         }
-        let count = self.views[&token].len() as u32;
-        Ok(ListView { token, count, folder_total, folder_unread, groups })
+        ListView { token, count, folder_total, folder_unread, groups }
+    }
+
+    /// Condition SQL (sur `m`) d'une étendue de recherche, à partir du dossier courant.
+    fn scope_sql(&self, scope: SearchScope, folder_id: &str) -> Result<(String, Vec<Value>)> {
+        // Dossiers de courrier visibles : ni éléments masqués (vues, rappels…), ni calendrier, contacts, tâches.
+        const VISIBLE: &str = "m.folder_id IN (SELECT id FROM folder WHERE hidden = 0 AND (container_class IS NULL
+            OR container_class = '' OR container_class LIKE 'IPF.Note%' OR container_class LIKE 'IPF.Imap%'))";
+        let folder = if folder_id.starts_with("s-") || folder_id.is_empty() { None } else { Some(folder_db_id(folder_id)?) };
+        Ok(match (scope, folder) {
+            (SearchScope::Folder, Some(f)) => ("m.folder_id = ?".into(), vec![Value::Integer(f)]),
+            (SearchScope::Subfolders, Some(f)) => (
+                "m.folder_id IN (WITH RECURSIVE t(id) AS (SELECT ? UNION ALL SELECT x.id FROM folder x JOIN t ON x.parent_id = t.id) SELECT id FROM t)".into(),
+                vec![Value::Integer(f)],
+            ),
+            (SearchScope::Source, Some(f)) => (
+                format!("{VISIBLE} AND m.folder_id IN (SELECT id FROM folder WHERE source_id = (SELECT source_id FROM folder WHERE id = ?))"),
+                vec![Value::Integer(f)],
+            ),
+            _ => (VISIBLE.into(), Vec::new()),
+        })
+    }
+
+    /// Requête et étendue d'un dossier de recherche. Les prédéfinis excluent « Éléments supprimés »
+    /// et « Courrier indésirable », comme la référence.
+    fn search_folder_def(&self, id: &str) -> Result<(String, String, Vec<Value>)> {
+        const ELIGIBLE: &str = "m.folder_id IN (WITH RECURSIVE excl(id) AS (
+                SELECT id FROM folder WHERE role IN ('deleted', 'junk')
+                UNION ALL SELECT x.id FROM folder x JOIN excl ON x.parent_id = excl.id)
+            SELECT id FROM folder WHERE hidden = 0 AND id NOT IN (SELECT id FROM excl) AND (container_class IS NULL
+                OR container_class = '' OR container_class LIKE 'IPF.Note%' OR container_class LIKE 'IPF.Imap%'))";
+        if let Some((_, _, q)) = BUILTIN_SEARCH_FOLDERS.iter().find(|(i, ..)| *i == id) {
+            return Ok((q.to_string(), ELIGIBLE.into(), Vec::new()));
+        }
+        let n: i64 = id.strip_prefix("s-").and_then(|n| n.parse().ok()).ok_or_else(|| format!("dossier de recherche inconnu : {id}"))?;
+        let (query, scope): (String, String) = self
+            .conn
+            .query_row("SELECT query, scope FROM search_folder WHERE id = ?1", [n], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|_| format!("dossier de recherche introuvable : {id}"))?;
+        match scope.strip_prefix("source:").and_then(|s| s.parse::<i64>().ok()) {
+            Some(src) => Ok((query, format!("{ELIGIBLE} AND m.folder_id IN (SELECT id FROM folder WHERE source_id = ?)"), vec![Value::Integer(src)])),
+            None => Ok((query, ELIGIBLE.into(), Vec::new())),
+        }
+    }
+
+    /// Résultats d'une recherche, triés et groupés comme un dossier ; les lignes indiquent leur dossier.
+    pub fn search(&mut self, q: &SearchQuery, sort: SortField, descending: bool) -> Result<ListView> {
+        let (scope_sql, scope_params) = self.scope_sql(q.scope, &q.folder_id)?;
+        self.search_view(&q.text, &scope_sql, scope_params, false, sort, descending, Local::now())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn search_view(
+        &mut self,
+        text: &str,
+        scope_sql: &str,
+        scope_params: Vec<Value>,
+        unread_only: bool,
+        sort: SortField,
+        descending: bool,
+        now: DateTime<Local>,
+    ) -> Result<ListView> {
+        let parsed = search::parse(text, now.date_naive());
+        if parsed.fts.is_empty() && parsed.preds.is_empty() {
+            return Ok(self.finish_view(Vec::new(), sort, descending, now, (0, 0), true));
+        }
+        let mut sql = format!("message m WHERE {scope_sql}");
+        let mut params = scope_params;
+        if !parsed.fts.is_empty() {
+            sql.push_str(" AND m.id IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)");
+            params.push(Value::Text(parsed.fts.clone()));
+        }
+        let (pred_sql, pred_params) = search::predicates_sql(&parsed.preds);
+        sql.push_str(&pred_sql);
+        params.extend(pred_params);
+        if unread_only {
+            sql.push_str(" AND m.is_read = 0");
+        }
+        let items = self.collect(&sql, &params, sort).map_err(|e| {
+            if e.contains("fts5") { format!("Recherche invalide : {text}") } else { e }
+        })?;
+        let total = items.len() as u32;
+        let unread = if total == 0 {
+            0
+        } else {
+            let ids: Vec<i64> = items.iter().map(|i| i.0).collect();
+            let mut n = 0u32;
+            for chunk in ids.chunks(900) {
+                let marks = vec!["?"; chunk.len()].join(",");
+                let c: u32 = self
+                    .conn
+                    .query_row(&format!("SELECT COUNT(*) FROM message WHERE is_read = 0 AND id IN ({marks})"), params_from_iter(chunk), |r| r.get(0))
+                    .map_err(err)?;
+                n += c;
+            }
+            n
+        };
+        Ok(self.finish_view(items, sort, descending, now, (total, unread), true))
+    }
+
+    /// Dossiers de recherche du volet : prédéfinis (avec compteurs), puis enregistrés.
+    fn search_folders(&self) -> Result<Vec<Folder>> {
+        let mut out = Vec::new();
+        for (id, name, _) in BUILTIN_SEARCH_FOLDERS {
+            let (scope, _) = (self.search_folder_def(id)?.1, ());
+            let cond = if id == "s-unread" { "m.is_read = 0" } else { "m.flag_status = 2" };
+            let hint = if id == "s-unread" { "INDEXED BY message_folder_read" } else { "INDEXED BY message_flagged" };
+            let total: u32 = self
+                .conn
+                .query_row(&format!("SELECT COUNT(*) FROM message m {hint} WHERE {cond} AND {scope}"), [], |r| r.get(0))
+                .map_err(err)?;
+            let unread = if id == "s-unread" { total } else { 0 };
+            out.push(Folder { id: id.into(), name: name.into(), role: FolderRole::Virtual, unread, total, children: vec![] });
+        }
+        let mut stmt = self.conn.prepare("SELECT id, name FROM search_folder ORDER BY position, id").map_err(err)?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).map_err(err)?;
+        for row in rows {
+            let (id, name) = row.map_err(err)?;
+            out.push(Folder { id: format!("s-{id}"), name, role: FolderRole::Virtual, unread: 0, total: 0, children: vec![] });
+        }
+        Ok(out)
     }
 
     /// Lignes `start..start+count` d'une vue ouverte.
@@ -399,7 +549,8 @@ impl Mailbox {
     }
 
     pub fn rows_at(&self, token: u64, start: u32, count: u32, now: DateTime<Local>) -> Result<Vec<MessageSummary>> {
-        let ids = self.views.get(&token).ok_or("vue expirée : rouvrir le dossier")?;
+        let view = self.views.get(&token).ok_or("vue expirée : rouvrir le dossier")?;
+        let ids = &view.ids;
         let start = (start as usize).min(ids.len());
         let end = (start + count.min(MAX_ROWS) as usize).min(ids.len());
         let slice = &ids[start..end];
@@ -420,11 +571,12 @@ impl Mailbox {
         let sql = format!(
             "SELECT m.id, f.source_id, m.from_name, m.from_addr, m.subject, m.preview, m.received_at, m.size, m.is_read,
                     m.flag_status, m.importance,
-                    EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0)
+                    EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0), f.name
              FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id IN ({marks})"
         );
         let mut stmt = self.conn.prepare(&sql).map_err(err)?;
         let mut by_id: HashMap<i64, MessageSummary> = HashMap::with_capacity(slice.len());
+        let search = view.search;
         let rows = stmt
             .query_map(params_from_iter(slice), |r| {
                 let id: i64 = r.get(0)?;
@@ -449,6 +601,7 @@ impl Mailbox {
                         importance: importance(r.get(10)?),
                         has_attachments: r.get::<_, i64>(11)? != 0,
                         categories: Vec::new(),
+                        folder: if search { Some(r.get(12)?) } else { None },
                     },
                 ))
             })
@@ -482,7 +635,7 @@ impl Mailbox {
 
     /// Identifiants des lignes d'une vue (pour la navigation sans charger les lignes).
     pub fn view_ids(&self, token: u64) -> Option<&[i64]> {
-        self.views.get(&token).map(Vec::as_slice)
+        self.views.get(&token).map(|v| v.ids.as_slice())
     }
 
     pub(crate) fn conn(&self) -> &Connection {

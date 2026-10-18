@@ -189,6 +189,9 @@ pub struct MessageSummary {
     pub importance: Importance,
     pub has_attachments: bool,
     pub categories: Vec<CategoryChip>,
+    /// Dossier de l'élément, dans les résultats de recherche.
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -233,6 +236,49 @@ pub struct MessageView {
     pub remote_blocked: bool,
     /// Élément autre qu'un courrier (contact, rendez-vous…), en attendant les modules dédiés.
     pub item_kind: Option<String>,
+}
+
+/// Étendue d'une recherche (onglet Rechercher).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchScope {
+    Folder,
+    Subfolders,
+    /// Fichier de données du dossier courant (« Boîte aux lettres actuelle »).
+    #[default]
+    Source,
+    All,
+}
+
+impl SearchScope {
+    pub const ALL: [SearchScope; 4] = [SearchScope::Folder, SearchScope::Subfolders, SearchScope::Source, SearchScope::All];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Folder => "Dossier actif",
+            Self::Subfolders => "Sous-dossiers",
+            Self::Source => "Fichier de données actuel",
+            Self::All => "Tous les fichiers de données",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchQuery {
+    pub text: String,
+    pub scope: SearchScope,
+    /// Dossier courant, point de départ de l'étendue.
+    pub folder_id: String,
+}
+
+/// Avancement de l'indexation plein texte (tâche de fond).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexStatus {
+    pub done: u64,
+    pub total: u64,
+    pub running: bool,
 }
 
 /// Éléments visés par une opération : plages de positions d'une vue ouverte (`[début, fin[`)
@@ -318,6 +364,9 @@ pub enum FolderOp {
     Empty { id: String },
     AddFavorite { id: String },
     RemoveFavorite { id: String },
+    /// Enregistre une recherche comme dossier de recherche.
+    SaveSearch { name: String, query: String, scope: SearchScope, folder_id: String },
+    DeleteSearchFolder { id: String },
 }
 
 /// Résultat d'une opération : texte pour la barre d'état, et libellé de ce que Ctrl+Z annulera.

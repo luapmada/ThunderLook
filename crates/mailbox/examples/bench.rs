@@ -5,7 +5,7 @@
 use std::{collections::BTreeMap, env, path::PathBuf, time::Instant};
 
 use thunderlook_mailbox::Mailbox;
-use thunderlook_model::{BodyView, Folder, ListQuery, SortField};
+use thunderlook_model::{BodyView, Folder, ListQuery, SearchQuery, SearchScope, SortField};
 
 fn all_folders(f: &[Folder], out: &mut Vec<Folder>) {
     for x in f {
@@ -28,7 +28,7 @@ fn main() {
     let mut folders = Vec::new();
     for s in &tree.sections {
         println!("  section {} : {} dossiers de premier niveau", s.name, s.folders.len());
-        if s.id != "favorites" {
+        if s.id != "favorites" && s.id != "searches" {
             all_folders(&s.folders, &mut folders);
         }
     }
@@ -56,6 +56,42 @@ fn main() {
                 view.groups.first().map(|g| g.label.as_str()).unwrap_or("-"),
             );
         }
+    }
+
+    // Recherche (J4) : étendue « tous les fichiers de données », tri par date.
+    let tree = mb.folder_tree().expect("arborescence");
+    for s in tree.sections.iter().filter(|s| s.id == "searches") {
+        for f in &s.folders {
+            let t = Instant::now();
+            let v = mb
+                .open_list(&ListQuery { folder_id: f.id.clone(), unread_only: false, sort: SortField::Date, descending: true })
+                .expect("dossier de recherche");
+            println!("  dossier de recherche « {} » : {} éléments en {:?} (compteur du volet : {})", f.name, v.count, t.elapsed(), f.total);
+        }
+    }
+    for text in [
+        "facture",
+        "fact",
+        "\"bon de commande\"",
+        "de:paul",
+        "facture pj:oui",
+        "objet:devis reçu:2015",
+        "lu:non",
+        "suivi:oui",
+        "adresse:paul@adam-declic.fr",
+        "facture OU devis -relance",
+    ] {
+        let q = SearchQuery { text: text.into(), scope: SearchScope::All, folder_id: big.id.clone() };
+        let t = Instant::now();
+        let v = mb.search(&q, SortField::Date, true).expect("recherche");
+        let open = t.elapsed();
+        let rows = mb.rows(v.token, 0, 60).expect("lignes");
+        println!(
+            "  recherche {text:?} : {} résultats en {open:?} (+60 lignes {:?}) — 1er : {}",
+            v.count,
+            t.elapsed() - open,
+            rows.first().map(|r| format!("{} [{}]", r.subject, r.folder.clone().unwrap_or_default())).unwrap_or_default()
+        );
     }
 
     // Balayage : toutes les vues de tous les dossiers, et un message sur `step` jusqu'au volet de lecture.

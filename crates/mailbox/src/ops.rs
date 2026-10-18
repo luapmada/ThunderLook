@@ -7,7 +7,7 @@
 use std::{collections::HashMap, fs};
 
 use chrono::{Datelike, Duration, Local, NaiveDate, TimeZone};
-use thunderlook_model::{CategoryInfo, FlagAction, FolderOp, MessageOp, OpResult, Selection, format};
+use thunderlook_model::{CategoryInfo, FlagAction, FolderOp, MessageOp, OpResult, SearchScope, Selection, format};
 use thunderlook_store::rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_iter};
 
 use crate::{Mailbox, Result, category_color, err, fold, folder_db_id, message_db_id};
@@ -187,6 +187,7 @@ fn purge(tx: &Transaction, ids: &[i64]) -> Result<Vec<String>> {
         for p in rows {
             paths.push(p.map_err(err)?);
         }
+        tx.execute(&format!("DELETE FROM message_fts WHERE rowid IN ({marks})"), params_from_iter(chunk)).map_err(err)?;
         tx.execute(&format!("DELETE FROM message WHERE id IN ({marks})"), params_from_iter(chunk)).map_err(err)?;
     }
     Ok(paths)
@@ -757,6 +758,28 @@ impl Mailbox {
                     .collect::<std::result::Result<_, _>>()
                     .map_err(err)?;
                 self.delete(&ids, false)
+            }
+            FolderOp::SaveSearch { name, query, scope, folder_id } => {
+                let name = name.trim();
+                if name.is_empty() || query.trim().is_empty() {
+                    return Err("Nom ou recherche vide.".into());
+                }
+                // Étendue enregistrée : tout, ou le fichier de données du dossier courant.
+                let scope = match (scope, folder_db_id(folder_id)) {
+                    (SearchScope::All, _) | (_, Err(_)) => "all".to_string(),
+                    (_, Ok(f)) => format!("source:{}", folder_info(&self.conn, f)?.source),
+                };
+                let position: i64 = self.conn.query_row("SELECT IFNULL(MAX(position), -1) + 1 FROM search_folder", [], |r| r.get(0)).map_err(err)?;
+                self.conn
+                    .execute("INSERT INTO search_folder (name, query, scope, position) VALUES (?1, ?2, ?3, ?4)", params![name, query.trim(), scope, position])
+                    .map_err(err)?;
+                let id = self.conn.last_insert_rowid();
+                Ok(done(format!("Dossier de recherche « {name} » créé"), Some(format!("s-{id}")), self))
+            }
+            FolderOp::DeleteSearchFolder { id } => {
+                let n: i64 = id.strip_prefix("s-").and_then(|n| n.parse().ok()).ok_or("seuls les dossiers de recherche enregistrés se suppriment")?;
+                self.conn.execute("DELETE FROM search_folder WHERE id = ?1", [n]).map_err(err)?;
+                Ok(done("Dossier de recherche supprimé (les éléments restent dans leurs dossiers)".into(), None, self))
             }
             FolderOp::AddFavorite { id } | FolderOp::RemoveFavorite { id } => {
                 let fid = folder_db_id(id)?;
