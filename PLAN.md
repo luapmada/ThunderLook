@@ -1,6 +1,6 @@
 # PLAN — architecture, stack, jalons
 
-Statut : **validé le 2026-10-16** (§7 accepté tel quel : ruban simplifié par défaut avec mode classique, nom « ThunderLook », REA MCP repoussé à J6). **Modifié le même jour à ta demande (« plus il y a de Rust mieux c'est »)** : interface en Rust (Leptos → WebAssembly) au lieu de React/TypeScript, outillage cargo au lieu de npm. J0 terminé.
+Statut : **validé le 2026-10-16** (§7 accepté tel quel : ruban simplifié par défaut avec mode classique, nom « ThunderLook », REA MCP repoussé à J6). **Modifié le même jour à ta demande (« plus il y a de Rust mieux c'est »)** : interface en Rust (Leptos → WebAssembly) au lieu de React/TypeScript, outillage cargo au lieu de npm. J0 terminé. J1 terminé le 2026-10-18 (mesures en §5).
 Entrées : `SPEC.md` (priorités Q1 à Q4), `DESIGN.md`, `notes/ui-reference.md`, `notes/formats.md`, `notes/juridique.md`.
 
 ## 1. Principes
@@ -73,7 +73,7 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | # | Jalon | Contenu | Critère de fin | Taille |
 |---|---|---|---|---|
 | J0 ✅ | Socle | Projet Tauri, jetons `DESIGN.md` clair/sombre, fenêtre à 3 volets statique, navigation basse, barre d'état, barre de commandes vide, police Inter, icônes Lucide | Contrastes AA vérifiés. Arbre UIA du clone relevé avec `tools/uia_dump.ps1` et comparé à la référence | S |
-| J1 | Import PST (lecture seule) | Copie de travail, import vers SQLite + `.eml`, pièces jointes, lu, drapeaux, catégories, FAI de configuration, rapport d'import | Sur tes 3 copies (271 Ko, 3,9 Go, 15 Go) : effectifs identiques à `pst-probe`, 0 perte silencieuse, import de 15 Go en moins de 10 min | M |
+| J1 ✅ | Import PST (lecture seule) | Copie de travail, import vers SQLite + `.eml`, pièces jointes, lu, drapeaux, catégories, FAI de configuration, rapport d'import | Sur tes 3 copies (271 Ko, 3,9 Go, 15 Go) : effectifs identiques à `pst-probe`, 0 perte silencieuse, import de 15 Go en moins de 10 min | M |
 | J2 | Lecture | Volet dossiers (compteurs non lus / [total]), liste virtualisée (colonnes, tri, groupes par date, styles non lu et drapeau), volet de lecture (HTML isolé, texte, RTF, pièces jointes, images bloquées), raccourcis de lecture, F6 | Ouverture d'un dossier de 22 000 éléments en moins de 200 ms. Parcours clavier complet | M |
 | J3 | Organisation | Lu/non lu, supprimer, déplacer/copier, glisser-déposer, indicateurs, catégories, CRUD des dossiers, favoris, conversations, « Organiser par », filtres Tous/Non lus, paramètres d'affichage | Ruban Accueil, Dossier et Affichage fonctionnels (sous-ensemble de `ui-reference.md` §3) | M |
 | J4 | Recherche | Index FTS5, zone de recherche et portées, onglet Recherche, mots-clés, recherche avancée, dossiers de recherche (Non lus, Pour le suivi, personnalisés) | Moins de 300 ms sur l'archive de 217 000 éléments | M |
@@ -91,6 +91,25 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
   - comparaison structurelle de l'arbre UIA du clone avec `notes/ui-reference.md` ;
   - contrôle des contrastes WCAG AA.
 - Performance : mesures J1, J2 et J4 sur l'archive de 15 Go.
+
+### Mesures du J1 (2026-10-18, Ryzen 7 7700, NVMe)
+Référence : `pst-probe --open-all` (même lecteur) et, pour les pièces jointes, libpff.
+Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nombre de pièces jointes, corps) : 0 écart sur les trois copies.
+
+| Copie | Dossiers | Éléments importés / référence | FAI | Pièces jointes (dont messages joints) | Incidents | Copie de travail | Import |
+|---|---|---|---|---|---|---|---|
+| 271 Ko | 17 / 17 | 4 / 4 | 2 / 2 | 0 | 0 | — | < 0,1 s |
+| 3,9 Go | 73 / 73 | 35 589 / 35 589 | 106 / 106 | 7 702 (295), = libpff | 0 | 2,4 s | 26,5 s |
+| 15 Go | 124 / 124 | 217 257 / 217 257 | 122 / 122 | 40 633 (404) | 0 | 11 s | 170 s |
+
+- La copie de travail est probablement servie en partie par le cache de Windows : les fichiers venaient d'être lus.
+- Taille produite pour 15 Go : 13,1 Go de `.eml`, base de 2,2 Go (les sacs MAPI bruts, RTF compressé compris, en font l'essentiel).
+- Catégories : 23 définitions (FAI `CategoryList`) et 7 814 attributions sur 5 309 éléments dans la copie de 3,9 Go.
+  L'archive a 13 839 attributions mais aucune liste de définitions : le J3 devra créer les catégories manquantes.
+- Indicateurs de suivi : 918 éléments marqués dans la copie de 3,9 Go, 111 232 dans l'archive, dont 110 363 dans
+  « listes Oxalis » (tous « Assurer un suivi », 2007-2017). C'est la valeur du PST, sans doute posée par une
+  ancienne règle ; à garder en tête pour le dossier de recherche « Pour le suivi » (J4).
+- Six défauts d'`outlook-pst` corrigés en chemin, dont deux pertes silencieuses : `vendor/outlook-pst/PATCH.md`.
 
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).

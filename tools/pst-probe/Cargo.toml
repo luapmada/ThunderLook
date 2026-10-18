@@ -8,4 +8,4 @@ anyhow = "1.0.104"
 outlook-pst = "1.2.0"
 
 [patch.crates-io]
-outlook-pst = { path = "vendor/outlook-pst" }
+outlook-pst = { path = "../../vendor/outlook-pst" }

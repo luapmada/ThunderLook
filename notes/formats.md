@@ -60,10 +60,18 @@ Formats de corps :
 - **Version publiée du crate** : 6 248 éléments sur 35 589 échouent avec « Missing Sub-Node Tree on message ».
   - Touche les contacts, rendez-vous et notes écrits par Outlook sans sous-arbre de nœuds.
   - 82 FAI sont touchés aussi.
-- **Correctif local** (`tools/pst-probe/vendor/outlook-pst`) : une absence de sous-arbre = pas de table de destinataires ni de pièces jointes.
+- **Correctif local** (`vendor/outlook-pst`, versionné depuis le J1) : une absence de sous-arbre = pas de table de destinataires ni de pièces jointes.
   - Résultat : 0 erreur, 35 589 éléments ouverts en **1,2 s**.
   - Les comptes par classe sont identiques à libpff, qui échoue sur 26 éléments.
   - Correctif à proposer en amont : licence MIT.
+- **Défauts trouvés au J1** (import complet, pièces jointes comprises ; détail dans `vendor/outlook-pst/PATCH.md`) :
+  - `PtypObject` (`0x000D`) absent des types reconnus, et lecture des feuilles de BTH arrêtée à la première
+    entrée illisible : tout PC contenant un objet était **tronqué sans erreur**. 298 pièces jointes concernées
+    sur la copie de 3,9 Go, toutes des messages joints.
+  - Messages joints cherchés dans les sous-nœuds du message au lieu de ceux de la pièce jointe, puis
+    interblocage sur le verrou du fichier à leur lecture.
+  - Pièces jointes de 0 octet (HNID nul) rejetées avec un message d'erreur trompeur.
+  - Après correction : 7 702 pièces jointes sur la copie de 3,9 Go, le même nombre que libpff, dont 295 messages joints.
 - **106 FAI lus.** Classes rencontrées :
 
 | Classe FAI | Dossier |
@@ -124,7 +132,7 @@ Droits sur les Open Specifications : la notice Microsoft autorise à copier la d
 | Bibliothèque | Langage, licence | Lecture / écriture | Remarques |
 |---|---|---|---|
 | libpff 20260926 (libyal) | C + Python, LGPL | Lecture | PST, OST, OST 4 Ko compressé. Pas d'accès FAI en Python. 26 éléments illisibles sur 35 563 |
-| `outlook-pst` 1.2.0 (github.com/microsoft/outlook-pst-rs) | Rust, MIT | Lecture | Implémentation « clean room » de [MS-PST] par Microsoft. FAI : oui. PST Unicode : oui après correctif. OST 4 Ko : non testé. Écriture : non |
+| `outlook-pst` 1.2.0 (github.com/microsoft/outlook-pst-rs) | Rust, MIT | Lecture | Implémentation « clean room » de [MS-PST] par Microsoft. FAI : oui. PST Unicode : oui après correctifs (6, voir `vendor/outlook-pst/PATCH.md`). OST 4 Ko : non testé. Écriture : non |
 | `outlook-pst-rw` 1.2.14 | Rust | Lecture, création, ajout (PST Unicode) | Fork tiers, mis à jour le 2026-10-14. Non évalué |
 | XstReader | C#, MS-PL | Lecture | Non évalué |
 

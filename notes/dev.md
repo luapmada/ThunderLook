@@ -17,6 +17,24 @@ cd app; cargo tauri dev
 cd app; cargo tauri build --no-bundle
 ```
 
+```powershell
+# Tests des crates du J1
+cargo test -p thunderlook-mime -p thunderlook-store -p thunderlook-import-pst
+
+# Import PST en ligne de commande. Par défaut, copie de travail dans <données>\sources\ ;
+# --in-place lit le fichier sur place (refusé sous A:\Fichiers Outlook).
+cargo build --release -p thunderlook-import-pst
+target\release\tl-import.exe <copie.pst> <dossier-de-données> [--in-place]
+
+# Vérification indépendante : relit chaque .eml avec mail-parser et le compare à la base
+cargo run --release -p thunderlook-import-pst --example verify_store -- <dossier-de-données>
+
+# Diagnostic d'un message (propriétés nommées, pièces jointes, messages joints)
+cargo run --release -p thunderlook-import-pst --example attach_debug -- <copie.pst> <nid décimal>
+```
+Le dossier de données contient des données personnelles : le garder sous `data/` (ignoré par git).
+Un nouvel import du même fichier d'origine remplace la source précédente (base et `.eml`).
+
 **Piège** : si `NO_COLOR=1` est défini (c'est le cas dans l'environnement de Claude Code), `trunk` échoue avec « invalid value '1' for '--no-color' ». Faire `Remove-Item Env:NO_COLOR` avant le build.
 
 ## Vérifications du J0
@@ -30,6 +48,17 @@ cd app; cargo tauri build --no-bundle
   - flèches gauche/droite dans les onglets ;
   - Ctrl+1 à 4 changent de module ;
   - Ctrl+E donne le focus à la recherche.
+
+## Import PST (J1)
+- Crates : `crates/mime` (pages de code, RTF [MS-OXRTFCP]/[MS-OXRTFEX], aperçu), `crates/store` (schéma SQLite v1,
+  disposition `eml/<source>/<lot>/<id>.eml`), `crates/import-pst` (parcours, conversion MAPI → MIME, rapport).
+- Lecteur : `vendor/outlook-pst`, copie corrigée d'`outlook-pst` 1.2.0. Six correctifs, dont deux pertes
+  silencieuses (PC tronqué au premier `PtypObject`, messages joints introuvables) : voir `vendor/outlook-pst/PATCH.md`.
+- Une seule transaction par import. Les `.eml` sont écrits par un fil dédié pendant la lecture du PST.
+- Rien ne se perd en silence : tout élément ou pièce jointe non importé donne une ligne `import_issue`
+  (`lost` ou `degraded`). Les propriétés MAPI non converties restent dans `props` (format dans `props.rs`).
+- Rôles des dossiers : EntryID du magasin et de la Boîte de réception ([MS-OXOSFLD]), puis repli sur le nom
+  des dossiers de premier niveau (PST de comptes IMAP sans ces EntryID).
 
 ## Notes techniques
 - CSP stricte. Le chargeur de Trunk récupère le `.wasm` par `fetch`, d'où `connect-src 'self'` et `script-src 'wasm-unsafe-eval'`. Sans eux, la fenêtre reste vide.

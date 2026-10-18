@@ -1,19 +1,13 @@
 # pst-probe
 
-Sonde de lecture PST (lecture seule) sur le crate `outlook-pst` 1.2.0 (Microsoft, MIT), avec un correctif local.
+Sonde de lecture PST (lecture seule) sur le crate `outlook-pst` 1.2.0 (Microsoft, MIT), dans sa copie corrigée
+`vendor/outlook-pst` (versionnée depuis le J1, partagée avec `crates/import-pst`).
 
-## Préparer le crate corrigé (non versionné)
-```bash
-cargo fetch                      # télécharge outlook-pst 1.2.0
-mkdir -p vendor && cp -r ~/.cargo/registry/src/*/outlook-pst-1.2.0 vendor/outlook-pst
-cd vendor/outlook-pst && patch -p1 < ../../outlook-pst-1.2.0-missing-subnode.patch
-```
-`Cargo.toml` pointe vers `vendor/outlook-pst` via `[patch.crates-io]`.
+`Cargo.toml` pointe vers `../../vendor/outlook-pst` via `[patch.crates-io]`.
 
-## Correctif
-`outlook-pst-1.2.0-missing-subnode.patch` : un message sans sous-arbre de nœuds (contacts, rendez-vous, notes écrits par Outlook) est lu avec une liste de sous-nœuds vide, au lieu d'échouer avec `MessageSubNodeTreeNotFound`.
-
-Sur une copie de 3,9 Go : 6 248 échecs → 0. À proposer en amont.
+## Correctifs
+Détail dans `vendor/outlook-pst/PATCH.md`. Diff complet par rapport à la version publiée :
+`vendor/outlook-pst-1.2.0-thunderlook.patch` (à proposer en amont).
 
 ## Usage
 ```bash

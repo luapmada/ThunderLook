@@ -1,0 +1,11 @@
+[package]
+name = "thunderlook-mime"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Conversions de contenu pour ThunderLook : pages de code, RTF compressé et encapsulé, aperçu texte"
+
+[dependencies]
+compressed-rtf = "1.0.1"
+codepage = "0.1.3"
+encoding_rs = "0.8.42"

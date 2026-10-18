@@ -1,0 +1,19 @@
+[package]
+name = "thunderlook-import-pst"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Import PST en lecture seule vers le stockage de ThunderLook (SQLite + .eml)"
+
+[dependencies]
+# Copie corrigée d'outlook-pst 1.2.0 (Microsoft, MIT) : voir vendor/outlook-pst/PATCH.md.
+outlook-pst = { path = "../../vendor/outlook-pst" }
+thunderlook-store = { path = "../store" }
+thunderlook-mime = { path = "../mime" }
+mail-builder = "1.0.0"
+quick-xml = "0.42.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+mail-parser = "0.11.9"

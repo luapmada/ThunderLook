@@ -1,0 +1,277 @@
+diff -ru --strip-trailing-cr C:/Users/paul/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/outlook-pst-1.2.0/src/ltp/prop_type.rs b/src/ltp/prop_type.rs
+--- C:/Users/paul/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/outlook-pst-1.2.0/src/ltp/prop_type.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/ltp/prop_type.rs	2026-10-18 22:05:48.141254600 +0200
+@@ -102,6 +102,8 @@
+             0x0007 => Ok(Self::FloatingTime),
+             0x000A => Ok(Self::ErrorCode),
+             0x000B => Ok(Self::Boolean),
++            // Correctif ThunderLook : PtypObject manquait, ce qui tronquait en silence tout PC qui en contient.
++            0x000D => Ok(Self::Object),
+             0x0014 => Ok(Self::Integer64),
+             0x001E => Ok(Self::String8),
+             0x001F => Ok(Self::Unicode),
+diff -ru --strip-trailing-cr C:/Users/paul/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/outlook-pst-1.2.0/src/ltp/tree.rs b/src/ltp/tree.rs
+--- C:/Users/paul/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/outlook-pst-1.2.0/src/ltp/tree.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/ltp/tree.rs	2026-10-18 22:05:48.141254600 +0200
+@@ -256,8 +256,14 @@
+         let mut results = Vec::new();
+         for heap_id in mem::take(&mut next_level).into_iter() {
+             let mut cursor = Cursor::new(self.heap.find_entry(heap_id)?);
+-            while let Ok(row) = HeapTreeLeafEntry::<K, V>::read(&mut cursor) {
+-                results.push(row);
++            // Correctif ThunderLook : seule la fin des données arrête la lecture ; une entrée
++            // illisible remonte en erreur au lieu de tronquer la liste en silence.
++            loop {
++                match HeapTreeLeafEntry::<K, V>::read(&mut cursor) {
++                    Ok(row) => results.push(row),
++                    Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
++                    Err(e) => return Err(e),
++                }
+             }
+         }
+ 
+diff -ru --strip-trailing-cr C:/Users/paul/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/outlook-pst-1.2.0/src/messaging/attachment.rs b/src/messaging/attachment.rs
+--- C:/Users/paul/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/outlook-pst-1.2.0/src/messaging/attachment.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/messaging/attachment.rs	2026-10-18 22:17:22.602844200 +0200
+@@ -11,7 +11,7 @@
+         read_write::*,
+     },
+     ndb::{
+-        block::{DataTree, IntermediateTreeBlock},
++        block::{DataTree, IntermediateTreeBlock, SubNodeTree},
+         block_id::BlockId,
+         header::Header,
+         node_id::{NodeId, NodeIdType},
+@@ -177,6 +177,13 @@
+     <<Pst as PstFile>::DataTreeBlock as IntermediateTreeBlock>::Entry:
+         IntermediateTreeEntryReadWrite,
+     <Pst as PstFile>::DataBlock: BlockReadWrite + Clone,
++    <Pst as PstFile>::SubNodeTreeBlockHeader: IntermediateTreeHeaderReadWrite,
++    <Pst as PstFile>::SubNodeTreeBlock: IntermediateTreeBlockReadWrite,
++    <<Pst as PstFile>::SubNodeTreeBlock as IntermediateTreeBlock>::Entry:
++        IntermediateTreeEntryReadWrite,
++    <Pst as PstFile>::SubNodeBlock: IntermediateTreeBlockReadWrite,
++    <<Pst as PstFile>::SubNodeBlock as IntermediateTreeBlock>::Entry:
++        IntermediateTreeEntryReadWrite,
+     <Pst as PstFile>::HeapNode: HeapNodeReadWrite<Pst>,
+     <Pst as PstFile>::PropertyTree: HeapTreeReadWrite<Pst>,
+     <Pst as PstFile>::PropertyContext: PropertyContextReadWrite<Pst>,
+@@ -201,7 +208,7 @@
+         let header = pst.header();
+         let root = header.root();
+ 
+-        let (properties, data) = {
++        let (properties, data, embedded_node) = {
+             let mut file = pst
+                 .reader()
+                 .lock()
+@@ -236,6 +243,21 @@
+             )?;
+             let header = heap.header()?;
+ 
++            // Correctif ThunderLook : le message joint (afEmbeddedMessage) et l'objet OLE
++            // (afStorage) sont des sous-nœuds de la pièce jointe elle-même ([MS-PST] 2.4.6.2),
++            // pas du message parent. On les cherche d'abord là.
++            let attachment_sub_nodes: BTreeMap<_, _> = match node.sub_node() {
++                Some(sub_node) => {
++                    let block =
++                        block_btree.find_entry(file, sub_node.search_key(), &mut page_cache)?;
++                    SubNodeTree::<Pst>::read(file, &block)?
++                        .entries(file, &block_btree, &mut page_cache)?
++                        .map(|entry| (entry.node(), entry))
++                        .collect()
++                }
++                None => BTreeMap::new(),
++            };
++
+             let tree = <Pst as PstFile>::PropertyTree::new(heap, header.user_root());
+             let prop_context = <<Pst as PstFile>::PropertyContext as PropertyContextReadWrite<
+                 Pst,
+@@ -251,23 +273,30 @@
+                 .collect::<io::Result<BTreeMap<_, _>>>()?;
+             let properties = AttachmentProperties { properties };
+ 
+-            let attachment_method = AttachmentMethod::try_from(properties.attachment_method()?)?;
+-            let data = match attachment_method {
+-                AttachmentMethod::ByValue => {
+-                    let binary_data = match properties
+-                        .get(0x3701)
+-                        .ok_or(MessagingError::AttachmentMessageObjectDataNotFound)?
+-                    {
+-                        PropertyValue::Binary(value) => value,
+-                        invalid => {
+-                            return Err(MessagingError::InvalidMessageObjectData(
+-                                PropertyType::from(invalid),
+-                            )
+-                            .into())
+-                        }
+-                    };
+-                    Some(AttachmentData::Binary(binary_data.clone()))
++            // Correctif ThunderLook : Outlook écrit des pièces jointes sans PidTagAttachMethod
++            // (parties d'avis de non-remise, par exemple) ; on les lit par valeur si des données
++            // binaires sont présentes.
++            let attachment_method = match properties.attachment_method() {
++                Ok(method) => AttachmentMethod::try_from(method)?,
++                Err(_) if matches!(properties.get(0x3701), Some(PropertyValue::Binary(_))) => {
++                    AttachmentMethod::ByValue
+                 }
++                Err(_) => AttachmentMethod::None,
++            };
++            let mut embedded_node = None;
++            let data = match attachment_method {
++                AttachmentMethod::ByValue => match properties.get(0x3701) {
++                    Some(PropertyValue::Binary(value)) => Some(AttachmentData::Binary(value.clone())),
++                    // Correctif ThunderLook : HNID nul = pièce jointe de 0 octet.
++                    Some(PropertyValue::Null) => Some(AttachmentData::Binary(BinaryValue::new(Vec::new()))),
++                    Some(invalid) => {
++                        return Err(MessagingError::InvalidMessageObjectData(PropertyType::from(
++                            invalid,
++                        ))
++                        .into())
++                    }
++                    None => None,
++                },
+                 AttachmentMethod::EmbeddedMessage => {
+                     let object_data = match properties
+                         .get(0x3701)
+@@ -283,23 +312,21 @@
+                     };
+ 
+                     let sub_node = object_data.node();
+-                    let node = message
+-                        .sub_nodes()
++                    let node = attachment_sub_nodes
+                         .get(&sub_node)
++                        .or_else(|| message.sub_nodes().get(&sub_node))
+                         .ok_or(MessagingError::AttachmentSubNodeNotFound(sub_node))?;
+-                    let node = <<Pst as PstFile>::NodeBTreeEntry as NodeBTreeEntryReadWrite>::new(
+-                        node.node(),
+-                        node.block(),
+-                        node.sub_node(),
+-                        None,
++                    // Correctif ThunderLook : `read_embedded` reprend le verrou du fichier, encore
++                    // tenu ici (interblocage). Le message joint est lu après sa libération.
++                    embedded_node = Some(
++                        <<Pst as PstFile>::NodeBTreeEntry as NodeBTreeEntryReadWrite>::new(
++                            node.node(),
++                            node.block(),
++                            node.sub_node(),
++                            None,
++                        ),
+                     );
+-                    let message =
+-                        <<Pst as PstFile>::Message as MessageReadWrite<Pst>>::read_embedded(
+-                            store.clone(),
+-                            node,
+-                            prop_ids,
+-                        )?;
+-                    Some(AttachmentData::Message(message))
++                    None
+                 }
+                 AttachmentMethod::Storage => {
+                     let object_data = match properties
+@@ -315,9 +342,9 @@
+                         }
+                     };
+                     let sub_node = object_data.node();
+-                    let node = message
+-                        .sub_nodes()
++                    let node = attachment_sub_nodes
+                         .get(&sub_node)
++                        .or_else(|| message.sub_nodes().get(&sub_node))
+                         .ok_or(MessagingError::AttachmentSubNodeNotFound(sub_node))?;
+                     let block =
+                         block_btree.find_entry(file, node.block().search_key(), &mut page_cache)?;
+@@ -337,7 +364,18 @@
+                 _ => None,
+             };
+ 
+-            (properties, data)
++            (properties, data, embedded_node)
++        };
++
++        let data = match embedded_node {
++            Some(node) => Some(AttachmentData::Message(
++                <<Pst as PstFile>::Message as MessageReadWrite<Pst>>::read_embedded(
++                    store.clone(),
++                    node,
++                    prop_ids,
++                )?,
++            )),
++            None => data,
+         };
+ 
+         Ok(Self {
+diff -ru --strip-trailing-cr C:/Users/paul/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/outlook-pst-1.2.0/src/messaging/message.rs b/src/messaging/message.rs
+--- C:/Users/paul/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/outlook-pst-1.2.0/src/messaging/message.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/messaging/message.rs	2026-10-18 21:47:52.398410000 +0200
+@@ -137,6 +137,9 @@
+     fn properties(&self) -> &MessageProperties;
+     fn recipient_table(&self) -> Option<&Rc<dyn TableContext>>;
+     fn attachment_table(&self) -> Option<&Rc<dyn TableContext>>;
++    /// Correctif ThunderLook : accès au type concret (`UnicodeMessage` / `AnsiMessage`), nécessaire
++    /// pour ouvrir les pièces jointes d'un message joint, que `AttachmentData::Message` rend en `dyn Message`.
++    fn into_any(self: Rc<Self>) -> Rc<dyn std::any::Any>;
+ }
+ 
+ struct MessageInner<Pst>
+@@ -253,9 +256,9 @@
+                 *root.block_btree(),
+             )?;
+ 
+-            let sub_node = node
+-                .sub_node()
+-                .ok_or(MessagingError::MessageSubNodeTreeNotFound)?;
++            // Correctif local : un message sans sous-arbre (contacts, rendez-vous écrits par
++            // Outlook) n'a simplement ni table de destinataires ni table de pièces jointes.
++            let sub_node = node.sub_node();
+ 
+             let mut page_cache = pst.block_cache();
+             let data = node.data();
+@@ -282,12 +285,18 @@
+                 .collect::<io::Result<BTreeMap<_, _>>>()?;
+             let properties = MessageProperties { properties };
+ 
+-            let block = block_btree.find_entry(file, sub_node.search_key(), &mut page_cache)?;
+-            let sub_nodes = SubNodeTree::<Pst>::read(file, &block)?;
+-            let sub_nodes: BTreeMap<_, _> = sub_nodes
+-                .entries(file, &block_btree, &mut page_cache)?
+-                .map(|entry| (entry.node(), entry))
+-                .collect();
++            let sub_nodes: BTreeMap<_, _> = match sub_node {
++                Some(sub_node) => {
++                    let block =
++                        block_btree.find_entry(file, sub_node.search_key(), &mut page_cache)?;
++                    let sub_nodes = SubNodeTree::<Pst>::read(file, &block)?;
++                    sub_nodes
++                        .entries(file, &block_btree, &mut page_cache)?
++                        .map(|entry| (entry.node(), entry))
++                        .collect()
++                }
++                None => BTreeMap::new(),
++            };
+ 
+             (properties, sub_nodes)
+         };
+@@ -374,6 +383,10 @@
+ }
+ 
+ impl Message for UnicodeMessage {
++    fn into_any(self: Rc<Self>) -> Rc<dyn std::any::Any> {
++        self
++    }
++
+     fn store(&self) -> Rc<dyn Store> {
+         self.inner.store.clone()
+     }
+@@ -434,6 +447,10 @@
+ }
+ 
+ impl Message for AnsiMessage {
++    fn into_any(self: Rc<Self>) -> Rc<dyn std::any::Any> {
++        self
++    }
++
+     fn store(&self) -> Rc<dyn Store> {
+         self.inner.store.clone()
+     }
