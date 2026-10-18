@@ -1,6 +1,6 @@
 # PLAN — architecture, stack, jalons
 
-Statut : **validé le 2026-10-16** (§7 accepté tel quel : ruban simplifié par défaut avec mode classique, nom « ThunderLook », REA MCP repoussé à J6). **Modifié le même jour à ta demande (« plus il y a de Rust mieux c'est »)** : interface en Rust (Leptos → WebAssembly) au lieu de React/TypeScript, outillage cargo au lieu de npm. J0 terminé. J1 terminé le 2026-10-18 (mesures en §5).
+Statut : **validé le 2026-10-16** (§7 accepté tel quel : ruban simplifié par défaut avec mode classique, nom « ThunderLook », REA MCP repoussé à J6). **Modifié le même jour à ta demande (« plus il y a de Rust mieux c'est »)** : interface en Rust (Leptos → WebAssembly) au lieu de React/TypeScript, outillage cargo au lieu de npm. J0 terminé. J1 terminé le 2026-10-18, J2 le 2026-10-19 (mesures en §5). Lien avec ADI Facturation : §8.
 Entrées : `SPEC.md` (priorités Q1 à Q4), `DESIGN.md`, `notes/ui-reference.md`, `notes/formats.md`, `notes/juridique.md`.
 
 ## 1. Principes
@@ -74,7 +74,7 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 |---|---|---|---|---|
 | J0 ✅ | Socle | Projet Tauri, jetons `DESIGN.md` clair/sombre, fenêtre à 3 volets statique, navigation basse, barre d'état, barre de commandes vide, police Inter, icônes Lucide | Contrastes AA vérifiés. Arbre UIA du clone relevé avec `tools/uia_dump.ps1` et comparé à la référence | S |
 | J1 ✅ | Import PST (lecture seule) | Copie de travail, import vers SQLite + `.eml`, pièces jointes, lu, drapeaux, catégories, FAI de configuration, rapport d'import | Sur tes 3 copies (271 Ko, 3,9 Go, 15 Go) : effectifs identiques à `pst-probe`, 0 perte silencieuse, import de 15 Go en moins de 10 min | M |
-| J2 | Lecture | Volet dossiers (compteurs non lus / [total]), liste virtualisée (colonnes, tri, groupes par date, styles non lu et drapeau), volet de lecture (HTML isolé, texte, RTF, pièces jointes, images bloquées), raccourcis de lecture, F6 | Ouverture d'un dossier de 22 000 éléments en moins de 200 ms. Parcours clavier complet | M |
+| J2 ✅ | Lecture | Volet dossiers (compteurs non lus / [total]), liste virtualisée (colonnes, tri, groupes par date, styles non lu et drapeau), volet de lecture (HTML isolé, texte, RTF, pièces jointes, images bloquées), raccourcis de lecture, F6 | Ouverture d'un dossier de 22 000 éléments en moins de 200 ms. Parcours clavier complet | M |
 | J3 | Organisation | Lu/non lu, supprimer, déplacer/copier, glisser-déposer, indicateurs, catégories, CRUD des dossiers, favoris, conversations, « Organiser par », filtres Tous/Non lus, paramètres d'affichage | Ruban Accueil, Dossier et Affichage fonctionnels (sous-ensemble de `ui-reference.md` §3) | M |
 | J4 | Recherche | Index FTS5, zone de recherche et portées, onglet Recherche, mots-clés, recherche avancée, dossiers de recherche (Non lus, Pour le suivi, personnalisés) | Moins de 300 ms sur l'archive de 217 000 éléments | M |
 | J5 | Rédaction (brouillons) | Fenêtre de rédaction HTML, réponse et transfert avec citation, signatures (import HTM), modèles `.oft`, brouillons | Réponse à tous fidèle (en-têtes, citation) enregistrée en brouillon | M |
@@ -111,10 +111,53 @@ Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nomb
   ancienne règle ; à garder en tête pour le dossier de recherche « Pour le suivi » (J4).
 - Six défauts d'`outlook-pst` corrigés en chemin, dont deux pertes silencieuses : `vendor/outlook-pst/PATCH.md`.
 
+### Mesures du J2 (2026-10-19, même machine, base fusionnée : 2 sources, 252 846 éléments, 2,8 Go)
+- **Ouverture d'un dossier dans l'application** (aller-retour IPC, première tranche de 100 lignes et affichage, journal `perf.log`) :
+  - Boîte de réception (22 188 éléments) : **145 ms** au premier lancement, 78 ms ensuite ;
+  - Inbox de l'archive (61 642 éléments) : 44 ms.
+- **Cœur seul** (`cargo run --release -p thunderlook-mailbox --example bench -- data/store`), sur le plus gros dossier, « listes Oxalis » (110 539 éléments) :
+
+  | Tri | Ouverture de la vue | Groupes |
+  |---|---|---|
+  | Date | 62 ms | 1 |
+  | De | 216 ms | 88 |
+  | Objet | 278 ms | 312 |
+  | Taille | 235 ms | 6 |
+
+  Pour les tris autres que la date, il faut lire les lignes (expéditeur, objet, taille) : c'est l'index FTS du J4 qui réduira ces temps.
+- **Arborescence** avec compteurs : 14 ms (index couvrant `message_folder_read`, schéma v2).
+  - Migration v1 → v2 sur la base fusionnée : 2,1 s, une seule fois.
+- **Volet de lecture** : balayage d'un message sur 20 (12 160 messages, avec extraction de toutes les pièces jointes), 0 échec.
+  - 1,4 ms par message en moyenne, 109 ms au plus.
+  - Corps : 11 039 HTML, 864 texte, 257 vides. Contenu distant bloqué dans 4 239 messages.
+- **Clavier**, vérifié avec `tools/uia_keys.ps1` :
+  - flèches, Début, Fin (dernier des 22 188 éléments, chargé à la demande), Pg Suiv ;
+  - Ctrl+. et Ctrl+, depuis n'importe quel volet, corps du message compris ;
+  - F6 et Maj+F6.
+- **Aperçus** : 78 269 entités HTML non décodées dans les aperçus écrits au J1 (`&zwnj;` 70 316, `&shy;` 7 497 : remplissage de mails publicitaires).
+  - Corrigé dans `thunderlook-mime` (table d'entités étendue, caractères invisibles retirés).
+  - Le correctif s'applique à l'affichage, sans réimport.
+- **Rôles de dossiers dans l'archive** : « Courrier indésirable » est marqué Brouillons et « YouSendIt Outbox » Indésirables.
+  - C'est ce que disent les EntryID de ce PST, sans doute hérités d'anciens profils.
+  - On les respecte, mais l'ordre et les compteurs de ces dossiers en dépendent. À revoir au J3 (rôle modifiable).
+
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).
 - Limites de REA en analyse statique : sur **nos propres binaires** (Rust/Tauri, donc sans enjeu juridique). REA annonce un support des binaires Rust.
 - Tout est journalisé dans `REA-LIMITES.md`.
+
+## 8. Lien avec ADI Facturation
+ThunderLook et ADI Facturation (Electron, presque en production) travailleront en relation étroite. Contrat proposé dans `notes/integration-adi.md` :
+- chaque application reste maître de sa base, et les échanges se font en lecture seule ou par commande explicite ;
+- ADI → ThunderLook :
+  - rédaction d'un mail avec la facture jointe, par ligne de commande compatible Outlook (J5 et J7) ;
+  - lecture de l'historique d'un client dans `thunderlook.db` (`open_read_only`, index par adresse au J4) ;
+- ThunderLook → ADI : fiche client dans le volet de lecture, par lecture seule de la base d'ADI, quand son schéma sera connu.
+
+Conséquences sur les jalons :
+- **J4** : index des adresses (expéditeur et destinataires).
+- **J5** : ligne de commande de rédaction.
+- **Schéma** : migrations par ajout uniquement, puisque la base devient une interface.
 
 ## 7. Points à valider avant de coder
 1. **Stack** Tauri 2 + Rust + React/TypeScript : OK ?

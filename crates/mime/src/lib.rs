@@ -16,10 +16,23 @@ pub fn decode(bytes: &[u8], codepage: u32) -> String {
     text.into_owned()
 }
 
-/// Aperçu d'une ligne : espaces normalisés, tronqué à `max` caractères.
+/// Caractères invisibles de mise en forme (trait d'union conditionnel, liants, espace sans chasse),
+/// très présents dans les mails publicitaires pour remplir l'aperçu.
+fn is_invisible(c: char) -> bool {
+    matches!(c, '\u{AD}' | '\u{34F}' | '\u{200B}'..='\u{200F}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}')
+}
+
+/// Aperçu d'une ligne : caractères invisibles retirés, espaces normalisés, tronqué à `max` caractères.
 pub fn preview_from_text(text: &str, max: usize) -> String {
     let mut out = String::with_capacity(max.min(text.len()));
     let mut count = 0;
+    let cleaned: String;
+    let text = if text.chars().any(is_invisible) {
+        cleaned = text.chars().filter(|c| !is_invisible(*c)).collect();
+        &cleaned
+    } else {
+        text
+    };
     for word in text.split_whitespace() {
         if count + 1 >= max && count > 0 {
             break;
@@ -91,6 +104,36 @@ pub fn html_to_text(html: &str) -> String {
     out
 }
 
+/// Entités HTML d'un texte déjà extrait (aperçus écrits avant le J2 : `&zwnj;`, `&shy;`… restés tels quels).
+pub fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        match tail.find(';').filter(|&p| p <= 10).and_then(|p| decode_entity(&tail[1..p]).map(|c| (c, p))) {
+            Some((c, p)) => {
+                out.push(c);
+                rest = &tail[p + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Aperçu stocké, nettoyé pour l'affichage : entités décodées, invisibles retirés.
+pub fn clean_preview(preview: &str) -> String {
+    if !preview.contains('&') && !preview.chars().any(is_invisible) {
+        return preview.to_string();
+    }
+    preview_from_text(&decode_entities(preview), usize::MAX)
+}
+
 fn decode_entity(name: &str) -> Option<char> {
     if let Some(num) = name.strip_prefix('#') {
         let code = match num.strip_prefix(['x', 'X']) {
@@ -131,6 +174,41 @@ fn decode_entity(name: &str) -> Option<char> {
         "euro" => '€',
         "copy" => '©',
         "reg" => '®',
+        "trade" => '™',
+        "shy" => '\u{AD}',
+        "zwnj" => '\u{200C}',
+        "zwj" => '\u{200D}',
+        "thinsp" => '\u{2009}',
+        "ensp" => '\u{2002}',
+        "emsp" => '\u{2003}',
+        "deg" => '°',
+        "bull" => '•',
+        "middot" => '·',
+        "dagger" => '†',
+        "hearts" => '♥',
+        "rarr" => '→',
+        "larr" => '←',
+        "times" => '×',
+        "sect" => '§',
+        "acute" => '´',
+        "Agrave" => 'À',
+        "Acirc" => 'Â',
+        "Ccedil" => 'Ç',
+        "Egrave" => 'È',
+        "Ecirc" => 'Ê',
+        "Icirc" => 'Î',
+        "Ocirc" => 'Ô',
+        "Ucirc" => 'Û',
+        "Uuml" => 'Ü',
+        "oelig" => 'œ',
+        "OElig" => 'Œ',
+        "aacute" => 'á',
+        "oacute" => 'ó',
+        "auml" => 'ä',
+        "ouml" => 'ö',
+        "uuml" => 'ü',
+        "szlig" => 'ß',
+        "ntilde" => 'ñ',
         _ => return None,
     })
 }
@@ -144,6 +222,8 @@ mod tests {
         let html = "<html><head><style>p{}</style></head><body><p>Bonjour&nbsp;Paul,</p><!-- x --><p>&eacute;t&#233; &amp; co</p></body></html>";
         assert_eq!(preview_from_text(&html_to_text(html), 100), "Bonjour Paul, été & co");
         assert_eq!(preview_from_text("a  b\r\n c", 3), "a b");
+        assert_eq!(clean_preview("Offre&zwnj; &zwnj;&nbsp;&zwnj; sp&shy;éciale &oelig;uvre &amp; co"), "Offre spéciale œuvre & co");
+        assert_eq!(clean_preview("R&D & co"), "R&D & co");
     }
 
     #[test]

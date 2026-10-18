@@ -1,0 +1,14 @@
+[package]
+name = "thunderlook-mailbox"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Lecture du stockage de ThunderLook pour l'interface : arborescence, listes triées, messages"
+
+[dependencies]
+thunderlook-model = { path = "../model" }
+thunderlook-store = { path = "../store" }
+thunderlook-mime = { path = "../mime" }
+mail-parser = "0.11.9"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+base64 = "0.22.1"

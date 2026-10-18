@@ -13,7 +13,7 @@ pub use rusqlite;
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub const DB_FILE: &str = "thunderlook.db";
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 /// Schéma v1. Les dates sont en millisecondes depuis l'époque Unix (UTC).
 /// `props` : sac de propriétés MAPI brut (format décrit dans `thunderlook-import-pst::propbag`),
@@ -134,6 +134,12 @@ CREATE TABLE import_run (
 );
 "#;
 
+/// v2 (J2) : index couvrant pour les compteurs de dossiers et l'ouverture d'une liste
+/// (non-lus, date) sans lire les lignes, dont les sacs MAPI rendent le parcours coûteux.
+const SCHEMA_V2: &str = r#"
+CREATE INDEX IF NOT EXISTS message_folder_read ON message(folder_id, is_read, received_at);
+"#;
+
 /// Ouvre (ou crée) la base du dossier de données et applique les migrations.
 pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(data_dir).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
@@ -141,12 +147,26 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
     let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version == 0 {
-        conn.execute_batch(&format!("BEGIN; {SCHEMA_V1} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
+        conn.execute_batch(&format!("BEGIN; {SCHEMA_V1} {SCHEMA_V2} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
+    } else if version == 1 {
+        conn.execute_batch(&format!("BEGIN; {SCHEMA_V2} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version > SCHEMA_VERSION {
         return Err(rusqlite::Error::InvalidParameterName(format!(
             "base créée par une version plus récente (schéma {version})"
         )));
     }
+    Ok(conn)
+}
+
+/// Ouvre une base existante en lecture seule (interface de lecture, outils tiers).
+/// Les migrations ne sont pas appliquées : ouvrir d'abord avec [`open`].
+pub fn open_read_only(data_dir: &Path) -> rusqlite::Result<Connection> {
+    use rusqlite::OpenFlags;
+    let conn = Connection::open_with_flags(
+        data_dir.join(DB_FILE),
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_URI,
+    )?;
+    conn.execute_batch("PRAGMA query_only = ON;")?;
     Ok(conn)
 }
 

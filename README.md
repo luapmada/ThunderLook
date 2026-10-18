@@ -19,7 +19,8 @@ a REA work on MSoutlook21
 | 3. Plan : architecture et jalons (`PLAN.md`) | Validé (2026-10-16) ; interface passée en Rust (Leptos) |
 | J0. Socle : Tauri + Leptos, 3 volets, barre de commandes, thème, clavier | Fait (2026-10-16) |
 | J1. Import PST en lecture seule | Fait (2026-10-18) : 3 copies importées sans perte, 15 Go en 3 min (`PLAN.md` §5) |
-| J2. Lecture : dossiers, liste, volet de lecture sur les données importées | À faire |
+| J2. Lecture : dossiers, liste, volet de lecture sur les données importées | Fait (2026-10-19) : 22 188 éléments ouverts en 145 ms, HTML isolé, pièces jointes (`PLAN.md` §5) |
+| J3. Organisation : lu/non lu, déplacer, indicateurs, catégories, dossiers | À faire |
 
 ## Fichiers
 - `SPEC.md` : fonctions inventoriées et priorités (le mail d'abord).
@@ -29,6 +30,8 @@ a REA work on MSoutlook21
 - `notes/` : analyses (interface, formats) et points juridiques.
 - `app/` : application (cœur Tauri `app/src-tauri`, interface Leptos `app/ui`) ; `crates/model` : types partagés.
 - `crates/store`, `crates/mime`, `crates/import-pst` : stockage SQLite + `.eml`, conversions de contenu, import PST (`tl-import`).
+- `crates/mailbox` : lecture pour l'interface (arborescence, vues triées servies par tranches, message complet).
+- `notes/integration-adi.md` : contrat d'intégration proposé avec ADI Facturation.
 - `vendor/outlook-pst` : copie corrigée du lecteur PST de Microsoft (MIT), correctifs dans `PATCH.md`.
 - `tools/` : outils d'analyse et de vérification (relevé et test clavier UI Automation, contrastes, en-têtes PST, sondes libpff et `outlook-pst`).
 - `notes/dev.md` : construire et tester.

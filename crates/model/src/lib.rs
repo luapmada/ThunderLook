@@ -6,9 +6,6 @@
 pub mod format;
 pub mod settings;
 
-#[cfg(feature = "clock")]
-pub mod demo;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,116 +59,18 @@ pub struct FolderSection {
     pub folders: Vec<Folder>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Arborescence du courrier envoyée à l'interface.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum CategoryColor {
-    Red,
-    Orange,
-    Yellow,
-    Green,
-    Blue,
-    Purple,
-}
-
-impl CategoryColor {
-    pub fn css_var(self) -> &'static str {
-        match self {
-            Self::Red => "var(--cat-red)",
-            Self::Orange => "var(--cat-orange)",
-            Self::Yellow => "var(--cat-yellow)",
-            Self::Green => "var(--cat-green)",
-            Self::Blue => "var(--cat-blue)",
-            Self::Purple => "var(--cat-purple)",
-        }
-    }
-}
-
-/// Groupes de la liste triée par date, dans l'ordre d'affichage.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DateGroup {
-    Today,
-    Yesterday,
-    ThisWeek,
-    LastWeek,
-    Older,
-}
-
-impl DateGroup {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Today => "Aujourd'hui",
-            Self::Yesterday => "Hier",
-            Self::ThisWeek => "Cette semaine",
-            Self::LastWeek => "La semaine dernière",
-            Self::Older => "Plus ancien",
-        }
-    }
-}
-
-/// Ligne de la liste des messages, prête à afficher.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageSummary {
-    pub id: String,
-    pub folder_id: String,
-    pub from: String,
-    pub from_address: String,
-    pub to: String,
-    pub subject: String,
-    pub preview: String,
-    /// Horodatage RFC 3339 (heure locale avec décalage).
-    pub received: String,
-    pub group: DateGroup,
-    /// Libellé court de la liste (« 09:12 », « lun. 17:05 », « 04/10/2026 »).
-    pub time_label: String,
-    /// Libellé complet du volet de lecture.
-    pub date_label: String,
-    pub unread: bool,
-    pub flagged: bool,
-    pub has_attachments: bool,
-    pub categories: Vec<CategoryColor>,
-}
-
-/// Corps d'un message, chargé à la demande. J0 : paragraphes de texte brut.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MessageBody {
-    pub id: String,
-    pub paragraphs: Vec<String>,
-}
-
-/// Instantané du courrier envoyé à l'interface (J0 : démonstration).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MailSnapshot {
+pub struct FolderTree {
     pub sections: Vec<FolderSection>,
-    pub messages: Vec<MessageSummary>,
-    /// `true` tant que les données sont fictives (avant l'import J1).
-    pub demo: bool,
+    /// Dossier de données ouvert.
+    pub data_dir: String,
+    /// Raison pour laquelle il n'a pas pu être ouvert.
+    pub error: Option<String>,
 }
 
-impl MailSnapshot {
-    /// Messages d'un dossier, du plus récent au plus ancien.
-    /// J0 : favoris et dossiers virtuels sont résolus sur la démonstration ; le magasin J1 les remplacera.
-    pub fn messages_in(&self, folder_id: &str) -> Vec<MessageSummary> {
-        let base = match folder_id {
-            "fav-inbox" => "inbox",
-            "fav-sent" => "sent",
-            other => other,
-        };
-        let mut out: Vec<MessageSummary> = self
-            .messages
-            .iter()
-            .filter(|m| match base {
-                "v-unread" => m.unread,
-                "v-flagged" => m.flagged,
-                b => m.folder_id == b,
-            })
-            .cloned()
-            .collect();
-        out.sort_by(|a, b| b.received.cmp(&a.received));
-        out
-    }
-
+impl FolderTree {
     /// Recherche d'un dossier par identifiant dans toutes les sections.
     pub fn find_folder(&self, id: &str) -> Option<&Folder> {
         fn walk<'a>(folders: &'a [Folder], id: &str) -> Option<&'a Folder> {
@@ -179,6 +78,161 @@ impl MailSnapshot {
         }
         self.sections.iter().find_map(|s| walk(&s.folders, id))
     }
+
+    /// Première « Boîte de réception », sinon le premier dossier.
+    pub fn default_folder(&self) -> Option<&Folder> {
+        let all = || self.sections.iter().flat_map(|s| s.folders.iter());
+        all().find(|f| f.role == FolderRole::Inbox).or_else(|| all().next())
+    }
+}
+
+/// Champ de tri de la liste.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SortField {
+    #[default]
+    Date,
+    From,
+    Subject,
+    Size,
+}
+
+impl SortField {
+    pub const ALL: [SortField; 4] = [SortField::Date, SortField::From, SortField::Subject, SortField::Size];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Date => "Date",
+            Self::From => "De",
+            Self::Subject => "Objet",
+            Self::Size => "Taille",
+        }
+    }
+
+    /// Sens par défaut quand on choisit ce tri : les plus récents et les plus gros d'abord.
+    pub fn default_descending(self) -> bool {
+        matches!(self, Self::Date | Self::Size)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListQuery {
+    pub folder_id: String,
+    pub unread_only: bool,
+    pub sort: SortField,
+    pub descending: bool,
+}
+
+/// Groupe contigu de la liste triée (« Aujourd'hui », un expéditeur, une tranche de taille…).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListGroup {
+    pub label: String,
+    pub start: u32,
+    pub count: u32,
+}
+
+/// Vue ouverte sur un dossier. Le cœur garde l'ordre des éléments ; l'interface demande
+/// les lignes visibles par tranches (`list_rows`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListView {
+    pub token: u64,
+    /// Éléments de la vue, filtre appliqué.
+    pub count: u32,
+    /// Compteurs du dossier entier, pour la barre d'état.
+    pub folder_total: u32,
+    pub folder_unread: u32,
+    pub groups: Vec<ListGroup>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FlagState {
+    #[default]
+    None,
+    Flagged,
+    Done,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Importance {
+    Low,
+    #[default]
+    Normal,
+    High,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CategoryChip {
+    pub name: String,
+    /// Couleur CSS ; `None` pour une catégorie sans couleur ou sans définition.
+    pub color: Option<String>,
+}
+
+/// Ligne de la liste des messages, prête à afficher.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageSummary {
+    pub id: String,
+    /// Position dans la vue.
+    pub pos: u32,
+    pub from: String,
+    pub subject: String,
+    pub preview: String,
+    /// Libellé court de la liste (« 09:12 », « lun. 17:05 », « 04/10/2026 »).
+    pub time_label: String,
+    pub size_label: String,
+    pub unread: bool,
+    pub flag: FlagState,
+    pub importance: Importance,
+    pub has_attachments: bool,
+    pub categories: Vec<CategoryChip>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentInfo {
+    pub index: u32,
+    pub name: String,
+    pub size_label: String,
+    /// Message joint (`message/rfc822`).
+    pub message: bool,
+    /// Type exécutable : ouverture refusée, enregistrement possible.
+    pub blocked: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum BodyView {
+    /// Document complet pour un `iframe` isolé (`srcdoc`, sans scripts).
+    Html { srcdoc: String },
+    Text { text: String },
+    Empty,
+}
+
+/// Message complet pour le volet de lecture.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageView {
+    pub id: String,
+    pub subject: String,
+    pub from: String,
+    pub from_address: String,
+    pub to: String,
+    pub cc: String,
+    pub date_label: String,
+    pub importance: Importance,
+    pub flag: FlagState,
+    pub flag_label: Option<String>,
+    pub categories: Vec<CategoryChip>,
+    pub attachments: Vec<AttachmentInfo>,
+    pub body: BodyView,
+    /// Contenu distant présent et bloqué (images, feuilles de style).
+    pub remote_blocked: bool,
+    /// Élément autre qu'un courrier (contact, rendez-vous…), en attendant les modules dédiés.
+    pub item_kind: Option<String>,
 }
 
 /// Initiales pour la pastille de l'expéditeur.

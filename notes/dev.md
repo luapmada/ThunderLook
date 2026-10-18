@@ -60,6 +60,24 @@ Un nouvel import du même fichier d'origine remplace la source précédente (bas
 - Rôles des dossiers : EntryID du magasin et de la Boîte de réception ([MS-OXOSFLD]), puis repli sur le nom
   des dossiers de premier niveau (PST de comptes IMAP sans ces EntryID).
 
+## Lecture (J2)
+- Dossier de données de l'application, par ordre de priorité :
+  1. `THUNDERLOOK_DATA` ;
+  2. `dataDir` dans `%APPDATA%\fr.local.thunderlook\config.json` ;
+  3. `%LOCALAPPDATA%\fr.local.thunderlook\data`.
+- `THUNDERLOOK_PERF=1` : temps d'ouverture des dossiers dans `%APPDATA%\fr.local.thunderlook\perf.log`.
+- Mesures et balayage du volet de lecture : `cargo run --release -p thunderlook-mailbox --example bench -- <données> [pas]`.
+- Liste virtualisée :
+  - le cœur garde l'ordre des éléments de chaque vue (`open_list` → jeton) ;
+  - l'interface demande les lignes visibles par tranches de 100 (`list_rows`) ;
+  - hauteurs fixes : `--msg-h` = `list::row_height`, en-tête de groupe 28 px.
+- Corps HTML : `iframe` `sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"`, **sans** `allow-scripts`, avec une CSP propre au message (`default-src 'none'`, images distantes seulement si l'utilisateur les autorise).
+  - `allow-same-origin` sert à ajuster la hauteur et à relayer les raccourcis clavier.
+  - Les liens partent dans le navigateur (`on_new_window` du cœur).
+- Pièces jointes :
+  - ouverture via un fichier temporaire (`%TEMP%\ThunderLook`) ;
+  - types exécutables refusés à l'ouverture, mais « Enregistrer sous » reste possible.
+
 ## Notes techniques
 - CSP stricte. Le chargeur de Trunk récupère le `.wasm` par `fetch`, d'où `connect-src 'self'` et `script-src 'wasm-unsafe-eval'`. Sans eux, la fenêtre reste vide.
 - `aria-level` n'existe pas dans les attributs typés de Leptos 0.8 (tachys). On passe par la propriété DOM `ariaLevel`, que Chromium reflète en attribut.

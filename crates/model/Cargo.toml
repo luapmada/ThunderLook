@@ -5,10 +5,6 @@ edition = "2024"
 publish = false
 description = "Types et logique d'affichage partagés entre le cœur et l'interface de ThunderLook"
 
-[features]
-# Horloge locale (côté cœur natif uniquement) : données de démonstration datées par rapport à maintenant.
-clock = ["chrono/clock"]
-
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "serde"] }

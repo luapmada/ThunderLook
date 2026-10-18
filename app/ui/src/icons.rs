@@ -4,18 +4,18 @@ use icondata_core::Icon;
 use leptos::prelude::*;
 
 pub use icondata_lu::{
-    LuArchive as ARCHIVE, LuArrowDownAZ as SORT_AZ, LuArrowUp as ARROW_UP, LuBan as BAN, LuBookUser as BOOK_USER,
+    LuArchive as ARCHIVE, LuArrowDown as ARROW_DOWN, LuArrowDownAZ as SORT_AZ, LuArrowUp as ARROW_UP, LuBan as BAN, LuBookUser as BOOK_USER,
     LuCalendar as CALENDAR, LuCalendarDays as CALENDAR_DAYS, LuCalendarPlus as CALENDAR_PLUS, LuCheck as CHECK,
     LuCheckCheck as CHECK_CHECK, LuChevronDown as CHEVRON_DOWN,
-    LuChevronRight as CHEVRON_RIGHT, LuCircleHelp as HELP, LuClock as CLOCK, LuCloudOff as CLOUD_OFF,
-    LuDownload as DOWNLOAD, LuEllipsis as ELLIPSIS, LuEraser as ERASER, LuEye as EYE, LuFlag as FLAG,
+    LuChevronRight as CHEVRON_RIGHT, LuCircleAlert as CIRCLE_ALERT, LuCircleHelp as HELP, LuClock as CLOCK, LuCloudOff as CLOUD_OFF,
+    LuDownload as DOWNLOAD, LuEllipsis as ELLIPSIS, LuEraser as ERASER, LuEye as EYE, LuFile as FILE, LuFlag as FLAG,
     LuFolderInput as FOLDER_INPUT, LuFolderPlus as FOLDER_PLUS, LuFolderSearch as FOLDER_SEARCH,
-    LuForward as FORWARD, LuFunnel as FUNNEL, LuInfo as INFO, LuListChecks as LIST_CHECKS,
+    LuForward as FORWARD, LuFunnel as FUNNEL, LuImageOff as IMAGE_OFF, LuInfo as INFO, LuListChecks as LIST_CHECKS,
     LuListFilter as LIST_FILTER, LuMail as MAIL, LuMailOpen as MAIL_OPEN, LuMailPlus as MAIL_PLUS,
     LuMessageSquareOff as MESSAGE_OFF, LuMinus as MINUS, LuPanelLeftClose as PANEL_LEFT_CLOSE,
     LuPanelLeftOpen as PANEL_LEFT_OPEN, LuPanelRight as PANEL_RIGHT, LuPaperclip as PAPERCLIP, LuPencil as PENCIL,
-    LuPlus as PLUS, LuRefreshCw as REFRESH, LuReply as REPLY, LuReplyAll as REPLY_ALL, LuRows2 as ROWS_2,
-    LuRows3 as ROWS_3, LuScissors as SCISSORS, LuSearch as SEARCH, LuSend as SEND, LuSettings2 as SETTINGS,
+    LuPlus as PLUS, LuRefreshCw as REFRESH, LuReply as REPLY, LuReplyAll as REPLY_ALL, LuRows2 as ROWS_2, LuSave as SAVE,
+    LuRows3 as ROWS_3, LuScissors as SCISSORS, LuSearch as SEARCH, LuSend as SEND, LuSettings2 as SETTINGS, LuShieldAlert as SHIELD_ALERT,
     LuSquareCheck as SQUARE_CHECK, LuStar as STAR, LuTags as TAGS, LuTrash2 as TRASH, LuUndo2 as UNDO,
     LuUsers as USERS, LuZap as ZAP,
 };

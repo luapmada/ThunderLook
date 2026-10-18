@@ -11,11 +11,7 @@ use crate::{
 #[component]
 pub fn StatusBar() -> impl IntoView {
     let ui = use_ui();
-    let counts = Memo::new(move |_| {
-        let msgs = ui.visible_messages();
-        (msgs.len() as u32, msgs.iter().filter(|m| m.unread).count() as u32)
-    });
-    let demo = move || ui.snapshot.with(|s| s.as_ref().is_some_and(|s| s.demo));
+    let counts = Memo::new(move |_| ui.view.with(|v| v.as_ref().map(|v| (v.folder_total, v.folder_unread)).unwrap_or_default()));
 
     view! {
         <footer class="statusbar" aria-label="Barre d'état">
@@ -27,8 +23,8 @@ pub fn StatusBar() -> impl IntoView {
                 .into_any(),
                 other => view! { <span>{format!("{} : module prévu après le courrier", other.label())}</span> }.into_any(),
             }}
-            <Show when=demo>
-                <span class="badge-demo">"Données de démonstration"</span>
+            <Show when=move || ui.module.get() == Module::Mail && ui.unread_only.get()>
+                <span class="badge-filter">"Filtre appliqué"</span>
             </Show>
             {move || ui.error.get().map(|e| view! { <span class="status-error" role="alert">{e}</span> })}
             <div class="end">

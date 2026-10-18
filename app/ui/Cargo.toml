@@ -12,7 +12,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 wasm-bindgen = "0.2.129"
 wasm-bindgen-futures = "0.4.79"
-web-sys = { version = "0.3.106", features = ["Document", "Element", "EventTarget", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "Node", "NodeList", "PointerEvent", "Window"] }
+js-sys = "0.3.106"
+web-sys = { version = "0.3.106", features = ["Document", "Element", "EventTarget", "HtmlElement", "HtmlIFrameElement", "HtmlInputElement", "KeyboardEvent", "Node", "NodeList", "Performance", "PointerEvent", "CssStyleDeclaration", "Window"] }
 console_error_panic_hook = "0.1"
 icondata_core = "0.1.0"
 icondata_lu = "0.1.0"

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use leptos::prelude::*;
-use thunderlook_model::{Folder, MailSnapshot};
+use thunderlook_model::{Folder, FolderTree};
 
 use crate::{
     icons::*,
@@ -24,10 +24,10 @@ struct Row {
     parent: Option<String>,
 }
 
-fn flatten(snapshot: &MailSnapshot, collapsed: &HashSet<String>) -> Vec<Row> {
-    fn push_folders(rows: &mut Vec<Row>, folders: &[Folder], level: u32, parent: &str, collapsed: &HashSet<String>) {
+fn flatten(tree: &FolderTree, collapsed: &HashSet<String>, expanded_set: &HashSet<String>) -> Vec<Row> {
+    fn push_folders(rows: &mut Vec<Row>, folders: &[Folder], level: u32, parent: &str, expanded_set: &HashSet<String>) {
         for f in folders {
-            let expanded = !collapsed.contains(&f.id);
+            let expanded = expanded_set.contains(&f.id);
             rows.push(Row {
                 id: f.id.clone(),
                 label: f.name.clone(),
@@ -40,12 +40,12 @@ fn flatten(snapshot: &MailSnapshot, collapsed: &HashSet<String>) -> Vec<Row> {
                 parent: Some(parent.to_string()),
             });
             if expanded {
-                push_folders(rows, &f.children, level + 1, &f.id, collapsed);
+                push_folders(rows, &f.children, level + 1, &f.id, expanded_set);
             }
         }
     }
     let mut rows = Vec::new();
-    for s in &snapshot.sections {
+    for s in &tree.sections {
         let expanded = !collapsed.contains(&s.id);
         rows.push(Row {
             id: s.id.clone(),
@@ -59,7 +59,7 @@ fn flatten(snapshot: &MailSnapshot, collapsed: &HashSet<String>) -> Vec<Row> {
             parent: None,
         });
         if expanded {
-            push_folders(&mut rows, &s.folders, 2, &s.id, collapsed);
+            push_folders(&mut rows, &s.folders, 2, &s.id, expanded_set);
         }
     }
     rows
@@ -74,7 +74,8 @@ pub fn FolderPane() -> impl IntoView {
     let ui = use_ui();
     let rows = Memo::new(move |_| {
         let collapsed = ui.collapsed_nodes.get();
-        ui.snapshot.with(|s| s.as_ref().map(|s| flatten(s, &collapsed)).unwrap_or_default())
+        let expanded = ui.expanded_nodes.get();
+        ui.tree.with(|t| t.as_ref().map(|t| flatten(t, &collapsed, &expanded)).unwrap_or_default())
     });
 
     let focus_row = move |row: &Row| {
@@ -83,7 +84,6 @@ pub fn FolderPane() -> impl IntoView {
             // La sélection suit le focus, comme dans le volet des dossiers de référence.
             if ui.folder.get_untracked() != row.id {
                 ui.folder.set(row.id.clone());
-                ui.selected.set(None);
             }
         }
         if let Some(el) = document().get_element_by_id(&node_dom_id(&row.id)) {
@@ -92,13 +92,16 @@ pub fn FolderPane() -> impl IntoView {
     };
 
     let toggle = move |id: String, expand: bool| {
-        ui.collapsed_nodes.update(|c| {
-            if expand {
-                c.remove(&id);
-            } else {
-                c.insert(id);
-            }
-        });
+        let section = rows.with_untracked(|r| r.iter().any(|x| x.id == id && x.section));
+        if section {
+            ui.collapsed_nodes.update(|c| {
+                if expand { c.remove(&id) } else { c.insert(id) };
+            });
+        } else {
+            ui.expanded_nodes.update(|c| {
+                if expand { c.insert(id) } else { c.remove(&id) };
+            });
+        }
     };
 
     let on_key = move |ev: leptos::ev::KeyboardEvent| {
@@ -123,7 +126,7 @@ pub fn FolderPane() -> impl IntoView {
                     focus_row(parent);
                 }
             }
-            "Enter" | " " if row.expandable && row.section => toggle(row.id.clone(), !row.expanded),
+            "Enter" | " " if row.expandable => toggle(row.id.clone(), !row.expanded),
             _ => return,
         }
         ev.prevent_default();

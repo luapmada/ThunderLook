@@ -1,14 +1,19 @@
 //! Racine de l'interface : état partagé, chargement, raccourcis globaux, disposition des volets.
 
+use std::collections::HashSet;
+
 use leptos::{prelude::*, task::spawn_local};
-use thunderlook_model::settings::{Density, ReadingPane, Settings};
+use thunderlook_model::{
+    ListQuery,
+    settings::{Density, ReadingPane, Settings},
+};
 use wasm_bindgen::JsCast;
 
 use crate::{
     commandbar::CommandBar,
     folders::FolderPane,
     ipc,
-    list::MessageList,
+    list::{Layout, MessageList, PAGE, ensure_rows, row_height},
     reading::ReadingPane as ReadingPaneView,
     splitter::Splitter,
     state::{Module, Ui, use_ui},
@@ -53,21 +58,152 @@ fn cycle_focus(ui: Ui, backward: bool) {
     let _ = targets[next as usize].focus();
 }
 
+/// Raccourcis valables partout, y compris dans le corps d'un message (relayés depuis l'iframe).
+pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
+    let key = ev.key();
+    let (ctrl, alt, shift) = (ev.ctrl_key(), ev.alt_key(), ev.shift_key());
+    let module = match (ctrl, alt, key.as_str()) {
+        (true, false, "1") => Some(Module::Mail),
+        (true, false, "2") => Some(Module::Calendar),
+        (true, false, "3") => Some(Module::Contacts),
+        (true, false, "4") => Some(Module::Tasks),
+        _ => None,
+    };
+    if let Some(m) = module {
+        ev.prevent_default();
+        ui.module.set(m);
+        return;
+    }
+    if key == "F6" {
+        ev.prevent_default();
+        cycle_focus(ui, shift);
+        return;
+    }
+    if (ctrl && !alt && key.eq_ignore_ascii_case("e")) || key == "F3" {
+        ev.prevent_default();
+        if let Some(s) = ui.refs.search.get_untracked() {
+            let _ = s.focus();
+            s.select();
+        }
+        return;
+    }
+    // Élément suivant / précédent, d'où que vienne le focus.
+    if ctrl && !alt && (key == "." || key == ",") {
+        ev.prevent_default();
+        let row_h = row_height(ui.settings.get_untracked().density);
+        let collapsed = ui.collapsed_groups.get_untracked();
+        let delta = if key == "." { 1 } else { -1 };
+        let target = ui
+            .view
+            .with_untracked(|v| v.as_ref().and_then(|v| Layout::new(v, collapsed, row_h).step(ui.selected_pos.get_untracked(), delta)));
+        if target.is_some() {
+            ui.selected_pos.set(target);
+        }
+        return;
+    }
+    if key == "Escape" && ui.bar_popup.get_untracked() {
+        ui.bar_popup.set(false);
+        return;
+    }
+    if reserved(ev) {
+        ev.prevent_default();
+    }
+}
+
+fn now_ms() -> f64 {
+    window().performance().map(|p| p.now()).unwrap_or_default()
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     let ui = Ui::new();
     provide_context(ui);
+    let requested = StoredValue::new(HashSet::<(u64, u32)>::new());
+    provide_context(requested);
 
-    // Chargement initial : réglages puis instantané du courrier.
+    // Chargement initial : réglages puis arborescence ; ouverture de la Boîte de réception.
     spawn_local(async move {
         match ipc::load_settings().await {
             Ok(s) => ui.settings.set(s.clamped()),
             Err(e) => ui.error.set(Some(e)),
         }
         ui.settings_loaded.set(true);
-        match ipc::mail_snapshot().await {
-            Ok(s) => ui.snapshot.set(Some(s)),
+        match ipc::folder_tree().await {
+            Ok(t) => {
+                if let Some(e) = &t.error {
+                    ui.error.set(Some(e.clone()));
+                }
+                if let Some(f) = t.default_folder() {
+                    ui.folder.set(f.id.clone());
+                    ui.tree_focus.set(f.id.clone());
+                }
+                ui.tree.set(Some(t));
+            }
             Err(e) => ui.error.set(Some(e)),
+        }
+    });
+
+    // Ouverture d'une vue à chaque changement de dossier, de filtre ou de tri. La première tranche
+    // est demandée tout de suite ; la mesure couvre les deux allers-retours et l'affichage.
+    Effect::new(move |_| {
+        let folder = ui.folder.get();
+        let unread_only = ui.unread_only.get();
+        let (sort, descending) = ui.sort.get();
+        if folder.is_empty() {
+            return;
+        }
+        let query = ListQuery { folder_id: folder, unread_only, sort, descending };
+        let t0 = now_ms();
+        spawn_local(async move {
+            let q = query.clone();
+            let current = move || {
+                ui.folder.get_untracked() == q.folder_id
+                    && ui.unread_only.get_untracked() == q.unread_only
+                    && ui.sort.get_untracked() == (q.sort, q.descending)
+            };
+            let view = match ipc::open_list(&query).await {
+                Ok(v) => v,
+                Err(e) => {
+                    ui.error.set(Some(e));
+                    return;
+                }
+            };
+            if !current() {
+                return;
+            }
+            let first = match ipc::list_rows(view.token, 0, PAGE).await {
+                Ok(r) => r,
+                Err(e) => {
+                    ui.error.set(Some(e));
+                    Vec::new()
+                }
+            };
+            if !current() {
+                return;
+            }
+            let count = view.count;
+            requested.set_value(HashSet::from([(view.token, 0)]));
+            ui.collapsed_groups.set(HashSet::new());
+            ui.rows.set(first.into_iter().map(|m| (m.pos, m)).collect());
+            ui.view.set(Some(view));
+            ui.selected_pos.set((count > 0).then_some(0));
+            request_animation_frame(move || {
+                let ms = now_ms() - t0;
+                let label = format!("ouverture {} : {count} éléments, tri {:?}, non lus {}", query.folder_id, query.sort, query.unread_only);
+                spawn_local(async move { ipc::perf_mark(&label, ms).await });
+            });
+        });
+    });
+
+    // Identifiant du message sélectionné, dès que sa ligne est reçue (chargée au besoin).
+    Effect::new(move |_| {
+        let pos = ui.selected_pos.get();
+        let id = pos.and_then(|p| ui.rows.with(|r| r.get(&p).map(|m| m.id.clone())));
+        if let (Some(p), None) = (pos, &id) {
+            ensure_rows(ui, [p], requested);
+        }
+        if ui.selected.get_untracked() != id {
+            ui.selected.set(id);
         }
     });
 
@@ -91,42 +227,7 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    let keys = window_event_listener(leptos::ev::keydown, move |ev| {
-        let key = ev.key();
-        let (ctrl, alt, shift) = (ev.ctrl_key(), ev.alt_key(), ev.shift_key());
-        let module = match (ctrl, alt, key.as_str()) {
-            (true, false, "1") => Some(Module::Mail),
-            (true, false, "2") => Some(Module::Calendar),
-            (true, false, "3") => Some(Module::Contacts),
-            (true, false, "4") => Some(Module::Tasks),
-            _ => None,
-        };
-        if let Some(m) = module {
-            ev.prevent_default();
-            ui.module.set(m);
-            return;
-        }
-        if key == "F6" {
-            ev.prevent_default();
-            cycle_focus(ui, shift);
-            return;
-        }
-        if (ctrl && !alt && key.eq_ignore_ascii_case("e")) || key == "F3" {
-            ev.prevent_default();
-            if let Some(s) = ui.refs.search.get_untracked() {
-                let _ = s.focus();
-                s.select();
-            }
-            return;
-        }
-        if key == "Escape" && ui.bar_popup.get_untracked() {
-            ui.bar_popup.set(false);
-            return;
-        }
-        if reserved(&ev) {
-            ev.prevent_default();
-        }
-    });
+    let keys = window_event_listener(leptos::ev::keydown, move |ev| global_key(ui, &ev));
     on_cleanup(move || keys.remove());
 
     view! {

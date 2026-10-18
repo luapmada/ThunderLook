@@ -1,9 +1,9 @@
 //! État partagé de l'interface (fourni par contexte à tous les composants).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use leptos::{html, prelude::*};
-use thunderlook_model::{DateGroup, MailSnapshot, MessageSummary, settings::Settings};
+use thunderlook_model::{FolderTree, ListView, MessageSummary, SortField, settings::Settings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Module {
@@ -86,14 +86,26 @@ pub struct Ui {
     pub settings_loaded: RwSignal<bool>,
     /// Mode « onglets seuls » : barre déroulée temporairement.
     pub bar_popup: RwSignal<bool>,
-    pub snapshot: RwSignal<Option<MailSnapshot>>,
+    pub tree: RwSignal<Option<FolderTree>>,
     pub error: RwSignal<Option<String>>,
+    /// Dossier affiché (identifiant de l'arborescence, favoris compris).
     pub folder: RwSignal<String>,
     pub tree_focus: RwSignal<String>,
-    pub selected: RwSignal<Option<String>>,
     pub unread_only: RwSignal<bool>,
-    pub collapsed_groups: RwSignal<HashSet<DateGroup>>,
+    /// Tri de la liste : champ et sens décroissant.
+    pub sort: RwSignal<(SortField, bool)>,
+    /// Vue ouverte sur le dossier courant, et lignes déjà reçues (par position).
+    pub view: RwSignal<Option<ListView>>,
+    pub rows: RwSignal<HashMap<u32, MessageSummary>>,
+    /// Position sélectionnée dans la vue, et identifiant du message une fois la ligne reçue.
+    pub selected_pos: RwSignal<Option<u32>>,
+    pub selected: RwSignal<Option<String>>,
+    pub collapsed_groups: RwSignal<HashSet<String>>,
+    /// Sections repliées, et dossiers dépliés (les dossiers à sous-dossiers sont repliés par défaut).
     pub collapsed_nodes: RwSignal<HashSet<String>>,
+    pub expanded_nodes: RwSignal<HashSet<String>>,
+    /// Messages dont le contenu distant a été autorisé pendant la session.
+    pub remote_allowed: RwSignal<HashSet<String>>,
     pub refs: Refs,
 }
 
@@ -105,14 +117,20 @@ impl Ui {
             settings: RwSignal::new(Settings::default()),
             settings_loaded: RwSignal::new(false),
             bar_popup: RwSignal::new(false),
-            snapshot: RwSignal::new(None),
+            tree: RwSignal::new(None),
             error: RwSignal::new(None),
-            folder: RwSignal::new("inbox".into()),
-            tree_focus: RwSignal::new("inbox".into()),
-            selected: RwSignal::new(None),
+            folder: RwSignal::new(String::new()),
+            tree_focus: RwSignal::new(String::new()),
             unread_only: RwSignal::new(false),
+            sort: RwSignal::new((SortField::Date, true)),
+            view: RwSignal::new(None),
+            rows: RwSignal::new(HashMap::new()),
+            selected_pos: RwSignal::new(None),
+            selected: RwSignal::new(None),
             collapsed_groups: RwSignal::new(HashSet::new()),
             collapsed_nodes: RwSignal::new(HashSet::new()),
+            expanded_nodes: RwSignal::new(HashSet::new()),
+            remote_allowed: RwSignal::new(HashSet::new()),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),
@@ -121,17 +139,6 @@ impl Ui {
                 reading: NodeRef::new(),
             },
         }
-    }
-
-    /// Messages du dossier courant, filtre « Non lus » appliqué.
-    pub fn visible_messages(&self) -> Vec<MessageSummary> {
-        let folder = self.folder.get();
-        let unread_only = self.unread_only.get();
-        self.snapshot.with(|s| {
-            s.as_ref()
-                .map(|s| s.messages_in(&folder).into_iter().filter(|m| !unread_only || m.unread).collect())
-                .unwrap_or_default()
-        })
     }
 
     pub fn update_settings(&self, f: impl FnOnce(&mut Settings)) {

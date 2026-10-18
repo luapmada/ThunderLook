@@ -102,6 +102,20 @@ Chaque entrée : action → résultat → cause → contournement → source.
 - Limite pratique : chaque requête CLI suivante (xrefs, décompilation) coûterait encore environ 20 min, puisque le snapshot ne garde pas la base.
   - L'investigation est reportée au jalon J6, via le serveur MCP après redémarrage de Claude Code, et seulement si l'import des règles bute sur des champs inconnus.
 
+**`OUTLOOK.EXE` par le serveur MCP (2026-10-19, session de Claude Code redémarrée, Ghidra visible)**
+- `open_binary` (fournisseur `ghidra`) : immédiat, avec l'identité du binaire et son architecture x86_64. L'analyse est paresseuse.
+- `search_strings 'CRuleElement'` : **échec deux fois**, `provider_timeout` au bout de **330 000 ms** (`retryable: true`).
+  - Le deuxième essai repart de zéro : l'analyse partielle n'est pas conservée entre deux requêtes.
+- Cause probable : le serveur MCP garde son délai de démarrage de Ghidra par défaut (330 s). La CLI n'a réussi qu'avec `REA_GHIDRA_STARTUP_TIMEOUT_MS=14400000`, pour 20 min d'analyse.
+- **Limite** : avec la configuration MCP par défaut, REA ne peut pas analyser un binaire de la taille d'`OUTLOOK.EXE` (46,6 Mo).
+  - Le message d'erreur conseille une « requête plus petite ». Mais toute requête déclenche l'analyse complète du programme.
+- **Contournement proposé, non appliqué** :
+  - ajouter `REA_GHIDRA_STARTUP_TIMEOUT_MS=14400000` dans la section `env` du serveur `rea` (`~/.claude.json`) ;
+  - redémarrer Claude Code ;
+  - relancer `search_strings`, puis `xrefs 0x142216ad8`.
+
+  C'est une modification de la configuration de Claude Code : elle est laissée à Paul.
+
 **Observation d'interface**
 - `observe_native_ui` et `capture_native_ui_scenario` sont macOS uniquement.
 - Contournement : `tools/uia_dump.ps1` (UI Automation + `PrintWindow`), `tools/uia_menu.ps1` et `tools/uia_summarize.py`.

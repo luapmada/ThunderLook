@@ -34,12 +34,14 @@
   /* Densité confortable (défaut) */
   --row-pad-y: 10px;
   --row-gap: 2px;
+  --msg-h: 80px; /* = list::row_height(Comfortable) */
   --bar-h: 44px;
 }
 
 :root[data-density="compact"] {
   --row-pad-y: 6px;
   --row-gap: 0px;
+  --msg-h: 66px; /* = list::row_height(Compact) */
   --bar-h: 40px;
 }
 
