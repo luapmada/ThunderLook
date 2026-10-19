@@ -72,6 +72,10 @@ Un nouvel import du même fichier d'origine n'est accepté qu'avec `--replace`. 
 - `tools/uia_invoke.ps1` : active un bouton ou un onglet par son nom (Invoke, Toggle, SelectionItem) et relève les lignes visibles.
   - Option `-Click` : vrai clic de souris, refusé si la fenêtre n'est pas au premier plan ou si le point sort de la fenêtre.
   - Le clic n'a pas visé la bonne ligne le 2026-10-19 : à fiabiliser avant de s'y fier.
+- **Vérification d'interface des jalons** : `node tools/ui_check.mjs` (après `cargo tauri build --no-bundle`).
+  - Le script lance ThunderLook avec CDP (port 9333) sur les vraies données, exécute les vérifications de `CHECKS`, rétablit les réglages et ferme l'application. Code de sortie 1 en cas d'échec.
+  - Il décoche « marquer comme lu quand la sélection change » pendant l'exécution, puis le rétablit : le nombre de non-lus de la base est identique avant et après.
+  - J3b : trouve une conversation repliée, teste le chevron, le volet de lecture, et ← → depuis l'en-tête et depuis un élément déplié.
 - **Préférer `tools/cdp.mjs`** : il pilote la page par le protocole de débogage de WebView2. Les clics et les touches arrivent dans la page seule, aucune entrée système n'est envoyée.
   - Lancer avec `$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'`.
   - Puis `node tools/cdp.mjs eval "<JS>"` ou `node tools/cdp.mjs key ArrowRight`. La touche va à l'élément qui a le focus dans la page.
