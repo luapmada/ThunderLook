@@ -53,7 +53,47 @@ python -I tools/rule_catalog.py --dll "C:\Program Files\Microsoft Office\root\Of
 - Les éléments masqués ou obsolètes ont pour libellé « (néant) » (`0x797e`) et `f5` = 0/0 : `0xE7`, `0xE9`, `0xEB`, `0xEC`, `0x141`, `0x143`.
 - Les types `0x18` à `0x1B` déclenchent une assertion (`Ordinal_7228`, balise `0x10f222`), puis une valeur générique est utilisée.
 
+## En-tête de règle (2026-10-19, `0x14084a418`)
+
+Trouvé par les appelants du singleton du catalogue (`0x1400b9b28`) puis de la lecture d'un dword (`0x1405895b0`).
+La même fonction lit, écrit ou mesure : le mode est dans le contexte du flux.
+Paramètres : la règle, le flux, la **version du flux** (le `RW_Magic`), des options.
+
+**Les versions sont des nombres, pas des « magic »** : `RW_Magic` est un u32 de version, suivi d'un second u32.
+
+| Valeur | Octets | Version d'Outlook (spec) |
+|---|---|---|
+| 0xED03C (970 812) | `3C D0 0E 00` | OL98 |
+| 0xE5EBD | `BD 5E 0E 00` | OL2000 |
+| 0xF4240 (1 000 000) | `40 42 0F 00` | OL2002 |
+| 0x140000 (1 310 720) | `00 00 14 00` | OL2016 et plus |
+
+Les seuils lus dans le code : `< 1 000 000` (chaînes ANSI), `> 0xED03B`, `≥ 0xECFDE`, `≤ 0x140000`, `> 0x140000`, `= 1 100 000`.
+
+Lecture d'une règle, dans l'ordre :
+1. **u32 `XR_Magic`** (version ≥ 1 000 000, ou si l'appelant ne fournit pas d'options) → règle `+0x90`.
+   - Les **24 bits bas** sont la version de cette règle (`& 0xFFFFFF`). Ce sont les « 3 octets » de la spec : `00 00 14` = 0x140000.
+   - L'**octet haut** est le « locator » de la spec (`00` ou `06`). Il sert d'index dans une table de versions minimales (`DAT_1420af5b0[x >> 24]`, dans `0x140849260`).
+2. **Nom de la règle** : chaîne au codage de longueur décrit plus bas (`0x14084b028`).
+3. **u32 « active »** → bit 3 de `+0x94`.
+4. **u32** → bit 4 de `+0x94` (le « unknown = 0 » de la spec, pour OL2002 et plus). À l'écriture, il est calculé par `0x140849190`.
+5. **Trois u32** : `+0xAC`, puis `+0xA8` (version > 0xED03B), puis `+0x98`. C'est le bloc « magic » de 12 octets de la spec.
+   - Avant 1 000 000 avec options, un chemin à part est suivi.
+6. **Après 0x140000** (format plus récent qu'OL2016) : un u32 de longueur et un bloc d'octets → `+0xA0`. La spec ne le décrit pas.
+   - Jusqu'à 0x140000, le u32 est à la place un booléen « éléments présents ».
+7. **`bytecount`** (écriture, versions 1 000 000 à 0x140000) : Outlook réserve 4 octets, écrit la suite, puis revient y inscrire la taille de tout ce qui suit. Cela confirme la spec.
+8. **Éléments** (`0x140bfba40`, ignorés si le bit `0x40` est mis et la version vaut 1 100 000) : un u16 de nombre d'éléments, puis pour chacun une **étiquette d'objet MFC (`CArchive`)** :
+   - `0xFFFF` = nouvelle classe, suivie de u16 schéma, u16 longueur (au plus 255) et du nom de classe (« CRuleElement ») ;
+   - `0x8001` = classe déjà vue, n° 1 (0x8000 | index). C'est le « séparateur » de la spec ;
+   - puis l'élément lui-même (slot 11 de la vtable, `0x14084b380`, voir plus haut).
+
+## Codage de longueur des chaînes (`0x1405b1b60` Unicode, `0x1405b1f48` ANSI)
+
+- **Lecture** : un octet `n`. Si `n = 0xFF`, un u16 suit et donne la longueur. Viennent ensuite `n` caractères : UTF-16 à partir de la version 1 000 000, octets avant.
+- **Écriture** : un octet si la longueur est au plus 254, sinon `0xFF` suivi de la longueur sur u16.
+- **Réponse à la question de la spec** : la forme non minimale `FF 00 00` (= 0) est **acceptée** à la lecture. Il n'y a ni forme 32 bits ni marqueur Unicode à la MFC (`FF FE FF`) : longueur maximale 65 535.
+
 ## Pas encore vu
 
-- Les bits de `XR_Magic` et le codage de longueur sur 3 octets : ils appartiennent à l'en-tête du flux et de chaque règle, en amont de `CRuleElement`. Il faudra trouver l'appelant de `0x14084b380`, une méthode virtuelle appelée par la liste d'éléments d'une règle.
 - La lecture de chaque type de valeur (slot 1 des 30 classes créées par `0x14084bda0`), sauf les types `0x0e` et `0x0f`.
+- Le rôle de la règle `+0xAC` et `+0x98`, et le contenu du bloc des versions > 0x140000.

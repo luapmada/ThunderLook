@@ -150,3 +150,10 @@ Chaque entrée : action → résultat → cause → contournement → source.
 1. REA sous WSL2 (Linux), avec Ghidra Linux, sur une copie du binaire. C'est la voie la plus documentée.
 2. Relever `REA_GHIDRA_STARTUP_TIMEOUT_MS` (3 600 000 ms ou plus) et analyser par fonctions ciblées.
 3. Pour tester REA en statique sans enjeu juridique : binaires libres, ou nos propres binaires (voir `notes/juridique.md`).
+
+**En-tête du flux de règles (2026-10-19, nouvelle session MCP)**
+- Le serveur MCP s'est reconnecté en cours de session et la session d'analyse a été perdue. Il a fallu tout réanalyser : la première requête est passée en tâche de fond pendant plusieurs minutes.
+  - **Limite** : rien n'est gardé entre deux sessions du serveur. Un instantané (`snapshot_path`) l'éviterait, mais il faut l'avoir exporté avant.
+- La méthode qui a payé : lister les **appelants** d'une primitive connue (singleton du catalogue, lecture d'un dword), décompiler en lot les voisins d'adresse, puis repérer les constantes de version dans le pseudo-code.
+- `batch_decompile` sur 7 fonctions dépasse la taille de réponse autorisée. REA enregistre alors le résultat dans un fichier, découpé ensuite en un fichier `.c` par fonction (`data/rea/`).
+- Résultats dans `notes/rea/regles-outlook.md` : versions du flux, `XR_Magic`, `bytecount`, étiquettes d'objet MFC et codage des longueurs.
