@@ -126,6 +126,16 @@ Chaque entrée : action → résultat → cause → contournement → source.
 - **Limite** : `xrefs` sur `0x14276fe50` remonte aussi `FUN_140b4f200`. Cette fonction parcourt une table de fonctionnalités (`FIsFeatureEnabled`) qui se termine juste avant le `CRuntimeClass`, et l'adresse lui sert de borne de fin. Ce faux positif n'est pas signalé, car `xrefs` ne donne pas le type de référence. `procedure_references` permettrait de le distinguer.
 - La suite de l'investigation reste au jalon J6, si l'import des règles bute sur des champs inconnus.
 
+**Investigation du flux de règles par MCP (2026-10-19, même session ; résultat dans `notes/rea/regles-outlook.md`)**
+- Environ 25 requêtes (`xrefs`, `read_bytes`, `procedure_pseudo_code`, `batch_decompile`) en quelques minutes, toutes instantanées. La session gardée ouverte change tout par rapport à la CLI.
+- `batch_decompile` est très utile : 9 fonctions de vtable décompilées d'un coup, sans échec.
+- **Erreur de ma part, corrigée** : j'avais lu la vtable de `CRuleElement` sur 16 entrées. Les entrées 12 et suivantes appartiennent à `CObList`. Le slot qui compte est le 11 (`0x14084b380`).
+  - REA ne donne pas les bornes d'une vtable. Il faut les déduire à partir d'un `GetRuntimeClass` voisin ou d'un GUID.
+- `procedure_pseudo_code` nomme `_guard_check_icall` une fonction qui ne contient qu'un `ret`, partagée par repli COMDAT. Cela peut faire croire à tort à un appel de garde CFG.
+- **Limite** : REA ne résout pas les chaînes de ressources (`LoadString` sur `OUTLLIBR.DLL`), alors que les libellés ont été décisifs pour donner un sens à `0x64` et à `0x190`.
+  - Contournement hors REA : `tools/rule_catalog.py --dll`, qui charge la DLL en données avec `LoadLibraryExW`.
+- Les tableaux statiques ont été lus avec `read_bytes`, puis recopiés dans un fichier `.hex` pour un décodage reproductible. REA n'a pas d'outil pour extraire une structure répétée vers un fichier.
+
 **Observation d'interface**
 - `observe_native_ui` et `capture_native_ui_scenario` sont macOS uniquement.
 - Contournement : `tools/uia_dump.ps1` (UI Automation + `PrintWindow`), `tools/uia_menu.ps1` et `tools/uia_summarize.py`.

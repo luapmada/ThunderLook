@@ -138,5 +138,7 @@ Droits sur les Open Specifications : la notice Microsoft autorise à copier la d
 
 ## 4. Points réservés à REA (interopérabilité non documentée)
 1. **Champs inconnus du flux de règles** (condition `0x64`, bits `XR_Magic`) dans `OUTLOOK.EXE`. Utile seulement si l'import de tes `.rwz` bute dessus.
+   - Fait le 2026-10-19 (`notes/rea/regles-outlook.md`) : format d'un élément, catalogue complet des 104 éléments avec leurs libellés, `0x64` (filtre de type d'élément, bit 0 = Message), `0x190` (bit 0 = à l'arrivée, bit 2 = à l'envoi).
+   - Reste à voir : `XR_Magic`, la longueur sur 3 octets, le dword `+8` de `0x64`.
 2. **OST 4 Ko** (`MSPST32.DLL`) : seulement si libyal ne suffit pas. Priorité P3.
 3. **Actions rapides** : d'abord lire les données. REA seulement si le XML ne suffit pas.
