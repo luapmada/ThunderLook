@@ -4847,6 +4847,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "thunderlook-rules"
+version = "0.6.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "thunderlook-store"
 version = "0.6.0"
 dependencies = [

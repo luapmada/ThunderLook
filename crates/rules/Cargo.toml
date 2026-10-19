@@ -1,0 +1,9 @@
+[package]
+name = "thunderlook-rules"
+version = "0.6.0"
+edition = "2024"
+publish = false
+description = "Règles côté client d'Outlook : lecture du flux PR_RW_RULES_STREAM et des fichiers .rwz"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
