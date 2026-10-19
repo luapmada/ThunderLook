@@ -1,6 +1,6 @@
 [package]
 name = "thunderlook-model"
-version = "0.1.0"
+version = "0.5.0"
 edition = "2024"
 publish = false
 description = "Types et logique d'affichage partagés entre le cœur et l'interface de ThunderLook"
