@@ -87,6 +87,8 @@ Lecture d'une règle, dans l'ordre :
    - `0x8001` = classe déjà vue, n° 1 (0x8000 | index). C'est le « séparateur » de la spec ;
    - puis l'élément lui-même (slot 11 de la vtable, `0x14084b380`, voir plus haut).
 
+**Vérifié sur `data/samples/regles240913.rwz`** : `RW_Magic` = 0x140000 puis 0x06140000 (même schéma : version 0x140000, octet haut 06). 30 règles ; la première, « NordNet (1) », a `XR_Magic` = 0x00140000, active = 1, puis un u32 nul.
+
 ## Codage de longueur des chaînes (`0x1405b1b60` Unicode, `0x1405b1f48` ANSI)
 
 - **Lecture** : un octet `n`. Si `n = 0xFF`, un u16 suit et donne la longueur. Viennent ensuite `n` caractères : UTF-16 à partir de la version 1 000 000, octets avant.
