@@ -473,9 +473,9 @@ impl Walker<'_> {
                 "INSERT INTO message (id, folder_id, nid, message_class, subject, from_name, from_addr, to_line, cc_line,
                     sent_at, received_at, created_at, modified_at, message_flags, is_read, flag_status, flag_request, flag_due,
                     flag_completed, importance, sensitivity, size, attachment_count, body_kind, preview, internet_message_id,
-                    in_reply_to, conversation_topic, conversation_index, eml_path, props)
+                    in_reply_to, conversation_topic, conversation_index, eml_path, props, conversation_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
-                    ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
+                    ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)",
             )?
             .execute(params![
                 id, folder_id, nid, c.message_class, c.subject, c.from_name, c.from_addr, c.to_line, c.cc_line,
@@ -483,6 +483,7 @@ impl Walker<'_> {
                 c.flag_request, c.flag_due, c.flag_completed, c.importance, c.sensitivity, c.size,
                 c.attachments.len() as i64, c.body_kind, c.preview, c.internet_message_id, c.in_reply_to,
                 c.conversation_topic, c.conversation_index, rel, c.props,
+                c.conversation_id.map_or_else(Vec::new, |g| g.to_vec()),
             ])?;
         for (position, a) in c.attachments.iter().enumerate() {
             self.tx
@@ -532,7 +533,7 @@ impl Walker<'_> {
         let class = text(p.get(0x001A)).unwrap_or_default();
         self.tx
             .prepare_cached("INSERT INTO fai (folder_id, nid, message_class, subject, props) VALUES (?1, ?2, ?3, ?4, ?5)")?
-            .execute(params![folder_id, nid, class, text(p.get(0x0037)).unwrap_or_default(), props::propbag(p.iter(), &[])])?;
+            .execute(params![folder_id, nid, class, text(p.get(0x0037)).map(|s| thunderlook_store::strip_subject_marker(&s).to_string()).unwrap_or_default(), props::propbag(p.iter(), &[])])?;
         self.report.fai_imported += 1;
         if class.eq_ignore_ascii_case("IPM.Configuration.CategoryList")
             && let Some(xml) = binary(p.get(PR_ROAMING_XML_STREAM))

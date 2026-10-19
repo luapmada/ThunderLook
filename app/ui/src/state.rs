@@ -85,6 +85,8 @@ pub enum Dialog {
     NewCategory,
     /// Enregistrer la recherche courante comme dossier de recherche.
     SaveSearch,
+    /// « Réglages de l'affichage » : classement, conversations, espacement, lecture (J3b).
+    ViewSettings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

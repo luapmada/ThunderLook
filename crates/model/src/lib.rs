@@ -95,10 +95,24 @@ pub enum SortField {
     From,
     Subject,
     Size,
+    /// Un élément figure sous chacune de ses catégories.
+    Categories,
+    /// Avec suivi, terminé, sans indicateur.
+    Flag,
+    /// Avec ou sans pièce jointe.
+    Attachments,
 }
 
 impl SortField {
-    pub const ALL: [SortField; 4] = [SortField::Date, SortField::From, SortField::Subject, SortField::Size];
+    pub const ALL: [SortField; 7] = [
+        SortField::Date,
+        SortField::From,
+        SortField::Subject,
+        SortField::Size,
+        SortField::Categories,
+        SortField::Flag,
+        SortField::Attachments,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -106,6 +120,9 @@ impl SortField {
             Self::From => "De",
             Self::Subject => "Objet",
             Self::Size => "Taille",
+            Self::Categories => "Catégories",
+            Self::Flag => "Indicateur",
+            Self::Attachments => "Pièces jointes",
         }
     }
 
@@ -122,6 +139,9 @@ pub struct ListQuery {
     pub unread_only: bool,
     pub sort: SortField,
     pub descending: bool,
+    /// « Afficher en tant que conversations » : pris en compte pour le tri par date d'un dossier réel.
+    #[serde(default)]
+    pub conversations: bool,
 }
 
 /// Groupe contigu de la liste triée (« Aujourd'hui », un expéditeur, une tranche de taille…).
@@ -189,9 +209,26 @@ pub struct MessageSummary {
     pub importance: Importance,
     pub has_attachments: bool,
     pub categories: Vec<CategoryChip>,
-    /// Dossier de l'élément, dans les résultats de recherche.
+    /// Dossier de l'élément, dans les résultats de recherche et pour un élément de conversation venu d'un
+    /// autre dossier.
     #[serde(default)]
     pub folder: Option<String>,
+    /// En-tête d'une conversation de plusieurs éléments.
+    #[serde(default)]
+    pub conversation: Option<ConversationInfo>,
+    /// Élément d'une conversation dépliée, affiché sous son en-tête.
+    #[serde(default)]
+    pub child: bool,
+}
+
+/// Conversation résumée par son en-tête. Les éléments comptés sont ceux du fichier de données, hors
+/// « Éléments supprimés » et « Courrier indésirable » (sauf s'ils sont dans le dossier affiché).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationInfo {
+    pub count: u32,
+    pub unread: u32,
+    pub expanded: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

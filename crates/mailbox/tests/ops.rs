@@ -71,14 +71,14 @@ fn rand_suffix() -> u128 {
 
 fn count(mb: &mut Mailbox, folder: i64) -> (u32, u32) {
     let v = mb
-        .open_list(&ListQuery { folder_id: format!("f{folder}"), unread_only: false, sort: SortField::Date, descending: true })
+        .open_list(&ListQuery { folder_id: format!("f{folder}"), unread_only: false, sort: SortField::Date, descending: true, conversations: false })
         .unwrap();
     (v.folder_total, v.folder_unread)
 }
 
 fn all(mb: &mut Mailbox, folder: i64) -> Selection {
     let v = mb
-        .open_list(&ListQuery { folder_id: format!("f{folder}"), unread_only: false, sort: SortField::Date, descending: true })
+        .open_list(&ListQuery { folder_id: format!("f{folder}"), unread_only: false, sort: SortField::Date, descending: true, conversations: false })
         .unwrap();
     Selection { token: v.token, ranges: vec![(0, v.count)], ids: vec![] }
 }

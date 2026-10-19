@@ -28,6 +28,10 @@ pub enum Action {
     FolderPaneMenu,
     /// Bascule de densité compacte.
     DensityToggle,
+    /// « Afficher en tant que conversations » (J3b).
+    ConversationsToggle,
+    /// Boîte « Réglages de l'affichage » (J3b).
+    ViewSettings,
     // J3 : organisation.
     Delete,
     Archive,
@@ -72,6 +76,8 @@ fn perform(ui: Ui, action: Action) {
         Action::DensityToggle => ui.update_settings(|s| {
             s.density = if s.density == Density::Compact { Density::Comfortable } else { Density::Compact }
         }),
+        Action::ConversationsToggle => ui.update_settings(|s| s.conversations = !s.conversations),
+        Action::ViewSettings => ui.dialog.set(Some(Dialog::ViewSettings)),
         Action::NewFolder => ui.dialog.set(Some(Dialog::NewFolder { parent: folder })),
         Action::RenameFolder if plain => ui.dialog.set(Some(Dialog::Rename { id: folder, name })),
         Action::MoveFolder if plain => {
@@ -298,13 +304,13 @@ const VIEW: &[Group] = &[
         label: "Affichage actuel",
         cmds: &[
             cmd("Changer d'affichage", EYE, None, true, true, true),
-            cmd("Réglages de l'affichage", SETTINGS, None, false, false, true),
+            wired("Réglages de l'affichage", SETTINGS, None, true, false, Action::ViewSettings),
             cmd("Rétablir l'affichage", UNDO, None, false, false, false),
         ],
     },
     Group {
         label: "Messages",
-        cmds: &[cmd("Afficher en conversations", ROWS_2, None, false, false, true)],
+        cmds: &[wired("Afficher en tant que conversations", ROWS_2, None, true, true, Action::ConversationsToggle)],
     },
     Group {
         label: "Disposition",
@@ -481,6 +487,19 @@ fn command_view(c: &'static Cmd, full: bool) -> AnyView {
                 aria-pressed=move || (ui.settings.get().density == Density::Compact).to_string()
                 title=tooltip(c)
                 on:click=move |_| perform(ui, Action::DensityToggle)
+            >
+                <Svg icon=c.icon />
+                <span>{c.label}</span>
+            </button>
+        }
+        .into_any(),
+        Action::ConversationsToggle => view! {
+            <button
+                class=class
+                aria-label=c.label
+                aria-pressed=move || ui.settings.get().conversations.to_string()
+                title=tooltip(c)
+                on:click=move |_| perform(ui, Action::ConversationsToggle)
             >
                 <Svg icon=c.icon />
                 <span>{c.label}</span>

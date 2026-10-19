@@ -30,6 +30,7 @@ mod tag {
     pub const SENT_REPRESENTING_EMAIL: u16 = 0x0065;
     pub const CONVERSATION_TOPIC: u16 = 0x0070;
     pub const CONVERSATION_INDEX: u16 = 0x0071;
+    pub const CONVERSATION_INDEX_TRACKING: u16 = 0x3016;
     pub const SENDER_ADDRTYPE: u16 = 0x0C1E;
     pub const SENDER_NAME: u16 = 0x0C1A;
     pub const SENDER_EMAIL: u16 = 0x0C1F;
@@ -126,6 +127,8 @@ pub struct Converted {
     pub in_reply_to: Option<String>,
     pub conversation_topic: Option<String>,
     pub conversation_index: Option<Vec<u8>>,
+    /// `PidTagConversationId` calculé ([`thunderlook_store::conversation_id`]).
+    pub conversation_id: Option<[u8; 16]>,
     pub categories: Vec<String>,
     pub attachments: Vec<AttachmentMeta>,
     pub props: Vec<u8>,
@@ -232,7 +235,7 @@ fn convert_at(msg: &Rc<dyn Message>, named: &NamedProps, depth: usize) -> Conver
     let mut issues = Vec::new();
 
     let message_class = text(get(tag::MESSAGE_CLASS)).unwrap_or_else(|| "IPM.Note".into());
-    let subject = text(get(tag::SUBJECT)).unwrap_or_default();
+    let subject = text(get(tag::SUBJECT)).map(|s| thunderlook_store::strip_subject_marker(&s).to_string()).unwrap_or_default();
     let sender_type = text(get(tag::SENDER_ADDRTYPE)).unwrap_or_default();
     let from_name = text(get(tag::SENT_REPRESENTING_NAME)).or_else(|| text(get(tag::SENDER_NAME))).unwrap_or_default();
     let from_addr = text(get(tag::SENT_REPRESENTING_SMTP))
@@ -485,6 +488,11 @@ fn convert_at(msg: &Rc<dyn Message>, named: &NamedProps, depth: usize) -> Conver
         in_reply_to,
         conversation_topic: text(get(tag::CONVERSATION_TOPIC)),
         conversation_index: binary(get(tag::CONVERSATION_INDEX)).map(<[u8]>::to_vec),
+        conversation_id: thunderlook_store::conversation_id(
+            binary(get(tag::CONVERSATION_INDEX)),
+            boolean(get(tag::CONVERSATION_INDEX_TRACKING)),
+            text(get(tag::CONVERSATION_TOPIC)).as_deref(),
+        ),
         categories,
         attachments,
         props: props::propbag(p.iter(), &skip),

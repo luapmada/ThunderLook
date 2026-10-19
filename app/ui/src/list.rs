@@ -162,6 +162,32 @@ impl Layout {
     }
 }
 
+/// Déplie ou replie la conversation de la ligne `pos` (`expand` absent : inverse), puis sélectionne `pos`.
+/// La vue garde son jeton : seules les lignes à partir de la tranche de `pos` sont rechargées.
+pub fn toggle_conversation(ui: Ui, pos: u32, expand: Option<bool>, requested: StoredValue<HashSet<(u64, u32)>>) {
+    let Some(token) = ui.view.with_untracked(|v| v.as_ref().map(|v| v.token)) else { return };
+    spawn_local(async move {
+        match ipc::toggle_conversation(token, pos, expand).await {
+            Ok(view) => {
+                if ui.view.with_untracked(|v| v.as_ref().map(|v| v.token)) != Some(token) {
+                    return;
+                }
+                let first_page = pos / PAGE;
+                ui.rows.update(|r| r.retain(|p, _| *p < first_page * PAGE));
+                requested.update_value(|s| s.retain(|(t, page)| *t != token || *page < first_page));
+                ui.view.set(Some(view));
+                select_single(ui, pos);
+            }
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
+/// Position de l'en-tête de la conversation dépliée qui contient la ligne `pos` (lignes déjà reçues).
+fn conversation_head(ui: Ui, pos: u32) -> Option<u32> {
+    ui.rows.with_untracked(|r| (0..=pos).rev().find(|p| r.get(p).is_some_and(|m| !m.child)).filter(|p| r.get(p).is_some_and(|m| m.conversation.is_some())))
+}
+
 /// Demande au cœur les tranches de lignes manquantes pour les positions données.
 pub fn ensure_rows(ui: Ui, positions: impl IntoIterator<Item = u32>, requested: StoredValue<HashSet<(u64, u32)>>) {
     let Some(token) = ui.view.with_untracked(|v| v.as_ref().map(|v| v.token)) else { return };
@@ -301,6 +327,22 @@ pub fn MessageList() -> impl IntoView {
                 return;
             }
             _ => {}
+        }
+        // Conversations : → déplie, ← replie (depuis l'en-tête ou l'un de ses éléments).
+        if let (Some(p), "ArrowRight" | "ArrowLeft") = (cur, key.as_str()) {
+            let row = ui.rows.with_untracked(|r| r.get(&p).map(|m| (m.conversation, m.child)));
+            let right = key == "ArrowRight";
+            match row {
+                Some((Some(c), _)) if right != c.expanded => toggle_conversation(ui, p, Some(right), requested),
+                Some((_, true)) if !right => {
+                    if let Some(head) = conversation_head(ui, p) {
+                        toggle_conversation(ui, head, Some(false), requested);
+                    }
+                }
+                _ => {}
+            }
+            ev.prevent_default();
+            return;
         }
         let target = match key.as_str() {
             "ArrowDown" => l.step(cur, 1),
@@ -498,15 +540,49 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
     .flatten()
     .collect::<Vec<_>>()
     .join(", ");
-    let label = format!("{}, {}, {}{}", m.from, m.subject, m.time_label, if status.is_empty() { String::new() } else { format!(", {status}") });
+    let info = m.conversation;
+    let conv_label = info
+        .map(|c| {
+            let unread = if c.unread > 0 { format!(", {} non lus", c.unread) } else { String::new() };
+            format!(", conversation de {} éléments{unread}, {}", c.count, if c.expanded { "dépliée" } else { "repliée" })
+        })
+        .unwrap_or_default();
+    let label = format!(
+        "{}, {}, {}{}{}",
+        m.from,
+        m.subject,
+        m.time_label,
+        if status.is_empty() { String::new() } else { format!(", {status}") },
+        conv_label
+    );
     let subject = if m.subject.trim().is_empty() { "(aucun objet)".to_string() } else { m.subject.clone() };
+    let requested = expect_context::<StoredValue<HashSet<(u64, u32)>>>();
+    let chevron = info.map(|c| {
+        view! {
+            <button
+                class="conv-toggle"
+                tabindex="-1"
+                aria-hidden="true"
+                title=if c.expanded { "Réduire la conversation" } else { "Développer la conversation" }
+                on:click=move |ev| {
+                    ev.stop_propagation();
+                    toggle_conversation(ui, pos, None, requested);
+                }
+            >
+                {if c.expanded { view! { <Svg icon=CHEVRON_DOWN size=14 /> } } else { view! { <Svg icon=CHEVRON_RIGHT size=14 /> } }}
+            </button>
+        }
+    });
     view! {
         <div
             role="option"
             id=msg_dom_id(pos)
             class="msg"
             class:unread=m.unread
+            class:conv=info.is_some()
+            class:child=m.child
             class:focused=focused
+            aria-expanded=info.map(|c| c.expanded.to_string())
             style=style
             aria-selected=move || selected().to_string()
             aria-posinset=pos + 1
@@ -517,6 +593,7 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
             on:dragstart=move |ev| drag_start(ui, pos, &ev)
             on:contextmenu=move |ev| context(ui, pos, &ev)
         >
+            {chevron}
             <span class="from">{m.from.clone()}</span>
             <span class="meta">
                 {match m.importance {
@@ -540,7 +617,10 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
                 {m.folder.clone().map(|f| view! { <span class="folder-tag" title="Dossier">{f}</span> })}
                 <span class="time">{m.time_label.clone()}</span>
             </span>
-            <span class="subject">{subject}</span>
+            <span class="subject">
+                {subject}
+                {info.filter(|c| c.unread > 0).map(|c| view! { <span class="conv-unread">{format!(" ({})", c.unread)}</span> })}
+            </span>
             <span class="preview">{m.preview.clone()}</span>
         </div>
     }

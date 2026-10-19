@@ -1,21 +1,22 @@
 //! Accès au stockage pour l'interface : arborescence avec compteurs, vues triées et groupées d'un dossier
 //! ou d'une recherche (lignes servies par tranches), message complet pour le volet de lecture (J2),
-//! opérations d'organisation (J3), recherche et indexation plein texte (J4).
+//! opérations d'organisation (J3), recherche et indexation plein texte (J4), conversations (J3b).
 
+mod conv;
 mod index;
 mod message;
 mod ops;
 mod search;
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
 };
 
 use chrono::{DateTime, Local, TimeZone};
 use thunderlook_model::{
-    CategoryChip, FlagState, Folder, FolderRole, FolderSection, FolderTree, Importance, ListGroup, ListQuery,
-    ListView, MessageSummary, SearchQuery, SearchScope, SortField, format,
+    CategoryChip, ConversationInfo, FlagState, Folder, FolderRole, FolderSection, FolderTree, Importance, ListGroup,
+    ListQuery, ListView, MessageSummary, SearchQuery, SearchScope, SortField, format,
 };
 use thunderlook_store::rusqlite::{Connection, params_from_iter, types::Value};
 
@@ -41,12 +42,55 @@ pub struct Mailbox {
     views: BTreeMap<u64, View>,
     next_token: u64,
     undo: Vec<ops::UndoEntry>,
+    /// Conversations dépliées, gardées d'une ouverture de vue à l'autre (après une opération par exemple).
+    expanded: HashSet<[u8; 16]>,
 }
 
-/// Vue ouverte : ordre des éléments, et recherche ou non (les lignes indiquent alors leur dossier).
+/// Vue ouverte : lignes dans l'ordre, et recherche ou non (les lignes indiquent alors leur dossier).
 struct View {
-    ids: Vec<i64>,
+    rows: Vec<Row>,
     search: bool,
+    /// Vue en conversations : dossier affiché, et dossiers où chercher les autres éléments.
+    conv: Option<ConvView>,
+}
+
+struct ConvView {
+    folder: i64,
+    /// Dossiers de la portée, en liste SQL ([`conv::scope_folders`]).
+    scope: String,
+    now: DateTime<Local>,
+}
+
+/// Ligne d'une vue, et date qui décide de son groupe.
+struct Row {
+    item: RowItem,
+    date: i64,
+}
+
+enum RowItem {
+    Message(i64),
+    /// Conversation : éléments du dossier affiché, du plus récent au plus ancien.
+    Conversation { key: [u8; 16], members: Vec<i64>, expanded: bool },
+    /// Élément d'une conversation dépliée (éventuellement d'un autre dossier).
+    Child(i64),
+}
+
+impl RowItem {
+    /// Message affiché par la ligne (le plus récent du dossier pour une conversation).
+    fn shown(&self) -> i64 {
+        match self {
+            Self::Message(id) | Self::Child(id) => *id,
+            Self::Conversation { members, .. } => members[0],
+        }
+    }
+
+    /// Messages visés quand la ligne est sélectionnée.
+    fn targets(&self) -> &[i64] {
+        match self {
+            Self::Message(id) | Self::Child(id) => std::slice::from_ref(id),
+            Self::Conversation { members, .. } => members,
+        }
+    }
 }
 
 /// (id, date, clé de tri, libellé de groupe) d'un élément à trier.
@@ -184,7 +228,16 @@ impl Mailbox {
                 categories.insert((source, fold(&name)), category_color(color));
             }
         }
-        Ok(Self { data_dir: data_dir.to_path_buf(), conn, categories, views: BTreeMap::new(), next_token: 1, undo: Vec::new() })
+        conv::fill_conversation_ids(&conn)?;
+        Ok(Self {
+            data_dir: data_dir.to_path_buf(),
+            conn,
+            categories,
+            views: BTreeMap::new(),
+            next_token: 1,
+            undo: Vec::new(),
+            expanded: HashSet::new(),
+        })
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -318,10 +371,125 @@ impl Mailbox {
             )
             .map_err(err)?;
         let filter = if q.unread_only { " AND m.is_read = 0" } else { "" };
+        if q.conversations && q.sort == SortField::Date {
+            return self.conversation_view(folder, filter, q.descending, now, (folder_total, folder_unread));
+        }
         // Tri par date : l'index couvrant suffit, sans lire les lignes.
         let from = if q.sort == SortField::Date { "message m INDEXED BY message_folder_read" } else { "message m" };
         let items = self.collect(&format!("{from} WHERE m.folder_id = ?{filter}"), &[Value::Integer(folder)], q.sort)?;
         Ok(self.finish_view(items, q.sort, q.descending, now, (folder_total, folder_unread), false))
+    }
+
+    /// Vue en conversations d'un dossier, triée par date du dernier élément du dossier.
+    fn conversation_view(
+        &mut self,
+        folder: i64,
+        filter: &str,
+        descending: bool,
+        now: DateTime<Local>,
+        counts: (u32, u32),
+    ) -> Result<ListView> {
+        let mut convs: Vec<([u8; 16], i64, Vec<(i64, i64)>)> = Vec::new();
+        let mut singles: Vec<(i64, i64)> = Vec::new();
+        {
+            let mut by_key: HashMap<[u8; 16], usize> = HashMap::new();
+            let mut stmt = self
+                .conn
+                .prepare_cached(&format!(
+                    "SELECT m.id, IFNULL(m.received_at, 0), m.conversation_id FROM message m INDEXED BY message_folder_conv
+                     WHERE m.folder_id = ?1{filter}"
+                ))
+                .map_err(err)?;
+            let mut rows = stmt.query([folder]).map_err(err)?;
+            while let Some(r) = rows.next().map_err(err)? {
+                let (id, date): (i64, i64) = (r.get(0).map_err(err)?, r.get(1).map_err(err)?);
+                let key = r.get_ref(2).map_err(err)?.as_blob_or_null().ok().flatten().and_then(|b| <[u8; 16]>::try_from(b).ok());
+                match key {
+                    Some(key) => {
+                        let i = *by_key.entry(key).or_insert_with(|| {
+                            convs.push((key, i64::MIN, Vec::new()));
+                            convs.len() - 1
+                        });
+                        let c = &mut convs[i];
+                        c.1 = c.1.max(date);
+                        c.2.push((date, id));
+                    }
+                    None => singles.push((date, id)),
+                }
+            }
+        }
+        // (date, message affiché, ligne) : la date et l'identifiant du dernier élément décident de l'ordre.
+        let mut rows: Vec<(i64, i64, RowItem)> = Vec::with_capacity(convs.len() + singles.len());
+        for (key, date, mut members) in convs {
+            members.sort_unstable_by(|a, b| b.cmp(a));
+            let head = members[0].1;
+            let expanded = self.expanded.contains(&key);
+            rows.push((date, head, RowItem::Conversation { key, members: members.into_iter().map(|(_, id)| id).collect(), expanded }));
+        }
+        rows.extend(singles.into_iter().map(|(date, id)| (date, id, RowItem::Message(id))));
+        rows.sort_unstable_by(|a, b| {
+            let o = (a.0, a.1).cmp(&(b.0, b.1));
+            if descending { o.reverse() } else { o }
+        });
+        let scope = conv::scope_folders(&self.conn, folder)?;
+        let mut out: Vec<Row> = Vec::with_capacity(rows.len());
+        for (date, _, item) in rows {
+            // Dépliée lors d'une vue précédente : ses éléments suivent l'en-tête.
+            let reopen = match &item {
+                RowItem::Conversation { key, expanded: true, .. } => Some(*key),
+                _ => None,
+            };
+            out.push(Row { item, date });
+            if let Some(key) = reopen {
+                for id in conv::members(&self.conn, &key, &scope)? {
+                    out.push(Row { item: RowItem::Child(id), date });
+                }
+            }
+        }
+        let conv = ConvView { folder, scope, now };
+        Ok(self.store_view(out, SortField::Date, now, counts, false, Some(conv), &[]))
+    }
+
+    /// Déplie ou replie (`expand` absent : inverse) la conversation à la position `pos` : ses éléments, tous
+    /// dossiers confondus, se placent sous l'en-tête. La vue garde son jeton ; les lignes à partir de `pos`
+    /// sont à recharger.
+    pub fn toggle_conversation(&mut self, token: u64, pos: u32, expand: Option<bool>) -> Result<ListView> {
+        let view = self.views.get_mut(&token).ok_or("vue expirée : rouvrir le dossier")?;
+        let conv = view.conv.as_ref().ok_or("cette vue n'est pas en conversations")?;
+        let pos = pos as usize;
+        let Some(Row { item: RowItem::Conversation { key, expanded, .. }, date }) = view.rows.get_mut(pos) else {
+            return Err("aucune conversation à cette position".into());
+        };
+        let (key, date) = (*key, *date);
+        let want = expand.unwrap_or(!*expanded);
+        if want != *expanded {
+            *expanded = want;
+            if want {
+                let children: Vec<Row> =
+                    conv::members(&self.conn, &key, &conv.scope)?.into_iter().map(|id| Row { item: RowItem::Child(id), date }).collect();
+                view.rows.splice(pos + 1..pos + 1, children);
+                self.expanded.insert(key);
+            } else {
+                let end = view.rows[pos + 1..]
+                    .iter()
+                    .position(|r| !matches!(r.item, RowItem::Child(_)))
+                    .map_or(view.rows.len(), |n| pos + 1 + n);
+                view.rows.drain(pos + 1..end);
+                self.expanded.remove(&key);
+            }
+        }
+        let view = &self.views[&token];
+        let conv = view.conv.as_ref().expect("vue en conversations");
+        let groups = groups(&view.rows, SortField::Date, conv.now, &[]);
+        let (folder_total, folder_unread): (u32, u32) = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*), IFNULL(SUM(is_read = 0), 0) FROM message INDEXED BY message_folder_read WHERE folder_id = ?1",
+                [conv.folder],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(err)?;
+        Ok(ListView { token, count: view.rows.len() as u32, folder_total, folder_unread, groups })
     }
 
     /// Éléments à trier, avec les colonnes nécessaires au tri demandé.
@@ -336,9 +504,16 @@ impl Mailbox {
             }
             return Ok(items);
         }
+        if sort == SortField::Categories {
+            return self.collect_categories(from_where, params);
+        }
         let mut stmt = self
             .conn
-            .prepare_cached(&format!("SELECT m.id, IFNULL(m.received_at, 0), m.from_name, m.from_addr, m.subject, m.size FROM {from_where}"))
+            .prepare_cached(&format!(
+                "SELECT m.id, IFNULL(m.received_at, 0), m.from_name, m.from_addr, m.subject, m.size, m.flag_status,
+                        EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0)
+                 FROM {from_where}"
+            ))
             .map_err(err)?;
         let rows = stmt
             .query_map(params_from_iter(params), |r| {
@@ -349,11 +524,13 @@ impl Mailbox {
                     r.get::<_, String>(3)?,
                     r.get::<_, String>(4)?,
                     r.get::<_, i64>(5)?,
+                    r.get::<_, i64>(6)?,
+                    r.get::<_, bool>(7)?,
                 ))
             })
             .map_err(err)?;
         for row in rows {
-            let (id, date, from_name, from_addr, subject, size) = row.map_err(err)?;
+            let (id, date, from_name, from_addr, subject, size, flag, attached) = row.map_err(err)?;
             let (key, label) = match sort {
                 SortField::From => {
                     let label = if from_name.trim().is_empty() { from_addr } else { from_name };
@@ -365,6 +542,14 @@ impl Mailbox {
                     let label = if label.is_empty() { "(aucun objet)".to_string() } else { label };
                     (fold(&label), label)
                 }
+                // Clés d'un caractère : l'ordre croissant donne l'ordre de la référence.
+                SortField::Flag => match flag {
+                    2 => ("0".into(), "Avec suivi".into()),
+                    1 => ("1".into(), "Terminé".into()),
+                    _ => ("2".into(), "Sans indicateur".into()),
+                },
+                SortField::Attachments if attached => ("0".into(), "Avec pièce jointe".into()),
+                SortField::Attachments => ("1".into(), "Sans pièce jointe".into()),
                 _ => {
                     // Clé numérique de largeur fixe : l'ordre des chaînes suit celui des tailles.
                     let size = size.max(0) as u64;
@@ -376,6 +561,36 @@ impl Mailbox {
         Ok(items)
     }
 
+    /// Classement par catégories : un élément par catégorie qu'il porte, et « (aucune catégorie) » sinon,
+    /// en dernier. Un message peut donc occuper plusieurs lignes ; une sélection n'en garde qu'un exemplaire.
+    fn collect_categories(&self, from_where: &str, params: &[Value]) -> Result<Vec<Item>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached(&format!(
+                "SELECT m.id, IFNULL(m.received_at, 0), c.name FROM {from_where_join}",
+                from_where_join = from_where.replacen("message m", "message m LEFT JOIN message_category c ON c.message_id = m.id", 1)
+            ))
+            .map_err(err)?;
+        let rows = stmt
+            .query_map(params_from_iter(params), |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, Option<String>>(2)?)))
+            .map_err(err)?;
+        let mut items = Vec::new();
+        // Un seul libellé par catégorie, quelle que soit la casse des attributions (le premier rencontré).
+        let mut labels: HashMap<String, String> = HashMap::new();
+        for row in rows {
+            let (id, date, name) = row.map_err(err)?;
+            items.push(match name.filter(|n| !n.trim().is_empty()) {
+                Some(n) => {
+                    let key = fold(&n);
+                    let label = labels.entry(key.clone()).or_insert(n).clone();
+                    (id, date, format!("0{key}"), label)
+                }
+                None => (id, date, "1".into(), "(aucune catégorie)".into()),
+            });
+        }
+        Ok(items)
+    }
+
     /// Tri, groupes et enregistrement de la vue.
     fn finish_view(
         &mut self,
@@ -383,7 +598,7 @@ impl Mailbox {
         sort: SortField,
         descending: bool,
         now: DateTime<Local>,
-        (folder_total, folder_unread): (u32, u32),
+        counts: (u32, u32),
         search: bool,
     ) -> ListView {
         // Tri principal dans le sens demandé ; à l'intérieur d'un groupe, toujours du plus récent au plus ancien.
@@ -397,26 +612,28 @@ impl Mailbox {
                 (if descending { o.reverse() } else { o }).then(b.1.cmp(&a.1)).then(b.0.cmp(&a.0))
             }),
         }
+        let labels: Vec<String> = if sort == SortField::Date { Vec::new() } else { items.iter().map(|i| i.3.clone()).collect() };
+        let rows = items.into_iter().map(|(id, date, ..)| Row { item: RowItem::Message(id), date }).collect();
+        self.store_view(rows, sort, now, counts, search, None, &labels)
+    }
 
-        let mut groups: Vec<ListGroup> = Vec::new();
-        for (i, (_, date, _, label)) in items.iter().enumerate() {
-            let label = match sort {
-                SortField::Date => match local(Some(*date).filter(|d| *d > 0)) {
-                    Some(d) => format::date_group(&d, &now),
-                    None => "Sans date".to_string(),
-                },
-                _ => label.clone(),
-            };
-            match groups.last_mut() {
-                Some(g) if g.label == label => g.count += 1,
-                _ => groups.push(ListGroup { label, start: i as u32, count: 1 }),
-            }
-        }
-
+    /// Groupes et enregistrement d'une vue dont les lignes sont dans l'ordre.
+    #[allow(clippy::too_many_arguments)]
+    fn store_view(
+        &mut self,
+        rows: Vec<Row>,
+        sort: SortField,
+        now: DateTime<Local>,
+        (folder_total, folder_unread): (u32, u32),
+        search: bool,
+        conv: Option<ConvView>,
+        labels: &[String],
+    ) -> ListView {
+        let groups = groups(&rows, sort, now, labels);
         let token = self.next_token;
         self.next_token += 1;
-        let count = items.len() as u32;
-        self.views.insert(token, View { ids: items.into_iter().map(|(id, ..)| id).collect(), search });
+        let count = rows.len() as u32;
+        self.views.insert(token, View { rows, search, conv });
         while self.views.len() > VIEW_CACHE {
             self.views.pop_first();
         }
@@ -550,13 +767,14 @@ impl Mailbox {
 
     pub fn rows_at(&self, token: u64, start: u32, count: u32, now: DateTime<Local>) -> Result<Vec<MessageSummary>> {
         let view = self.views.get(&token).ok_or("vue expirée : rouvrir le dossier")?;
-        let ids = &view.ids;
-        let start = (start as usize).min(ids.len());
-        let end = (start + count.min(MAX_ROWS) as usize).min(ids.len());
-        let slice = &ids[start..end];
-        if slice.is_empty() {
+        let start = (start as usize).min(view.rows.len());
+        let end = (start + count.min(MAX_ROWS) as usize).min(view.rows.len());
+        let items = &view.rows[start..end];
+        if items.is_empty() {
             return Ok(Vec::new());
         }
+        let shown: Vec<i64> = items.iter().map(|r| r.item.shown()).collect();
+        let slice = shown.as_slice();
         let marks = vec!["?"; slice.len()].join(",");
         let mut cats: HashMap<i64, Vec<String>> = HashMap::new();
         {
@@ -571,7 +789,7 @@ impl Mailbox {
         let sql = format!(
             "SELECT m.id, f.source_id, m.from_name, m.from_addr, m.subject, m.preview, m.received_at, m.size, m.is_read,
                     m.flag_status, m.importance,
-                    EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0), f.name
+                    EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0), f.name, f.id
              FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id IN ({marks})"
         );
         let mut stmt = self.conn.prepare(&sql).map_err(err)?;
@@ -602,25 +820,68 @@ impl Mailbox {
                         has_attachments: r.get::<_, i64>(11)? != 0,
                         categories: Vec::new(),
                         folder: if search { Some(r.get(12)?) } else { None },
+                        conversation: None,
+                        child: false,
                     },
+                    (r.get::<_, i64>(13)?, r.get::<_, String>(12)?),
                 ))
             })
             .map_err(err)?;
+        let mut folder_of: HashMap<i64, (i64, String)> = HashMap::with_capacity(slice.len());
         for row in rows {
-            let (id, source, mut m) = row.map_err(err)?;
+            let (id, source, mut m, folder) = row.map_err(err)?;
             m.categories = self.chips(source, cats.remove(&id).unwrap_or_default());
+            folder_of.insert(id, folder);
             by_id.insert(id, m);
         }
-        Ok(slice
-            .iter()
-            .enumerate()
-            .filter_map(|(i, id)| {
-                by_id.remove(id).map(|mut m| {
-                    m.pos = (start + i) as u32;
-                    m
-                })
-            })
-            .collect())
+        let mut out = Vec::with_capacity(items.len());
+        for (i, row) in items.iter().enumerate() {
+            // Un même message peut figurer deux fois (en-tête et élément déplié) : on clone.
+            let Some(mut m) = by_id.get(&row.item.shown()).cloned() else { continue };
+            m.pos = (start + i) as u32;
+            if let Some(conv) = &view.conv {
+                match &row.item {
+                    RowItem::Conversation { key, expanded, .. } => self.conversation_head(&mut m, key, *expanded, conv)?,
+                    RowItem::Child(id) => {
+                        m.child = true;
+                        m.folder = folder_of.get(id).filter(|(f, _)| *f != conv.folder).map(|(_, name)| name.clone());
+                    }
+                    RowItem::Message(_) => {}
+                }
+            }
+            out.push(m);
+        }
+        Ok(out)
+    }
+
+    /// Fait de la ligne du dernier élément l'en-tête de sa conversation (si elle en compte plusieurs) :
+    /// participants, compteurs, indicateurs, pièces jointes et catégories de tous ses éléments.
+    fn conversation_head(&self, m: &mut MessageSummary, key: &[u8; 16], expanded: bool, conv: &ConvView) -> Result<()> {
+        let sum = conv::summary(&self.conn, key, &conv.scope, conv.folder)?;
+        if sum.count < 2 {
+            return Ok(());
+        }
+        let source: i64 = self.conn.query_row("SELECT source_id FROM folder WHERE id = ?1", [conv.folder], |r| r.get(0)).map_err(err)?;
+        if !sum.senders.is_empty() {
+            m.from = sum.senders.join("; ");
+        }
+        m.subject = normalized_subject(&m.subject).to_string();
+        m.flag = if sum.flagged {
+            FlagState::Flagged
+        } else if sum.done {
+            FlagState::Done
+        } else {
+            FlagState::None
+        };
+        if sum.high {
+            m.importance = Importance::High;
+        }
+        m.has_attachments = sum.attachments;
+        m.categories = self.chips(source, sum.categories);
+        // En gras si un élément du dossier affiché est non lu.
+        m.unread = sum.unread_here > 0;
+        m.conversation = Some(ConversationInfo { count: sum.count, unread: sum.unread, expanded });
+        Ok(())
     }
 
     fn chips(&self, source: i64, names: Vec<String>) -> Vec<CategoryChip> {
@@ -633,14 +894,35 @@ impl Mailbox {
             .collect()
     }
 
-    /// Identifiants des lignes d'une vue (pour la navigation sans charger les lignes).
-    pub fn view_ids(&self, token: u64) -> Option<&[i64]> {
-        self.views.get(&token).map(|v| v.ids.as_slice())
+    /// Messages visés par les lignes `[a, b[` d'une vue (ceux du dossier pour un en-tête de conversation).
+    pub fn view_targets(&self, token: u64, a: u32, b: u32) -> Option<Vec<i64>> {
+        let rows = &self.views.get(&token)?.rows;
+        let (a, b) = ((a as usize).min(rows.len()), (b as usize).min(rows.len()));
+        Some(rows[a.min(b)..b].iter().flat_map(|r| r.item.targets().iter().copied()).collect())
     }
 
     pub(crate) fn conn(&self) -> &Connection {
         &self.conn
     }
+}
+
+/// Groupes contigus des lignes : par date pour le tri par date, sinon d'après `labels` (un par ligne).
+fn groups(rows: &[Row], sort: SortField, now: DateTime<Local>, labels: &[String]) -> Vec<ListGroup> {
+    let mut groups: Vec<ListGroup> = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        let label = match sort {
+            SortField::Date => match local(Some(row.date).filter(|d| *d > 0)) {
+                Some(d) => format::date_group(&d, &now),
+                None => "Sans date".to_string(),
+            },
+            _ => labels.get(i).cloned().unwrap_or_default(),
+        };
+        match groups.last_mut() {
+            Some(g) if g.label == label => g.count += 1,
+            _ => groups.push(ListGroup { label, start: i as u32, count: 1 }),
+        }
+    }
+    groups
 }
 
 pub(crate) fn flag_state(v: i64) -> FlagState {

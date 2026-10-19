@@ -74,6 +74,17 @@ pub async fn list_rows(token: u64, start: u32, count: u32) -> Result<Vec<Message
     call("list_rows", &RowsArg { token, start, count }).await
 }
 
+#[derive(Serialize)]
+struct ToggleArg {
+    token: u64,
+    pos: u32,
+    expand: Option<bool>,
+}
+
+pub async fn toggle_conversation(token: u64, pos: u32, expand: Option<bool>) -> Result<ListView, String> {
+    call("toggle_conversation", &ToggleArg { token, pos, expand }).await
+}
+
 pub async fn message_view(id: &str, allow_remote: bool) -> Result<MessageView, String> {
     call("message_view", &ViewArg { id, allow_remote }).await
 }

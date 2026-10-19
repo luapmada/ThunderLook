@@ -117,6 +117,12 @@ fn list_rows(app: AppHandle, store: State<Store>, token: u64, start: u32, count:
     with_mailbox(&app, &store, |mb| mb.rows(token, start, count))
 }
 
+/// Déplie ou replie la conversation à la position `pos` (`expand` absent : inverse).
+#[tauri::command(async)]
+fn toggle_conversation(app: AppHandle, store: State<Store>, token: u64, pos: u32, expand: Option<bool>) -> Result<ListView, String> {
+    with_mailbox(&app, &store, |mb| mb.toggle_conversation(token, pos, expand))
+}
+
 #[tauri::command(async)]
 fn message_view(app: AppHandle, store: State<Store>, id: String, allow_remote: bool) -> Result<MessageView, String> {
     with_mailbox(&app, &store, |mb| mb.message_view(&id, allow_remote))
@@ -271,6 +277,7 @@ pub fn run() {
             folder_tree,
             open_list,
             list_rows,
+            toggle_conversation,
             message_view,
             apply_op,
             search,

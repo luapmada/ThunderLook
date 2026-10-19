@@ -76,7 +76,7 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | J1 ✅ | Import PST (lecture seule) | Copie de travail, import vers SQLite + `.eml`, pièces jointes, lu, drapeaux, catégories, FAI de configuration, rapport d'import | Sur tes 3 copies (271 Ko, 3,9 Go, 15 Go) : effectifs identiques à `pst-probe`, 0 perte silencieuse, import de 15 Go en moins de 10 min | M |
 | J2 ✅ | Lecture | Volet dossiers (compteurs non lus / [total]), liste virtualisée (colonnes, tri, groupes par date, styles non lu et drapeau), volet de lecture (HTML isolé, texte, RTF, pièces jointes, images bloquées), raccourcis de lecture, F6 | Ouverture d'un dossier de 22 000 éléments en moins de 200 ms. Parcours clavier complet | M |
 | J3 ✅ | Organisation | Lu/non lu, supprimer, déplacer/copier, glisser-déposer, indicateurs, catégories, CRUD des dossiers, favoris, conversations, « Organiser par », filtres Tous/Non lus, paramètres d'affichage | Ruban Accueil, Dossier et Affichage fonctionnels (sous-ensemble de `ui-reference.md` §3) | M |
-| J3b | Conversations et affichages | « Afficher en conversations », « Organiser par » au-delà des 4 tris (catégories, indicateur, pièces jointes), boîte « Réglages de l'affichage », options de lecture (marquer comme lu) dans l'interface | Liste en conversations sur la Boîte de réception de 22 000 éléments en moins de 300 ms | M |
+| J3b ✅ | Conversations et affichages | « Afficher en conversations », « Organiser par » au-delà des 4 tris (catégories, indicateur, pièces jointes), boîte « Réglages de l'affichage », options de lecture (marquer comme lu) dans l'interface | Liste en conversations sur la Boîte de réception de 22 000 éléments en moins de 300 ms | M |
 | J4 ✅ | Recherche | Index FTS5, zone de recherche et portées, onglet Recherche, mots-clés, recherche avancée, dossiers de recherche (Non lus, Pour le suivi, personnalisés) | Moins de 300 ms sur l'archive de 217 000 éléments | M |
 | J5 | Rédaction (brouillons) | Fenêtre de rédaction HTML, réponse et transfert avec citation, signatures (import HTM), modèles `.oft`, brouillons | Réponse à tous fidèle (en-têtes, citation) enregistrée en brouillon | M |
 | J6 | Règles et actions rapides | Import du flux de règles et des `.rwz`, assistant de règles, « Exécuter maintenant », actions rapides (défauts plus éditeur) | Tes 2 `.rwz` et le flux du PST importés, et rejoués sur une copie | L |
@@ -188,6 +188,42 @@ Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nomb
 - **Incident pendant les tests** : une fenêtre de HWiNFO64 (« Sauvegarder et fermer ») est passée au premier plan. Une saisie de test (`Ctrl+E`, « facture pj:oui », Entrée) lui a été envoyée.
   - `tools/uia_keys.ps1` vérifie désormais, avant chaque touche, que la fenêtre au premier plan est bien celle de l'application testée.
   - `tools/uia_search.ps1` saisit une recherche par UI Automation, sans clavier.
+
+### Mesures du J3b (2026-10-19, même base)
+- **Identifiant de conversation** : calculé selon [MS-OXOMSG] §2.2.1.2 (`PidTagConversationId`).
+  - C'est la partie GUID de `ConversationIndex` si `ConversationIndexTracking` est vrai et l'en-tête valide ; sinon le MD5 du sujet de conversation en majuscules.
+  - Couverture : 250 520 messages sur 252 846 ont un index, et le suivi est actif pour 22 154 des 22 188 messages de la Boîte de réception.
+  - Calcul fait à l'import (`tl-import`). Pour une base existante, il est fait une seule fois à l'ouverture : **46 s** sur la base fusionnée (lecture des sacs MAPI).
+- **Vue en conversations**, cœur seul (`examples/conversations.rs`) :
+
+  | Dossier | Éléments | Lignes | Ouverture | 100 premières lignes |
+  |---|---|---|---|---|
+  | Boîte de réception | 22 188 | 21 521 | **16 ms** | 3 ms |
+  | Inbox (archive) | 61 642 | 59 977 | 46 ms | 5 ms |
+  | listes Oxalis | 110 539 | 232 | 20 ms | 5 ms |
+
+  - L'objectif de 300 ms est tenu.
+  - Dans l'application, la Boîte de réception s'ouvre en conversations en **38,7 ms** de bout en bout (`perf.log`).
+  - Dépliage : 3 à 30 ms. Les éléments des autres dossiers du même fichier de données (« Éléments envoyés »…) apparaissent avec leur dossier. « Éléments supprimés » et « Courrier indésirable » en sont exclus.
+- **Conversations géantes** : « listes Oxalis » contient deux conversations de 60 014 et 49 536 éléments (« [coop] Relance séminaire », 2007-2017). C'est l'emballement déjà vu au J1.
+  - Les en-têtes sont résumés en SQL : une première version passait les identifiants en paramètres et dépassait la limite de 32 766 variables de SQLite.
+  - Chacun coûte environ 350 ms quand il entre à l'écran. C'est acceptable pour ce cas, sans cache.
+- **Organiser par** :
+  - Catégories : un élément apparaît sous chacune de ses catégories, et la casse est ignorée.
+  - Indicateur et pièces jointes : 9 à 282 ms, pire cas « Indicateur » sur l'Inbox de 61 642 éléments, comparable aux tris « De » et « Objet » du J2.
+- **Défaut du J1 corrigé** : 224 734 objets étaient stockés avec le marqueur de préfixe du PST ([MS-PST] §2.5.3.1.1.1 : `\x01` puis la longueur du préfixe plus un). Ce marqueur est invisible mais faussait le tri par objet.
+  - Il est retiré à l'import et dans la base (schéma v6, 15,6 s, une seule fois).
+  - Les `.eml` déjà écrits le gardent dans leur en-tête `Subject`. Il faudra en tenir compte à l'export.
+- **Choix faits** (non vérifiés sur Outlook) :
+  - conversations seulement pour le classement par date ;
+  - réglage global, pour tous les dossiers (Outlook demande « ce dossier / toutes les boîtes ») ;
+  - en-tête en gras si un élément non lu est dans le dossier affiché ;
+  - au plus 8 participants dans l'en-tête.
+- **Tests** : `crates/mailbox/tests/conversations.rs` (données synthétiques) couvre le calcul à l'ouverture, la migration v6, le dépliage, une opération sur un en-tête (elle vise tous les éléments du dossier), le dépliage conservé après rouverture, et les trois nouveaux classements.
+- **Non vérifié dans l'application** : le dépliage au chevron et aux flèches ← →.
+  - Activer les conversations (`tools/uia_invoke.ps1`, motif Toggle) et l'affichage des en-têtes (« conversation de 6 éléments, repliée ») sont vérifiés.
+  - Le pilotage à la souris n'a pas visé la bonne ligne : les clics de test sont partis ailleurs, dont un probablement sur la barre des tâches.
+  - `uia_invoke.ps1` refuse désormais tout clic hors de la fenêtre de l'application.
 
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).

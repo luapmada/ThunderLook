@@ -6,4 +6,5 @@ publish = false
 description = "Stockage local de ThunderLook : base SQLite et magasin de fichiers .eml"
 
 [dependencies]
+md-5 = "0.10.6"
 rusqlite = { version = "0.40.2", features = ["bundled"] }

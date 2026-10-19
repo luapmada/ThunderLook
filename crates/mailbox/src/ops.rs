@@ -209,10 +209,8 @@ impl Mailbox {
     pub fn resolve(&self, sel: &Selection) -> Result<Vec<i64>> {
         let mut out = Vec::with_capacity(sel.len() as usize);
         if !sel.ranges.is_empty() {
-            let ids = self.view_ids(sel.token).ok_or("vue expirée : rouvrir le dossier")?;
             for &(a, b) in &sel.ranges {
-                let (a, b) = ((a as usize).min(ids.len()), (b as usize).min(ids.len()));
-                out.extend_from_slice(&ids[a.min(b)..b]);
+                out.extend(self.view_targets(sel.token, a, b).ok_or("vue expirée : rouvrir le dossier")?);
             }
         }
         for id in &sel.ids {
@@ -483,11 +481,11 @@ impl Mailbox {
                     "INSERT INTO message (folder_id, nid, message_class, subject, from_name, from_addr, to_line, cc_line,
                         sent_at, received_at, created_at, modified_at, message_flags, is_read, flag_status, flag_request,
                         flag_due, flag_completed, importance, sensitivity, size, attachment_count, body_kind, preview,
-                        internet_message_id, in_reply_to, conversation_topic, conversation_index, eml_path, props)
+                        internet_message_id, in_reply_to, conversation_topic, conversation_index, eml_path, props, conversation_id)
                      SELECT ?2, 0, message_class, subject, from_name, from_addr, to_line, cc_line,
                         sent_at, received_at, created_at, modified_at, message_flags, is_read, flag_status, flag_request,
                         flag_due, flag_completed, importance, sensitivity, size, attachment_count, body_kind, preview,
-                        internet_message_id, in_reply_to, conversation_topic, conversation_index, '', props
+                        internet_message_id, in_reply_to, conversation_topic, conversation_index, '', props, conversation_id
                      FROM message WHERE id = ?1",
                     params![id, target],
                 )

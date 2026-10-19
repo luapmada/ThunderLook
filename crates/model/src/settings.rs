@@ -43,6 +43,8 @@ pub struct Settings {
     pub list_height: u32,
     /// Marquer un élément comme lu quand la sélection le quitte (défaut de la référence).
     pub mark_read_on_leave: bool,
+    /// « Afficher en tant que conversations », pour tous les dossiers.
+    pub conversations: bool,
 }
 
 impl Default for Settings {
@@ -56,6 +58,7 @@ impl Default for Settings {
             list_width: 440,
             list_height: 360,
             mark_read_on_leave: true,
+            conversations: false,
         }
     }
 }

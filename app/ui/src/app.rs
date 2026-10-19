@@ -193,12 +193,16 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // Seul ce réglage rouvre la vue (pas la largeur des volets, par exemple).
+    let conversations_on = Memo::new(move |_| ui.settings.with(|s| s.conversations));
+
     // Ouverture d'une vue à chaque changement de dossier, de filtre ou de tri. La première tranche
     // est demandée tout de suite ; la mesure couvre les deux allers-retours et l'affichage.
     Effect::new(move |_| {
         let folder = ui.folder.get();
         let unread_only = ui.unread_only.get();
         let (sort, descending) = ui.sort.get();
+        let conversations = conversations_on.get();
         ui.view_epoch.track();
         let search_text = ui.search_text.get();
         let scope = ui.search_scope.get();
@@ -206,7 +210,7 @@ pub fn App() -> impl IntoView {
             return;
         }
         let search = (!search_text.trim().is_empty()).then(|| SearchQuery { text: search_text.clone(), scope, folder_id: folder.clone() });
-        let query = ListQuery { folder_id: folder, unread_only, sort, descending };
+        let query = ListQuery { folder_id: folder, unread_only, sort, descending, conversations };
         let t0 = now_ms();
         spawn_local(async move {
             let q = query.clone();
@@ -215,6 +219,7 @@ pub fn App() -> impl IntoView {
                 ui.folder.get_untracked() == q.folder_id
                     && ui.unread_only.get_untracked() == q.unread_only
                     && ui.sort.get_untracked() == (q.sort, q.descending)
+                    && ui.settings.with_untracked(|s| s.conversations) == q.conversations
                     && ui.search_text.get_untracked() == s.as_ref().map(|s| s.text.clone()).unwrap_or_default()
                     && s.as_ref().is_none_or(|s| ui.search_scope.get_untracked() == s.scope)
             };

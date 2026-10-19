@@ -13,7 +13,7 @@ pub use rusqlite;
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub const DB_FILE: &str = "thunderlook.db";
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 6;
 
 /// Schéma v1. Les dates sont en millisecondes depuis l'époque Unix (UTC).
 /// `props` : sac de propriétés MAPI brut (format décrit dans `thunderlook-import-pst::propbag`),
@@ -173,6 +173,60 @@ CREATE TABLE IF NOT EXISTS search_folder (
 );
 "#;
 
+/// v5 (J3b) : conversations. `conversation_id` = `PidTagConversationId` calculé ([`conversation_id`]) ;
+/// vide quand le message n'a pas de conversation, NULL tant qu'il n'a pas été calculé (bases antérieures,
+/// complétées par `thunderlook-mailbox` à l'ouverture).
+const SCHEMA_V5: &str = r#"
+ALTER TABLE message ADD COLUMN conversation_id BLOB;
+CREATE INDEX IF NOT EXISTS message_folder_conv ON message(folder_id, received_at, conversation_id, is_read);
+CREATE INDEX IF NOT EXISTS message_conv ON message(conversation_id) WHERE length(conversation_id) = 16;
+"#;
+
+/// v6 (J3b) : objets importés avec le marqueur de préfixe du PST ([`strip_subject_marker`]).
+const SCHEMA_V6: &str = r#"
+UPDATE message SET subject = substr(subject, 3) WHERE substr(subject, 1, 1) = char(1) AND length(subject) >= 2;
+UPDATE fai SET subject = substr(subject, 3) WHERE substr(subject, 1, 1) = char(1) AND length(subject) >= 2;
+"#;
+
+/// Objet sans le marqueur de préfixe que le PST place devant `PidTagSubject` ([MS-PST] §2.5.3.1.1.1) :
+/// un premier caractère de valeur 1, puis un caractère donnant la longueur du préfixe plus un.
+/// L'objet complet commence après ces deux caractères.
+pub fn strip_subject_marker(subject: &str) -> &str {
+    let mut chars = subject.chars();
+    match (chars.next(), chars.next()) {
+        (Some('\u{1}'), Some(_)) => chars.as_str(),
+        _ => subject,
+    }
+}
+
+/// `PidTagConversationId` ([MS-OXOMSG] §2.2.1.2) : la partie GUID de `PidTagConversationIndex` si le suivi
+/// est actif (`PidTagConversationIndexTracking`) et l'en-tête valide (22 octets au moins, premier octet 0x01) ;
+/// sinon le MD5 des 255 premiers caractères UTF-16LE de `PidTagConversationTopic` en majuscules ; sinon rien.
+pub fn conversation_id(index: Option<&[u8]>, tracking: bool, topic: Option<&str>) -> Option<[u8; 16]> {
+    use md5::{Digest, Md5};
+    if let Some(index) = index.filter(|i| tracking && i.len() >= 22 && i[0] == 0x01) {
+        // En-tête : 1 octet réservé, 5 octets d'horodatage, 16 octets de GUID.
+        return index[6..22].try_into().ok();
+    }
+    let topic = topic?;
+    let mut hasher = Md5::new();
+    // « Premiers caractères non nuls » : la chaîne s'arrête au premier NUL.
+    for unit in topic.encode_utf16().take_while(|u| *u != 0).take(255) {
+        // Majuscules sans dépendre de la langue (« i » donne « I » partout) ; une unité UTF-16 reste une unité.
+        let upper = char::from_u32(u32::from(unit))
+            .map(|c| {
+                let mut up = c.to_uppercase();
+                match (up.next(), up.next()) {
+                    (Some(u), None) if (u as u32) <= 0xFFFF => u as u16,
+                    _ => unit,
+                }
+            })
+            .unwrap_or(unit);
+        hasher.update(upper.to_le_bytes());
+    }
+    Some(hasher.finalize().into())
+}
+
 /// Ouvre (ou crée) la base du dossier de données et applique les migrations.
 pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(data_dir).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
@@ -182,11 +236,11 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version == 0 {
         conn.execute_batch(&format!(
-            "BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} {SCHEMA_V4} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
+            "BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} {SCHEMA_V4} {SCHEMA_V5} {SCHEMA_V6} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
         ))?;
     } else if version < SCHEMA_VERSION {
         // Migrations par ajout uniquement : la base est lue par d'autres outils (ADI Facturation).
-        let steps = [SCHEMA_V2, SCHEMA_V3, SCHEMA_V4];
+        let steps = [SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6];
         let pending = steps[(version as usize - 1).min(steps.len())..].concat();
         conn.execute_batch(&format!("BEGIN; {pending} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version > SCHEMA_VERSION {
@@ -272,5 +326,34 @@ mod tests {
         assert_eq!(eml_relative_path(3, 12345), "eml/3/0012/12345.eml");
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn subject_marker() {
+        assert_eq!(strip_subject_marker("\u{1}\u{5}RE: Suite"), "RE: Suite");
+        assert_eq!(strip_subject_marker("\u{1}\u{1}Devis"), "Devis");
+        assert_eq!(strip_subject_marker("Devis"), "Devis");
+        assert_eq!(strip_subject_marker("\u{1}"), "\u{1}");
+        assert_eq!(strip_subject_marker(""), "");
+    }
+
+    #[test]
+    fn conversation_ids() {
+        let mut index = vec![0x01, 1, 2, 3, 4, 5];
+        index.extend(0x10u8..0x20);
+        index.extend([0xAA; 5]); // un bloc de réponse
+        let guid: [u8; 16] = std::array::from_fn(|i| 0x10 + i as u8);
+        assert_eq!(conversation_id(Some(&index), true, Some("x")), Some(guid));
+        // Sans suivi, ou en-tête invalide : le sujet décide, sans tenir compte de la casse.
+        let by_topic = conversation_id(None, false, Some("Devis 2026"));
+        assert_eq!(conversation_id(Some(&index), false, Some("DEVIS 2026")), by_topic);
+        assert_eq!(conversation_id(Some(&index[..21]), true, Some("devis 2026")), by_topic);
+        index[0] = 0x02;
+        assert_eq!(conversation_id(Some(&index), true, Some("Devis 2026")), by_topic);
+        assert_ne!(conversation_id(None, false, Some("Devis 2027")), by_topic);
+        // MD5 de « ABC » en UTF-16LE (41 00 42 00 43 00).
+        let abc = conversation_id(None, false, Some("abc")).unwrap();
+        assert_eq!(abc[..4], [0x71, 0x67, 0x74, 0xb5]);
+        assert_eq!(conversation_id(None, true, None), None);
     }
 }

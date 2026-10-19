@@ -1,8 +1,8 @@
 //! Boîtes de dialogue modales du J3 : nouveau dossier, renommer, choix d'un dossier, confirmation,
-//! nouvelle catégorie. Échap annule, Entrée valide, le focus reste dans la boîte.
+//! nouvelle catégorie ; réglages de l'affichage (J3b). Échap annule, Entrée valide, le focus reste dans la boîte.
 
 use leptos::{html, prelude::*};
-use thunderlook_model::{Folder, FolderOp, MessageOp};
+use thunderlook_model::{Folder, FolderOp, MessageOp, SortField, settings::Density};
 use wasm_bindgen::JsCast;
 
 use crate::{
@@ -43,6 +43,12 @@ pub fn Dialogs() -> impl IntoView {
     let root: NodeRef<html::Div> = NodeRef::new();
     let text = RwSignal::new(String::new());
     let picked = RwSignal::new(0usize);
+    // Réglages de l'affichage, appliqués seulement sur OK.
+    let v_sort = RwSignal::new(SortField::Date);
+    let v_desc = RwSignal::new(true);
+    let v_conv = RwSignal::new(false);
+    let v_compact = RwSignal::new(false);
+    let v_mark_read = RwSignal::new(true);
 
     // À chaque ouverture : champ prérempli et focus.
     Effect::new(move |_| {
@@ -53,6 +59,15 @@ pub fn Dialogs() -> impl IntoView {
             _ => String::new(),
         });
         picked.set(0);
+        if d == Some(Dialog::ViewSettings) {
+            let (sort, desc) = ui.sort.get_untracked();
+            let s = ui.settings.get_untracked();
+            v_sort.set(sort);
+            v_desc.set(desc);
+            v_conv.set(s.conversations);
+            v_compact.set(s.density == Density::Compact);
+            v_mark_read.set(s.mark_read_on_leave);
+        }
         if d.is_some() {
             request_animation_frame(move || {
                 if let Some(r) = root.get_untracked() {
@@ -101,6 +116,14 @@ pub fn Dialogs() -> impl IntoView {
                 }
             }
             Dialog::Confirm { action, .. } => actions::confirm(ui, action),
+            Dialog::ViewSettings => {
+                ui.sort.set((v_sort.get_untracked(), v_desc.get_untracked()));
+                ui.update_settings(|s| {
+                    s.conversations = v_conv.get_untracked();
+                    s.density = if v_compact.get_untracked() { Density::Compact } else { Density::Comfortable };
+                    s.mark_read_on_leave = v_mark_read.get_untracked();
+                });
+            }
             Dialog::SaveSearch => actions::run_folder(
                 ui,
                 FolderOp::SaveSearch {
@@ -144,7 +167,7 @@ pub fn Dialogs() -> impl IntoView {
             "Tab" => {
                 // Le focus reste dans la boîte.
                 if let Some(r) = root.get_untracked() {
-                    let Ok(list) = r.query_selector_all("input, button") else { return };
+                    let Ok(list) = r.query_selector_all("input, select, button") else { return };
                     let els: Vec<web_sys::HtmlElement> = (0..list.length()).filter_map(|i| list.item(i)?.dyn_into().ok()).collect();
                     let active = document().active_element();
                     let pos = els.iter().position(|e| active.as_ref().is_some_and(|a| a == e.unchecked_ref::<web_sys::Element>()));
@@ -170,6 +193,7 @@ pub fn Dialogs() -> impl IntoView {
         Some(Dialog::Confirm { .. }) => "Confirmer",
         Some(Dialog::NewCategory) => "Nouvelle catégorie",
         Some(Dialog::SaveSearch) => "Enregistrer la recherche",
+        Some(Dialog::ViewSettings) => "Réglages de l'affichage",
         None => "",
     };
 
@@ -207,6 +231,48 @@ pub fn Dialogs() -> impl IntoView {
                         }
                         .into_any(),
                         Some(Dialog::Confirm { text: t, .. }) => view! { <p data-autofocus tabindex="-1">{t}</p> }.into_any(),
+                        Some(Dialog::ViewSettings) => view! {
+                            <label class="field">
+                                <span>"Organiser par"</span>
+                                <select
+                                    data-autofocus
+                                    on:change=move |ev| {
+                                        let i: usize = event_target_value(&ev).parse().unwrap_or(0);
+                                        let f = SortField::ALL[i.min(SortField::ALL.len() - 1)];
+                                        v_sort.set(f);
+                                        v_desc.set(f.default_descending());
+                                    }
+                                >
+                                    {SortField::ALL
+                                        .into_iter()
+                                        .enumerate()
+                                        .map(|(i, f)| view! { <option value=i.to_string() selected=move || v_sort.get() == f>{f.label()}</option> })
+                                        .collect_view()}
+                                </select>
+                            </label>
+                            <label class="check">
+                                <input type="checkbox" prop:checked=move || v_desc.get() on:change=move |ev| v_desc.set(event_target_checked(&ev)) />
+                                <span>"Ordre décroissant"</span>
+                            </label>
+                            <label class="check">
+                                <input type="checkbox" prop:checked=move || v_conv.get() on:change=move |ev| v_conv.set(event_target_checked(&ev)) />
+                                <span>"Afficher en tant que conversations"</span>
+                            </label>
+                            <p class="dialog-note">"Les conversations s'appliquent au classement par date, pour tous les dossiers."</p>
+                            <label class="check">
+                                <input type="checkbox" prop:checked=move || v_compact.get() on:change=move |ev| v_compact.set(event_target_checked(&ev)) />
+                                <span>"Utiliser un espacement plus étroit"</span>
+                            </label>
+                            <label class="check">
+                                <input
+                                    type="checkbox"
+                                    prop:checked=move || v_mark_read.get()
+                                    on:change=move |ev| v_mark_read.set(event_target_checked(&ev))
+                                />
+                                <span>"Marquer l'élément comme lu quand la sélection change"</span>
+                            </label>
+                        }
+                        .into_any(),
                         Some(Dialog::PickFolder { .. }) => view! {
                             <label class="field">
                                 <span>"Rechercher un dossier"</span>

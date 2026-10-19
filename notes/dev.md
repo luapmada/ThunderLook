@@ -61,6 +61,19 @@ Un nouvel import du même fichier d'origine n'est accepté qu'avec `--replace`. 
 - Rôles des dossiers : EntryID du magasin et de la Boîte de réception ([MS-OXOSFLD]), puis repli sur le nom
   des dossiers de premier niveau (PST de comptes IMAP sans ces EntryID).
 
+## Conversations et affichages (J3b)
+- Mesures : `cargo run --release -p thunderlook-mailbox --example conversations -- <données>`.
+- Schéma v5 : `message.conversation_id`.
+  - Vide = pas de conversation ; NULL = pas encore calculé. Les bases anciennes sont complétées à l'ouverture.
+- Schéma v6 : objets sans le marqueur de préfixe du PST.
+- Une vue en conversations a des lignes de trois sortes (`RowItem`) : message, en-tête de conversation, élément déplié.
+  - `view_targets` étend une sélection d'en-tête à tous les éléments de la conversation dans le dossier.
+  - `toggle_conversation` garde le jeton de la vue. L'interface ne recharge que les tranches à partir de la ligne dépliée.
+- `tools/uia_invoke.ps1` : active un bouton ou un onglet par son nom (Invoke, Toggle, SelectionItem) et relève les lignes visibles.
+  - Option `-Click` : vrai clic de souris, refusé si la fenêtre n'est pas au premier plan ou si le point sort de la fenêtre.
+  - Le clic n'a pas visé la bonne ligne le 2026-10-19 : à fiabiliser avant de s'y fier.
+  - Avec `powershell -File`, un tableau passé en paramètre arrive comme une seule chaîne. Appeler le script avec `&` depuis PowerShell.
+
 ## Lecture (J2)
 - Dossier de données de l'application, par ordre de priorité :
   1. `THUNDERLOOK_DATA` ;
