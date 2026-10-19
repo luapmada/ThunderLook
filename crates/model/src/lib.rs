@@ -423,6 +423,62 @@ pub struct CategoryInfo {
     pub color: Option<String>,
 }
 
+/// Nature d'un message en rédaction (J5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ComposeKind {
+    #[default]
+    New,
+    Reply,
+    ReplyAll,
+    Forward,
+}
+
+/// Origine d'une pièce jointe de brouillon.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum DraftAttachmentSource {
+    /// Pièce jointe `index` (numérotation de [`MessageView::attachments`]) d'un message enregistré.
+    Message { id: String, index: u32 },
+    /// Fichier choisi sur le disque.
+    File { path: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftAttachment {
+    pub name: String,
+    pub size_label: String,
+    pub source: DraftAttachmentSource,
+}
+
+/// Message en rédaction. Les destinataires sont des listes « Nom <adresse> » séparées par des points-virgules,
+/// comme les saisit l'utilisateur. Le corps est le contenu de `<body>`, images intégrées en URI `data:`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Draft {
+    /// Brouillon enregistré (`m…`) ; absent tant qu'il ne l'a pas été.
+    pub id: Option<String>,
+    pub kind: ComposeKind,
+    /// Message auquel on répond, ou que l'on transfère.
+    pub source_id: Option<String>,
+    pub to: String,
+    pub cc: String,
+    pub bcc: String,
+    pub subject: String,
+    pub html: String,
+    /// Feuilles de style du message cité (`<style>` de son en-tête), gardées pour sa mise en forme.
+    pub styles: String,
+    pub attachments: Vec<DraftAttachment>,
+}
+
+/// Signature d'Outlook (`%APPDATA%\Microsoft\Signatures`), images intégrées en URI `data:`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Signature {
+    pub name: String,
+    pub html: String,
+}
+
 /// Initiales pour la pastille de l'expéditeur.
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphanumeric()));

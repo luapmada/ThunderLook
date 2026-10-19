@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use leptos::{prelude::*, task::spawn_local};
 use thunderlook_model::{
-    FlagAction, ListQuery, MessageOp, SearchQuery, Selection,
+    ComposeKind, FlagAction, ListQuery, MessageOp, SearchQuery, Selection,
     settings::{Density, ReadingPane, Settings},
 };
 use wasm_bindgen::JsCast;
@@ -12,6 +12,7 @@ use wasm_bindgen::JsCast;
 use crate::{
     actions::{self, real_folder, select_single},
     commandbar::CommandBar,
+    compose::ComposePane,
     dialogs::Dialogs,
     menus::ContextMenu,
     folders::FolderPane,
@@ -31,6 +32,17 @@ fn reserved(ev: &web_sys::KeyboardEvent) -> bool {
     let ctrl = ev.ctrl_key();
     matches!(key.as_str(), "f5" | "f9" | "f7" | "f3" | "f1" | "f12")
         || (ctrl && matches!(key.as_str(), "r" | "f" | "n" | "p" | "u" | "q" | "s" | "m" | "g" | "j" | "h" | "o" | "t" | "k" | "e" | "y" | "d" | "l" | "b" | "+" | "-" | "=" | "0"))
+}
+
+/// Volet de droite (ou du bas) : la rédaction en cours, sinon le message sélectionné.
+#[component]
+fn ReadingOrCompose() -> impl IntoView {
+    let ui = use_ui();
+    let composing = Memo::new(move |_| ui.compose.with(Option::is_some));
+    move || {
+        ui.compose_epoch.track();
+        if composing.get() { view! { <ComposePane /> }.into_any() } else { view! { <ReadingPaneView /> }.into_any() }
+    }
 }
 
 /// Cycle F6 / Maj+F6 : recherche → onglets → dossiers → liste → lecture.
@@ -85,6 +97,19 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
         if let Some(op) = op {
             ev.prevent_default();
             actions::run(ui, op);
+            return;
+        }
+        // Rédaction (J5).
+        let kind = match (ctrl, alt, shift, key.to_ascii_lowercase().as_str()) {
+            (true, false, false, "n") => Some(ComposeKind::New),
+            (true, false, false, "r") => Some(ComposeKind::Reply),
+            (true, false, true, "r") => Some(ComposeKind::ReplyAll),
+            (true, false, false, "f") => Some(ComposeKind::Forward),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            ev.prevent_default();
+            actions::compose(ui, kind);
             return;
         }
         if ctrl && !alt && !shift && key.eq_ignore_ascii_case("z") {
@@ -437,7 +462,7 @@ fn Main() -> impl IntoView {
                         max=Settings::LIST_MAX
                         on_change=set_list_w
                     />
-                    <ReadingPaneView />
+                    <ReadingOrCompose />
                 }
                 .into_any(),
                 (Module::Mail, ReadingPane::Bottom) => view! {
@@ -451,7 +476,7 @@ fn Main() -> impl IntoView {
                             max=900
                             on_change=set_list_h
                         />
-                        <ReadingPaneView />
+                        <ReadingOrCompose />
                     </div>
                 }
                 .into_any(),

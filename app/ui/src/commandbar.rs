@@ -5,7 +5,7 @@
 use icondata_core::Icon;
 use leptos::prelude::*;
 use thunderlook_model::{
-    FolderOp, MessageOp, SearchScope,
+    ComposeKind, FolderOp, MessageOp, SearchScope,
     settings::{BarMode, Density, ReadingPane},
 };
 
@@ -32,6 +32,10 @@ pub enum Action {
     ConversationsToggle,
     /// Boîte « Réglages de l'affichage » (J3b).
     ViewSettings,
+    /// Rédaction (J5).
+    Compose(ComposeKind),
+    /// Menu « Nouveaux éléments » (message, modèle `.oft`).
+    NewItemsMenu,
     // J3 : organisation.
     Delete,
     Archive,
@@ -56,7 +60,7 @@ pub enum Action {
 
 impl Action {
     fn is_menu(self) -> bool {
-        matches!(self, Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu)
+        matches!(self, Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu)
     }
 }
 
@@ -78,6 +82,7 @@ fn perform(ui: Ui, action: Action) {
         }),
         Action::ConversationsToggle => ui.update_settings(|s| s.conversations = !s.conversations),
         Action::ViewSettings => ui.dialog.set(Some(Dialog::ViewSettings)),
+        Action::Compose(kind) => actions::compose(ui, kind),
         Action::NewFolder => ui.dialog.set(Some(Dialog::NewFolder { parent: folder })),
         Action::RenameFolder if plain => ui.dialog.set(Some(Dialog::Rename { id: folder, name })),
         Action::MoveFolder if plain => {
@@ -128,6 +133,10 @@ fn menu_entries(ui: Ui, action: Action) -> Vec<MenuEntry> {
         Action::MoveMenu => menus::move_entries(ui),
         Action::CategoriesMenu => menus::category_entries(ui),
         Action::FlagMenu => menus::flag_entries(ui),
+        Action::NewItemsMenu => vec![
+            MenuEntry::action("Message électronique", move || actions::compose(ui, ComposeKind::New)),
+            MenuEntry::action("Choisir un modèle (.oft)…", move || actions::compose_from_template(ui)),
+        ],
         Action::ReadingPaneMenu => {
             let current = ui.settings.get().reading_pane;
             [(ReadingPane::Right, "À droite"), (ReadingPane::Bottom, "En bas"), (ReadingPane::Off, "Désactivé")]
@@ -174,7 +183,7 @@ const fn wired(label: &'static str, icon: Icon, shortcut: Option<&'static str>, 
 
 impl Action {
     const fn is_menu_const(self) -> bool {
-        matches!(self, Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu)
+        matches!(self, Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu)
     }
 }
 
@@ -187,8 +196,8 @@ const MAIL_HOME: &[Group] = &[
     Group {
         label: "Nouveau",
         cmds: &[
-            cmd("Nouveau message", MAIL_PLUS, Some("Ctrl+N"), false, true, true),
-            cmd("Nouveaux éléments", PLUS, None, true, false, true),
+            wired("Nouveau message", MAIL_PLUS, Some("Ctrl+N"), true, true, Action::Compose(ComposeKind::New)),
+            wired("Nouveaux éléments", PLUS, None, false, true, Action::NewItemsMenu),
         ],
     },
     Group {
@@ -204,9 +213,9 @@ const MAIL_HOME: &[Group] = &[
     Group {
         label: "Répondre",
         cmds: &[
-            cmd("Répondre", REPLY, Some("Ctrl+R"), false, true, true),
-            cmd("Répondre à tous", REPLY_ALL, Some("Ctrl+Maj+R"), false, true, true),
-            cmd("Transférer", FORWARD, Some("Ctrl+F"), false, true, true),
+            wired("Répondre", REPLY, Some("Ctrl+R"), true, true, Action::Compose(ComposeKind::Reply)),
+            wired("Répondre à tous", REPLY_ALL, Some("Ctrl+Maj+R"), true, true, Action::Compose(ComposeKind::ReplyAll)),
+            wired("Transférer", FORWARD, Some("Ctrl+F"), true, true, Action::Compose(ComposeKind::Forward)),
             cmd("Réunion", CALENDAR_PLUS, Some("Ctrl+Alt+R"), false, false, false),
         ],
     },

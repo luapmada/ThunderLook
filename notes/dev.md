@@ -61,6 +61,13 @@ Un nouvel import du même fichier d'origine n'est accepté qu'avec `--replace`. 
 - Rôles des dossiers : EntryID du magasin et de la Boîte de réception ([MS-OXOSFLD]), puis repli sur le nom
   des dossiers de premier niveau (PST de comptes IMAP sans ces EntryID).
 
+## Rédaction (J5)
+- Cœur : `crates/mailbox/src/compose.rs` (composition, signatures, brouillons) et `oft.rs` (modèles).
+- `THUNDERLOOK_SIGNATURES` remplace le dossier des signatures (tests).
+- Fidélité d'une réponse : `cargo run --release -p thunderlook-mailbox --example fidelity -- <données> <id original> <id réponse Outlook>`.
+- Lecture d'un modèle : `cargo run -p thunderlook-mailbox --example oft -- <modèle.oft>`.
+- Éditeur : iframe `sandbox="allow-same-origin"` (aucun script), `designMode`. Le document de l'iframe se convertit avec `unchecked_into`, pas `dyn_into` (autre royaume JavaScript).
+
 ## Versions
 - **Application** : une version mineure par jalon, dans l'ordre de livraison. J0 = 0.0.0, J1 = 0.1.0, J2 = 0.2.0, J3 = 0.3.0, J4 = 0.4.0, J3b = 0.5.0, J5 = 0.6.0, etc.
   - Un correctif après un jalon augmente le dernier chiffre (0.5.1).

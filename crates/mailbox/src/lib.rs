@@ -2,9 +2,11 @@
 //! ou d'une recherche (lignes servies par tranches), message complet pour le volet de lecture (J2),
 //! opérations d'organisation (J3), recherche et indexation plein texte (J4), conversations (J3b).
 
+mod compose;
 mod conv;
 mod index;
 mod message;
+mod oft;
 mod ops;
 mod search;
 
@@ -20,7 +22,9 @@ use thunderlook_model::{
 };
 use thunderlook_store::rusqlite::{Connection, params_from_iter, types::Value};
 
+pub use compose::{MailAddress, default_signature, format_address, parse_addresses, signatures};
 pub use index::index_pending;
+pub use oft::draft_from_oft;
 pub use message::{AttachmentData, BLOCKED_EXTENSIONS, is_blocked};
 
 pub type Result<T> = std::result::Result<T, String>;

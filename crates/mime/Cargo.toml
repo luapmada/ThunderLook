@@ -1,6 +1,6 @@
 [package]
 name = "thunderlook-mime"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 publish = false
 description = "Conversions de contenu pour ThunderLook : pages de code, RTF compressé et encapsulé, aperçu texte"

@@ -112,6 +112,20 @@ pub fn full_date<Tz: TimeZone>(received: &DateTime<Tz>) -> String {
     )
 }
 
+/// Date du bloc cité d'une réponse ou d'un transfert, comme Outlook 2021 en français :
+/// « jeudi 8 octobre 2026 22:14 ».
+pub fn quote_date<Tz: TimeZone>(d: &DateTime<Tz>) -> String {
+    format!(
+        "{} {} {} {} {:02}:{:02}",
+        WEEKDAYS[d.weekday().num_days_from_monday() as usize],
+        d.day(),
+        MONTHS[d.month0() as usize],
+        d.year(),
+        d.hour(),
+        d.minute()
+    )
+}
+
 /// Date sans heure : « 16 octobre 2026 ».
 pub fn long_day<Tz: TimeZone>(d: &DateTime<Tz>) -> String {
     format!("{} {} {}", d.day(), MONTHS[d.month0() as usize], d.year())

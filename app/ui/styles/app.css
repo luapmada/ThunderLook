@@ -1174,3 +1174,103 @@ input {
   border-radius: var(--radius);
   font-size: 11px;
 }
+
+/* Rédaction (J5) : barre, champs, pièces jointes, corps éditable. */
+.pane.compose {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.compose-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--u);
+  padding: calc(var(--u) * 2) calc(var(--u) * 3);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.compose-bar .cmd.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.compose-bar .cmd.primary[aria-disabled="true"] {
+  opacity: 0.55;
+}
+
+.compose-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 var(--u);
+  background: var(--border);
+}
+
+.compose-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u);
+  padding: calc(var(--u) * 2) calc(var(--u) * 3);
+  border-bottom: 1px solid var(--border);
+}
+
+.compose-field {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.compose-field input {
+  min-height: var(--target);
+  padding: 0 calc(var(--u) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs);
+}
+
+.compose-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.link-btn {
+  border: 0;
+  background: transparent;
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 var(--u);
+}
+
+.compose-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--u);
+  padding-left: calc(56px + var(--u) * 2);
+}
+
+.att-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u);
+  padding: 2px var(--u) 2px calc(var(--u) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+
+.compose-body {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}

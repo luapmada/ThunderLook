@@ -137,6 +137,56 @@ const CHECKS = [
   }],
 ];
 
+CHECKS.push(['J5 : répondre à tous, écrire, enregistrer en brouillon, supprimer le brouillon', async (log) => {
+  await toggleConversations(false);
+  const openFolder = async (pattern) => {
+    const ok = await js(`(() => { const t = [...document.querySelectorAll('.treeitem')].find(e => ${pattern}.test(e.textContent)); if (!t) return false; t.click(); return true; })()`);
+    if (!ok) throw new Error(`dossier introuvable : ${pattern}`);
+    await sleep(900);
+  };
+  const draftsCount = `(() => { const t = [...document.querySelectorAll('.treeitem')].find(e => /^Brouillons/.test(e.textContent.trim())); return t ? t.textContent.trim() : ''; })()`;
+  const before = await js(draftsCount);
+  await openFolder('/Boîte de réception/');
+  await js(`${ROW(1)}.click()`);
+  await until(`document.querySelector('.reading-subject')`, 'message affiché');
+  const original = await js(`document.querySelector('.reading-subject').textContent`);
+  await js(`[...document.querySelectorAll('.reading-actions button')].find(b => b.textContent.includes('Répondre à tous')).click()`);
+  await until(`document.querySelector('.pane.compose iframe')?.contentDocument?.designMode === 'on'`, 'volet de rédaction');
+  const fields = await js(`[...document.querySelectorAll('.compose-field input')].map(i => i.value)`);
+  const [to, , subject] = fields;
+  if (!to) throw new Error('« À » est vide');
+  if (!subject.startsWith('RE: ')) throw new Error(`objet inattendu : ${subject}`);
+  const quoted = await js(`(() => { const b = document.querySelector('.pane.compose iframe').contentDocument.body.innerHTML; return ['De&nbsp;:', 'Envoyé&nbsp;:', 'Objet&nbsp;:'].every(x => b.includes(x)); })()`);
+  if (!quoted) throw new Error('bloc cité absent du corps');
+  log(`réponse à tous de « ${original.slice(0, 50)} » : À = ${to.slice(0, 60)}, objet = « ${subject.slice(0, 50)} », bloc cité présent`);
+  // Texte saisi dans l'éditeur (designMode), puis enregistrement.
+  await js(`(() => { const d = document.querySelector('.pane.compose iframe').contentDocument; d.body.focus(); d.execCommand('insertText', false, 'Vérification automatique ThunderLook. '); })()`);
+  await js(`[...document.querySelectorAll('.compose-bar button')].find(b => b.textContent.includes('Enregistrer')).click()`);
+  await until(`(document.querySelector('[role=status], .statusbar')?.textContent ?? '').includes('Brouillon enregistré')`, 'enregistrement du brouillon');
+  await sleep(800);
+  log(`brouillon enregistré ; Brouillons : « ${before} » → « ${await js(draftsCount)} »`);
+  await js(`[...document.querySelectorAll('.compose-bar button')].find(b => b.textContent.includes('Ignorer')).click()`);
+  // Le brouillon est le plus récent de « Brouillons » : on le vérifie, puis on le supprime définitivement.
+  await openFolder('/^Brouillons/');
+  const label = await js(`${ROW(1)}?.getAttribute('aria-label') ?? ''`);
+  if (!label.includes(subject.slice(0, 30))) throw new Error(`brouillon introuvable en tête de « Brouillons » : ${label}`);
+  await js(`${ROW(1)}.click(); document.querySelector('[role=listbox]').focus()`);
+  // Entrée rouvre le brouillon avec le texte saisi.
+  await key('Enter');
+  await until(`document.querySelector('.pane.compose iframe')?.contentDocument?.body?.innerHTML?.includes('Vérification automatique ThunderLook')`, 'réouverture du brouillon');
+  log('Entrée sur le brouillon : rouvert avec le texte saisi');
+  await js(`[...document.querySelectorAll('.compose-bar button')].find(b => b.textContent.includes('Ignorer')).click()`);
+  await js(`document.querySelector('[role=listbox]').focus()`);
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46, modifiers: 8 });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46, modifiers: 8 });
+  await until(`document.querySelector('.dialog')`, 'confirmation de suppression définitive');
+  await js(`[...document.querySelectorAll('.dialog button')].find(b => b.textContent.trim() === 'OK').click()`);
+  await sleep(1200);
+  const after = await js(draftsCount);
+  if (after !== before) throw new Error(`Brouillons : « ${before} » avant, « ${after} » après la suppression`);
+  log(`brouillon supprimé définitivement ; Brouillons revenu à « ${after} »`);
+}]);
+
 // --- Exécution ------------------------------------------------------------------------------------
 const app = spawn(exe, [], {
   env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },

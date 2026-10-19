@@ -5,10 +5,10 @@
 //! ajuster la hauteur du cadre à son contenu et relayer les raccourcis clavier tapés dans le message.
 
 use leptos::{prelude::*, task::spawn_local};
-use thunderlook_model::{BodyView, FlagState, Importance, MessageView, initials};
+use thunderlook_model::{BodyView, ComposeKind, FlagState, Importance, MessageView, initials};
 use wasm_bindgen::{JsCast, closure::Closure};
 
-use crate::{app::global_key, icons::*, ipc, state::use_ui};
+use crate::{actions, app::global_key, icons::*, ipc, state::use_ui};
 
 /// Ajuste la hauteur de l'iframe à son document et y relaie les raccourcis globaux.
 fn wire_frame(frame: &web_sys::HtmlIFrameElement, relay: &js_sys::Function) {
@@ -56,9 +56,9 @@ pub fn ReadingPane() -> impl IntoView {
         });
     });
 
-    let action = |label: &'static str, icon, shortcut: &'static str| {
+    let action = move |label: &'static str, icon, shortcut: &'static str, kind: ComposeKind| {
         view! {
-            <button class="cmd" aria-disabled="true" tabindex="-1" title=format!("{label} ({shortcut}) — prévu au jalon J5")>
+            <button class="cmd" title=format!("{label} ({shortcut})") on:click=move |_| actions::compose(ui, kind)>
                 <Svg icon=icon />
                 <span>{label}</span>
             </button>
@@ -91,9 +91,9 @@ pub fn ReadingPane() -> impl IntoView {
                     view! {
                         <header class="reading-head">
                             <div class="reading-actions" role="toolbar" aria-label="Actions sur le message">
-                                {action("Répondre", REPLY, "Ctrl+R")}
-                                {action("Répondre à tous", REPLY_ALL, "Ctrl+Maj+R")}
-                                {action("Transférer", FORWARD, "Ctrl+F")}
+                                {action("Répondre", REPLY, "Ctrl+R", ComposeKind::Reply)}
+                                {action("Répondre à tous", REPLY_ALL, "Ctrl+Maj+R", ComposeKind::ReplyAll)}
+                                {action("Transférer", FORWARD, "Ctrl+F", ComposeKind::Forward)}
                             </div>
                             <h1 class="reading-subject">{if m.subject.trim().is_empty() { "(aucun objet)".to_string() } else { m.subject.clone() }}</h1>
                             <div class="reading-who">

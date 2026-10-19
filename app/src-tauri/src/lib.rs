@@ -18,8 +18,8 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use thunderlook_mailbox::Mailbox;
 use thunderlook_model::{
-    CategoryInfo, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp, MessageSummary, MessageView, OpResult,
-    SearchQuery, Selection, SortField, settings::Settings,
+    CategoryInfo, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
+    MessageOp, MessageSummary, MessageView, OpResult, SearchQuery, Selection, Signature, SortField, format, settings::Settings,
 };
 
 /// Boîte aux lettres ouverte à la première demande ; `Err` mémorise l'échec d'ouverture.
@@ -167,6 +167,58 @@ fn categories(app: AppHandle, store: State<Store>) -> Result<Vec<CategoryInfo>, 
     with_mailbox(&app, &store, |mb| mb.categories())
 }
 
+/// Prépare un nouveau message, une réponse, une réponse à tous ou un transfert (J5).
+#[tauri::command(async)]
+fn compose(app: AppHandle, store: State<Store>, kind: ComposeKind, source_id: Option<String>) -> Result<Draft, String> {
+    with_mailbox(&app, &store, |mb| mb.compose(kind, source_id.as_deref()))
+}
+
+/// Enregistre un brouillon ; le message enregistré est à indexer.
+#[tauri::command(async)]
+fn save_draft(app: AppHandle, store: State<Store>, draft: Draft) -> Result<Draft, String> {
+    with_mailbox(&app, &store, |mb| {
+        let saved = mb.save_draft(&draft)?;
+        app.state::<Indexer>().ensure(mb.data_dir());
+        Ok(saved)
+    })
+}
+
+/// Rouvre un brouillon ; `None` si le message n'en est pas un.
+#[tauri::command(async)]
+fn open_draft(app: AppHandle, store: State<Store>, id: String) -> Result<Option<Draft>, String> {
+    with_mailbox(&app, &store, |mb| if mb.is_draft(&id)? { mb.open_draft(&id).map(Some) } else { Ok(None) })
+}
+
+/// Nouveau message d'après un modèle `.oft` choisi par l'utilisateur (`None` s'il annule).
+#[tauri::command(async)]
+fn compose_from_template(app: AppHandle) -> Result<Option<Draft>, String> {
+    let Some(file) = app.dialog().file().add_filter("Modèle Outlook", &["oft", "msg"]).blocking_pick_file() else { return Ok(None) };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let scratch = std::env::temp_dir().join("ThunderLook").join(format!("modele-{stamp}"));
+    thunderlook_mailbox::draft_from_oft(&path, &scratch).map(Some)
+}
+
+#[tauri::command(async)]
+fn signatures() -> Vec<Signature> {
+    thunderlook_mailbox::signatures()
+}
+
+/// Fichiers à joindre, choisis par l'utilisateur (vide s'il annule).
+#[tauri::command(async)]
+fn pick_attachments(app: AppHandle) -> Vec<DraftAttachment> {
+    let Some(files) = app.dialog().file().blocking_pick_files() else { return Vec::new() };
+    files
+        .into_iter()
+        .filter_map(|f| f.into_path().ok())
+        .map(|path| DraftAttachment {
+            name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            size_label: format::size(fs::metadata(&path).map(|m| m.len()).unwrap_or(0)),
+            source: DraftAttachmentSource::File { path: path.to_string_lossy().into_owned() },
+        })
+        .collect()
+}
+
 /// Nom de fichier sûr pour Windows.
 fn safe_file_name(name: &str) -> String {
     let s: String = name
@@ -279,6 +331,12 @@ pub fn run() {
             list_rows,
             toggle_conversation,
             message_view,
+            compose,
+            save_draft,
+            open_draft,
+            signatures,
+            pick_attachments,
+            compose_from_template,
             apply_op,
             search,
             index_status,

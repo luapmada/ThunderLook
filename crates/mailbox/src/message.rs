@@ -38,22 +38,22 @@ pub struct AttachmentData {
     pub blocked: bool,
 }
 
-struct Row {
-    subject: String,
-    from_name: String,
-    from_addr: String,
-    to_line: String,
-    cc_line: String,
-    received: Option<i64>,
-    sent: Option<i64>,
-    importance: i64,
-    flag_status: i64,
-    flag_request: Option<String>,
-    flag_due: Option<i64>,
-    flag_completed: Option<i64>,
-    message_class: String,
-    eml_path: String,
-    source: i64,
+pub(crate) struct Row {
+    pub(crate) subject: String,
+    pub(crate) from_name: String,
+    pub(crate) from_addr: String,
+    pub(crate) to_line: String,
+    pub(crate) cc_line: String,
+    pub(crate) received: Option<i64>,
+    pub(crate) sent: Option<i64>,
+    pub(crate) importance: i64,
+    pub(crate) flag_status: i64,
+    pub(crate) flag_request: Option<String>,
+    pub(crate) flag_due: Option<i64>,
+    pub(crate) flag_completed: Option<i64>,
+    pub(crate) message_class: String,
+    pub(crate) eml_path: String,
+    pub(crate) source: i64,
 }
 
 fn item_kind(class: &str) -> Option<String> {
@@ -81,7 +81,7 @@ fn item_kind(class: &str) -> Option<String> {
 }
 
 /// Nom affiché d'une pièce jointe ; un message joint sans nom prend son objet.
-fn part_name(part: &mail_parser::MessagePart, index: usize) -> String {
+pub(crate) fn part_name(part: &mail_parser::MessagePart, index: usize) -> String {
     if let Some(n) = part.attachment_name().map(str::trim).filter(|n| !n.is_empty()) {
         return n.to_string();
     }
@@ -94,7 +94,7 @@ fn part_name(part: &mail_parser::MessagePart, index: usize) -> String {
     format!("pièce jointe {}", index + 1)
 }
 
-fn content_id(part: &mail_parser::MessagePart) -> Option<String> {
+pub(crate) fn content_id(part: &mail_parser::MessagePart) -> Option<String> {
     part.content_id().map(|c| c.trim().trim_start_matches('<').trim_end_matches('>').to_string())
 }
 
@@ -104,7 +104,7 @@ fn is_rtf_body(part: &mail_parser::MessagePart) -> bool {
         && part.content_type().is_some_and(|c| c.ctype() == "text" && c.subtype() == Some("rtf"))
 }
 
-fn mime_of(part: &mail_parser::MessagePart) -> String {
+pub(crate) fn mime_of(part: &mail_parser::MessagePart) -> String {
     part.content_type()
         .map(|c| match c.subtype() {
             Some(s) => format!("{}/{}", c.ctype(), s),
@@ -114,7 +114,7 @@ fn mime_of(part: &mail_parser::MessagePart) -> String {
 }
 
 /// Recherche ASCII insensible à la casse.
-fn find_ci(hay: &str, needle: &str, from: usize) -> Option<usize> {
+pub(crate) fn find_ci(hay: &str, needle: &str, from: usize) -> Option<usize> {
     let h = hay.as_bytes();
     let n = needle.as_bytes();
     if n.is_empty() || h.len() < n.len() {
@@ -124,7 +124,7 @@ fn find_ci(hay: &str, needle: &str, from: usize) -> Option<usize> {
 }
 
 /// Remplace les références `cid:` connues par des URI `data:`.
-fn inline_cids(html: &str, cids: &HashMap<String, String>) -> (String, Vec<String>) {
+pub(crate) fn inline_cids(html: &str, cids: &HashMap<String, String>) -> (String, Vec<String>) {
     let mut out = String::with_capacity(html.len());
     let mut used = Vec::new();
     let mut pos = 0;
@@ -182,7 +182,7 @@ pub(crate) fn srcdoc(html: &str, allow_remote: bool) -> String {
 }
 
 impl Mailbox {
-    fn row(&self, id: i64) -> Result<Row> {
+    pub(crate) fn row(&self, id: i64) -> Result<Row> {
         self.conn()
             .query_row(
                 "SELECT m.subject, m.from_name, m.from_addr, m.to_line, m.cc_line, m.received_at, m.sent_at, m.importance,
@@ -214,7 +214,7 @@ impl Mailbox {
             .ok_or_else(|| format!("message introuvable : m{id}"))
     }
 
-    fn eml(&self, row: &Row) -> Result<Vec<u8>> {
+    pub(crate) fn eml(&self, row: &Row) -> Result<Vec<u8>> {
         let path = thunderlook_store::resolve(self.data_dir(), &row.eml_path);
         fs::read(&path).map_err(|e| format!("{} : {e}", path.display()))
     }
@@ -313,7 +313,7 @@ impl Mailbox {
 }
 
 /// Pièces jointes au sens de l'interface, dans l'ordre du `.eml` (index stable entre deux lectures).
-fn attachment_parts<'a>(m: &'a Message<'a>) -> impl Iterator<Item = &'a mail_parser::MessagePart<'a>> {
+pub(crate) fn attachment_parts<'a>(m: &'a Message<'a>) -> impl Iterator<Item = &'a mail_parser::MessagePart<'a>> {
     m.attachments().filter(|p| !is_rtf_body(p))
 }
 

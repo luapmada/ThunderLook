@@ -2,8 +2,8 @@
 
 use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
-    CategoryInfo, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp, MessageSummary, MessageView, OpResult,
-    SearchQuery, Selection, SortField, settings::Settings,
+    CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
+    MessageSummary, MessageView, OpResult, SearchQuery, Selection, Signature, SortField, settings::Settings,
 };
 use wasm_bindgen::prelude::*;
 
@@ -145,6 +145,47 @@ pub async fn load_settings() -> Result<Settings, String> {
 
 pub async fn save_settings(settings: Settings) -> Result<(), String> {
     call("save_settings", &SettingsArg { settings }).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComposeArg<'a> {
+    kind: ComposeKind,
+    source_id: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct DraftArg<'a> {
+    draft: &'a Draft,
+}
+
+#[derive(Serialize)]
+struct IdArg<'a> {
+    id: &'a str,
+}
+
+pub async fn compose(kind: ComposeKind, source_id: Option<&str>) -> Result<Draft, String> {
+    call("compose", &ComposeArg { kind, source_id }).await
+}
+
+pub async fn save_draft(draft: &Draft) -> Result<Draft, String> {
+    call("save_draft", &DraftArg { draft }).await
+}
+
+pub async fn open_draft(id: &str) -> Result<Option<Draft>, String> {
+    call("open_draft", &IdArg { id }).await
+}
+
+pub async fn compose_from_template() -> Result<Option<Draft>, String> {
+    call("compose_from_template", &NoArgs {}).await
+}
+
+pub async fn signatures() -> Result<Vec<Signature>, String> {
+    call("signatures", &NoArgs {}).await
+}
+
+pub async fn pick_attachments() -> Result<Vec<DraftAttachment>, String> {
+    call("pick_attachments", &NoArgs {}).await
 }
 
 /// Mesure de performance, journalisée par le cœur si `THUNDERLOOK_PERF` est défini.

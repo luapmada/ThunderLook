@@ -1,6 +1,6 @@
 [package]
 name = "thunderlook-mailbox"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 publish = false
 description = "Lecture du stockage de ThunderLook pour l'interface : arborescence, listes triées, messages"
@@ -15,3 +15,4 @@ base64 = "0.22.1"
 mail-builder = "1.0.0"
 md-5 = "0.10.6"
 encoding_rs = "0.8.42"
+cfb = "0.14.0"

@@ -78,7 +78,7 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | J3 ✅ | Organisation | Lu/non lu, supprimer, déplacer/copier, glisser-déposer, indicateurs, catégories, CRUD des dossiers, favoris, conversations, « Organiser par », filtres Tous/Non lus, paramètres d'affichage | Ruban Accueil, Dossier et Affichage fonctionnels (sous-ensemble de `ui-reference.md` §3) | M |
 | J3b ✅ | Conversations et affichages | « Afficher en conversations », « Organiser par » au-delà des 4 tris (catégories, indicateur, pièces jointes), boîte « Réglages de l'affichage », options de lecture (marquer comme lu) dans l'interface | Liste en conversations sur la Boîte de réception de 22 000 éléments en moins de 300 ms | M |
 | J4 ✅ | Recherche | Index FTS5, zone de recherche et portées, onglet Recherche, mots-clés, recherche avancée, dossiers de recherche (Non lus, Pour le suivi, personnalisés) | Moins de 300 ms sur l'archive de 217 000 éléments | M |
-| J5 | Rédaction (brouillons) | Fenêtre de rédaction HTML, réponse et transfert avec citation, signatures (import HTM), modèles `.oft`, brouillons | Réponse à tous fidèle (en-têtes, citation) enregistrée en brouillon | M |
+| J5 ✅ | Rédaction (brouillons) | Fenêtre de rédaction HTML, réponse et transfert avec citation, signatures (import HTM), modèles `.oft`, brouillons | Réponse à tous fidèle (en-têtes, citation) enregistrée en brouillon | M |
 | J6 | Règles et actions rapides | Import du flux de règles et des `.rwz`, assistant de règles, « Exécuter maintenant », actions rapides (défauts plus éditeur) | Tes 2 `.rwz` et le flux du PST importés, et rejoués sur une copie | L |
 | J7 | IMAP + SMTP (Hostinger) | Comptes, synchronisation, envoi, boîte d'envoi, F9, hors connexion, notifications, réponse automatique locale | Envoi et réception réels sur un compte de test | L |
 | J8 | POP3 | Si toujours utile (profil « pop-original ») | — | S |
@@ -227,6 +227,38 @@ Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nomb
   - l'en-tête sélectionné affiche le dernier message dans le volet de lecture.
   - Une première tentative à la souris système (`uia_invoke.ps1 -Click`) a manqué sa cible ; un clic est probablement parti sur la barre des tâches.
     `uia_invoke.ps1` refuse désormais tout clic hors de la fenêtre. Le pilotage par CDP est à préférer.
+
+### Vérifications du J5 (2026-10-19, même base)
+- **Fidélité de la réponse** (`examples/fidelity.rs`, lecture seule) :
+  - la réponse à tous préparée par ThunderLook pour le message de Roland MULLER (`m29555`) est **identique** à celle qu'Outlook a réellement écrite (`m7233`) ;
+  - c'est vrai pour les destinataires, la copie, l'objet et le texte du bloc cité (« De : … Envoyé : jeudi 8 octobre 2026 22:14 À : … Objet : … ») ;
+  - en chemin, une erreur a été corrigée : Outlook remplace un premier « Re: » par « RE: », et ne le garde pas tel quel. Les préfixes intérieurs restent (« RE: TR: » 21 fois, « TR: Fw: » dans les Éléments envoyés).
+- **Format relevé sur un message envoyé** de la copie :
+  - objet préfixé par `RE: ` ou `TR: ` ;
+  - filet `border-top:solid #E1E1E1 1.0pt`, libellés en gras suivis d'une espace insécable ;
+  - message d'origine sans retrait ;
+  - `In-Reply-To` et `References` chaînés.
+- **Brouillon** : `.eml` du dossier Brouillons de la source, `X-Unsent: 1`, `MSGFLAG_UNSENT`.
+  - Même conversation que l'original : index enfant de 27 octets, même `conversation_id`.
+  - Images en `cid:` dans le fichier et en `data:` dans l'éditeur.
+  - Un brouillon rouvert puis réenregistré reste un seul brouillon et garde son fil.
+- **Signatures** : les `.htm` de `%APPDATA%\Microsoft\Signatures` (windows-1252), images incluses.
+  - Aucune signature par défaut n'est définie dans le registre de la référence. ThunderLook prend celle dont le nom contient « (adresse du compte) ».
+  - Les autres s'insèrent par le menu « Signature ».
+- **« Mes adresses »**, exclues de « Répondre à tous » : les expéditeurs des Éléments envoyés de la source.
+- **Modèles `.oft`** (lecteur [MS-OXMSG] minimal, `oft.rs`) : les deux modèles de `data/samples` donnent leur objet et leur corps, accents compris. Menu « Nouveaux éléments ▾ ».
+- **Dans l'application** (`tools/ui_check.mjs`, CDP) :
+  - « Répondre à tous » ouvre le volet de rédaction : « À » rempli, objet `RE: …`, bloc cité présent ;
+  - texte saisi, enregistrement : Brouillons passe de [2] à [3] ;
+  - Entrée rouvre le brouillon avec son texte ;
+  - suppression définitive : Brouillons revient à [2].
+  - Défaut trouvé par ce test : `dyn_into::<HtmlDocument>()` échoue sur le document de l'iframe, qui vient d'un autre royaume JavaScript. L'éditeur restait donc inerte.
+- **Tests** : `crates/mailbox/tests/compose.rs` (réponse à tous, réponse, transfert avec pièce jointe, nouveau message, adresses) et le test des préfixes d'objet.
+- **Non fait** (reporté) :
+  - fenêtre de rédaction séparée : la rédaction se fait dans le volet de lecture, comme la réponse intégrée d'Outlook ;
+  - carnet d'adresses, saisie semi-automatique, orthographe ;
+  - glisser-déposer de pièces jointes ;
+  - signature différente selon nouveau message ou réponse.
 
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).

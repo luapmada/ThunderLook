@@ -321,6 +321,11 @@ pub fn MessageList() -> impl IntoView {
                 }
                 return;
             }
+            (false, false, "Enter") => {
+                ev.prevent_default();
+                actions::open_if_draft(ui);
+                return;
+            }
             (true, true, "v" | "V") => {
                 ev.prevent_default();
                 ui.dialog.set(Some(Dialog::PickFolder { purpose: PickPurpose::MoveMessages }));
@@ -590,6 +595,7 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
             aria-label=label
             draggable="true"
             on:click=pick
+            on:dblclick=move |_| actions::open_if_draft(ui)
             on:dragstart=move |ev| drag_start(ui, pos, &ev)
             on:contextmenu=move |ev| context(ui, pos, &ev)
         >

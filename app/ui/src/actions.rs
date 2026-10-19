@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use leptos::{prelude::*, task::spawn_local};
-use thunderlook_model::{FolderOp, MessageOp, OpResult, Selection};
+use thunderlook_model::{ComposeKind, FolderOp, MessageOp, OpResult, Selection};
 
 use crate::{
     ipc,
@@ -62,6 +62,75 @@ pub mod ranges {
             normalize(v)
         }
     }
+}
+
+/// Ouvre la rédaction : nouveau message, ou réponse / transfert de l'élément sélectionné.
+/// Un message déjà en cours de rédaction et modifié n'est pas remplacé.
+pub fn compose(ui: Ui, kind: ComposeKind) {
+    if ui.compose.with_untracked(Option::is_some) && ui.compose_dirty.get_untracked() {
+        ui.error.set(Some("Un message est déjà en cours de rédaction : enregistrez-le ou ignorez-le d'abord.".into()));
+        return;
+    }
+    let source = match kind {
+        ComposeKind::New => None,
+        _ => match ui.selected.get_untracked() {
+            Some(id) => Some(id),
+            None => {
+                ui.error.set(Some("Sélectionnez d'abord un message.".into()));
+                return;
+            }
+        },
+    };
+    spawn_local(async move {
+        match ipc::compose(kind, source.as_deref()).await {
+            Ok(d) => {
+                ui.compose_dirty.set(false);
+                ui.compose.set(Some(d));
+                ui.compose_epoch.update(|e| *e += 1);
+                ui.error.set(None);
+            }
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
+/// Nouveau message d'après un modèle `.oft`.
+pub fn compose_from_template(ui: Ui) {
+    if ui.compose.with_untracked(Option::is_some) && ui.compose_dirty.get_untracked() {
+        ui.error.set(Some("Un message est déjà en cours de rédaction : enregistrez-le ou ignorez-le d'abord.".into()));
+        return;
+    }
+    spawn_local(async move {
+        match ipc::compose_from_template().await {
+            Ok(Some(d)) => {
+                ui.compose_dirty.set(true);
+                ui.compose.set(Some(d));
+                ui.compose_epoch.update(|e| *e += 1);
+            }
+            Ok(None) => {}
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
+/// Ouvre en rédaction l'élément courant s'il s'agit d'un brouillon (Entrée, double-clic).
+pub fn open_if_draft(ui: Ui) {
+    let Some(id) = ui.selected.get_untracked() else { return };
+    spawn_local(async move {
+        match ipc::open_draft(&id).await {
+            Ok(Some(d)) => {
+                if ui.compose.with_untracked(Option::is_some) && ui.compose_dirty.get_untracked() {
+                    ui.error.set(Some("Un message est déjà en cours de rédaction : enregistrez-le ou ignorez-le d'abord.".into()));
+                    return;
+                }
+                ui.compose_dirty.set(false);
+                ui.compose.set(Some(d));
+                ui.compose_epoch.update(|e| *e += 1);
+            }
+            Ok(None) => {}
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
 }
 
 /// Éléments visés : la sélection, ou à défaut l'élément courant.

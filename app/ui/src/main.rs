@@ -3,6 +3,7 @@
 mod actions;
 mod app;
 mod commandbar;
+mod compose;
 mod dialogs;
 mod folders;
 mod icons;

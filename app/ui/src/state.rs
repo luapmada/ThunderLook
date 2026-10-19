@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use leptos::{html, prelude::*};
-use thunderlook_model::{CategoryInfo, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, settings::Settings};
+use thunderlook_model::{CategoryInfo, Draft, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, settings::Settings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Module {
@@ -174,6 +174,11 @@ pub struct Ui {
     pub search_text: RwSignal<String>,
     pub search_scope: RwSignal<SearchScope>,
     pub index: RwSignal<IndexStatus>,
+    /// Message en rédaction (J5), affiché à la place du volet de lecture ; modifié depuis le dernier enregistrement.
+    pub compose: RwSignal<Option<Draft>>,
+    pub compose_dirty: RwSignal<bool>,
+    /// Incrémenté à chaque ouverture de rédaction : le volet est alors recréé avec le nouveau message.
+    pub compose_epoch: RwSignal<u64>,
     pub refs: Refs,
 }
 
@@ -212,6 +217,9 @@ impl Ui {
             search_text: RwSignal::new(String::new()),
             search_scope: RwSignal::new(SearchScope::default()),
             index: RwSignal::new(IndexStatus::default()),
+            compose: RwSignal::new(None),
+            compose_dirty: RwSignal::new(false),
+            compose_epoch: RwSignal::new(0),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),
