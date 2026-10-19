@@ -116,6 +116,16 @@ Chaque entrée : action → résultat → cause → contournement → source.
 
   C'est une modification de la configuration de Claude Code : elle est laissée à Paul.
 
+**`OUTLOOK.EXE` par le serveur MCP, délai relevé (2026-10-19, `REA_GHIDRA_STARTUP_TIMEOUT_MS=14400000` appliqué par Paul)**
+- `search_strings 'CRuleElement'` : **réussi**, `0x142216ad8`, même résultat que la CLI. La requête dépasse 120 s et Claude Code la passe en tâche de fond. Durée exacte non mesurée.
+- Les requêtes suivantes (`xrefs`, `read_bytes`, `procedure_pseudo_code`) répondent **immédiatement** : la session MCP garde la base Ghidra. La limite des 330 s venait donc de la configuration, pas de REA.
+- Ce qui a été trouvé :
+  - `0x14276fe50` est le `CRuntimeClass` MFC de `CRuleElement` : nom, taille d'objet `0x58`, schéma 0, `CreateObject`/constructeur `0x141a195d0`, classe de base `0x14263a1b0`.
+  - La vtable est en `0x141dcbd08`. `GetRuntimeClass` = `0x140ded740` (8 octets).
+  - `Serialize` (slot 2) pointe sur un bouchon vide (`_guard_check_icall`). La (dé)sérialisation des règles ne passe donc **pas** par `CObject::Serialize`. Il faudra la chercher ailleurs : slot 4 `0x140dd3090`, qui itère une liste d'enfants en `+0x30`, ou les appelants du constructeur.
+- **Limite** : `xrefs` sur `0x14276fe50` remonte aussi `FUN_140b4f200`. Cette fonction parcourt une table de fonctionnalités (`FIsFeatureEnabled`) qui se termine juste avant le `CRuntimeClass`, et l'adresse lui sert de borne de fin. Ce faux positif n'est pas signalé, car `xrefs` ne donne pas le type de référence. `procedure_references` permettrait de le distinguer.
+- La suite de l'investigation reste au jalon J6, si l'import des règles bute sur des champs inconnus.
+
 **Observation d'interface**
 - `observe_native_ui` et `capture_native_ui_scenario` sont macOS uniquement.
 - Contournement : `tools/uia_dump.ps1` (UI Automation + `PrintWindow`), `tools/uia_menu.ps1` et `tools/uia_summarize.py`.
