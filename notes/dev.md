@@ -72,6 +72,9 @@ Un nouvel import du même fichier d'origine n'est accepté qu'avec `--replace`. 
 - `tools/uia_invoke.ps1` : active un bouton ou un onglet par son nom (Invoke, Toggle, SelectionItem) et relève les lignes visibles.
   - Option `-Click` : vrai clic de souris, refusé si la fenêtre n'est pas au premier plan ou si le point sort de la fenêtre.
   - Le clic n'a pas visé la bonne ligne le 2026-10-19 : à fiabiliser avant de s'y fier.
+- **Préférer `tools/cdp.mjs`** : il pilote la page par le protocole de débogage de WebView2. Les clics et les touches arrivent dans la page seule, aucune entrée système n'est envoyée.
+  - Lancer avec `$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'`.
+  - Puis `node tools/cdp.mjs eval "<JS>"` ou `node tools/cdp.mjs key ArrowRight`. La touche va à l'élément qui a le focus dans la page.
   - Avec `powershell -File`, un tableau passé en paramètre arrive comme une seule chaîne. Appeler le script avec `&` depuis PowerShell.
 
 ## Lecture (J2)

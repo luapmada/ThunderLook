@@ -220,10 +220,13 @@ Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nomb
   - en-tête en gras si un élément non lu est dans le dossier affiché ;
   - au plus 8 participants dans l'en-tête.
 - **Tests** : `crates/mailbox/tests/conversations.rs` (données synthétiques) couvre le calcul à l'ouverture, la migration v6, le dépliage, une opération sur un en-tête (elle vise tous les éléments du dossier), le dépliage conservé après rouverture, et les trois nouveaux classements.
-- **Non vérifié dans l'application** : le dépliage au chevron et aux flèches ← →.
-  - Activer les conversations (`tools/uia_invoke.ps1`, motif Toggle) et l'affichage des en-têtes (« conversation de 6 éléments, repliée ») sont vérifiés.
-  - Le pilotage à la souris n'a pas visé la bonne ligne : les clics de test sont partis ailleurs, dont un probablement sur la barre des tâches.
-  - `uia_invoke.ps1` refuse désormais tout clic hors de la fenêtre de l'application.
+- **Dans l'application** (`tools/cdp.mjs`, page pilotée par CDP) :
+  - test sur « commande », Boîte de réception de la seconde source, 6 éléments ;
+  - le chevron déplie : 6 éléments en retrait, du plus récent au plus ancien, les réponses marquées « Éléments envoyés » ;
+  - ← sur l'en-tête replie, → redéplie, ← sur un élément déplié replie et sélectionne l'en-tête ;
+  - l'en-tête sélectionné affiche le dernier message dans le volet de lecture.
+  - Une première tentative à la souris système (`uia_invoke.ps1 -Click`) a manqué sa cible ; un clic est probablement parti sur la barre des tâches.
+    `uia_invoke.ps1` refuse désormais tout clic hors de la fenêtre. Le pilotage par CDP est à préférer.
 
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).
