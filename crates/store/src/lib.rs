@@ -13,7 +13,7 @@ pub use rusqlite;
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub const DB_FILE: &str = "thunderlook.db";
-const SCHEMA_VERSION: i32 = 6;
+const SCHEMA_VERSION: i32 = 7;
 
 /// Schéma v1. Les dates sont en millisecondes depuis l'époque Unix (UTC).
 /// `props` : sac de propriétés MAPI brut (format décrit dans `thunderlook-import-pst::propbag`),
@@ -188,6 +188,28 @@ UPDATE message SET subject = substr(subject, 3) WHERE substr(subject, 1, 1) = ch
 UPDATE fai SET subject = substr(subject, 3) WHERE substr(subject, 1, 1) = char(1) AND length(subject) >= 2;
 "#;
 
+/// v7 (J6) : règles côté client, lues dans le flux `PR_RW_RULES_STREAM` d'un PST ou dans un export `.rwz`.
+/// - `origin` : `pst:<fai.id>` ou chemin du `.rwz` ; une origine forme un jeu de règles, ordonné par `position`.
+/// - `version` : version du flux (`RW_Magic`) ; `rule_json` : règle décodée (`thunderlook-rules`) ;
+///   `raw` : octets de la règle dans le flux, pour la relire avec un décodeur plus récent.
+/// - `active` fait foi : la case de la boîte « Règles et alertes » ne réécrit ni `rule_json` ni `raw`.
+const SCHEMA_V7: &str = r#"
+CREATE TABLE IF NOT EXISTS rule (
+    id          INTEGER PRIMARY KEY,
+    kind        TEXT NOT NULL,              -- 'pst' ou 'rwz'
+    source_id   INTEGER REFERENCES source(id) ON DELETE CASCADE,
+    origin      TEXT NOT NULL,
+    position    INTEGER NOT NULL,
+    name        TEXT NOT NULL,
+    active      INTEGER NOT NULL,
+    version     INTEGER NOT NULL,
+    rule_json   TEXT NOT NULL,
+    raw         BLOB NOT NULL,
+    imported_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rule_origin ON rule(origin, position);
+"#;
+
 /// Objet sans le marqueur de préfixe que le PST place devant `PidTagSubject` ([MS-PST] §2.5.3.1.1.1) :
 /// un premier caractère de valeur 1, puis un caractère donnant la longueur du préfixe plus un.
 /// L'objet complet commence après ces deux caractères.
@@ -236,11 +258,11 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version == 0 {
         conn.execute_batch(&format!(
-            "BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} {SCHEMA_V4} {SCHEMA_V5} {SCHEMA_V6} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
+            "BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} {SCHEMA_V4} {SCHEMA_V5} {SCHEMA_V6} {SCHEMA_V7} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
         ))?;
     } else if version < SCHEMA_VERSION {
         // Migrations par ajout uniquement : la base est lue par d'autres outils (ADI Facturation).
-        let steps = [SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6];
+        let steps = [SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7];
         let pending = steps[(version as usize - 1).min(steps.len())..].concat();
         conn.execute_batch(&format!("BEGIN; {pending} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version > SCHEMA_VERSION {

@@ -479,6 +479,25 @@ pub struct Signature {
     pub html: String,
 }
 
+/// Règle côté client, pour la boîte « Règles et alertes » (J6).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleSummary {
+    /// `r<id>`.
+    pub id: String,
+    /// Jeu de règles : `pst:<fai>` (flux d'un PST) ou chemin du `.rwz` importé.
+    pub origin: String,
+    /// Libellé du jeu (nom du fichier de données ou du `.rwz`).
+    pub origin_label: String,
+    pub position: u32,
+    pub name: String,
+    pub active: bool,
+    /// Description ligne à ligne, avec les libellés d'Outlook.
+    pub description: Vec<String>,
+    /// Décodage incomplet : raison (la règle est alors ignorée par « Exécuter maintenant »).
+    pub error: Option<String>,
+}
+
 /// Initiales pour la pastille de l'expéditeur.
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphanumeric()));

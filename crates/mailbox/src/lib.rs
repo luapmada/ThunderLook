@@ -1,6 +1,6 @@
 //! Accès au stockage pour l'interface : arborescence avec compteurs, vues triées et groupées d'un dossier
 //! ou d'une recherche (lignes servies par tranches), message complet pour le volet de lecture (J2),
-//! opérations d'organisation (J3), recherche et indexation plein texte (J4), conversations (J3b).
+//! opérations d'organisation (J3), recherche et indexation plein texte (J4), conversations (J3b), règles (J6).
 
 mod compose;
 mod conv;
@@ -8,6 +8,7 @@ mod index;
 mod message;
 mod oft;
 mod ops;
+mod rules;
 mod search;
 
 use std::{
@@ -233,6 +234,7 @@ impl Mailbox {
             }
         }
         conv::fill_conversation_ids(&conn)?;
+        rules::import_pst_rules(&conn)?;
         Ok(Self {
             data_dir: data_dir.to_path_buf(),
             conn,

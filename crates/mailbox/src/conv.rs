@@ -9,43 +9,50 @@ use crate::{Result, err};
 const TRACKING: u16 = 0x3016;
 
 /// Valeur booléenne d'une propriété d'un sac MAPI brut (format de `thunderlook-import-pst::props::propbag`).
-/// `None` si absente ; le sac est lu sans allocation et un sac tronqué arrête la lecture.
 pub(crate) fn bag_bool(bag: &[u8], wanted: u16) -> Option<bool> {
+    bag_value(bag, wanted, 0x000B).and_then(|v| v.first()).map(|b| *b != 0)
+}
+
+/// Valeur d'une propriété (identifiant et type) d'un sac MAPI brut : octets d'une valeur fixe, ou contenu d'une
+/// chaîne ou d'un binaire sans sa longueur. `None` si absente ; le sac est lu sans allocation et un sac tronqué
+/// arrête la lecture.
+pub(crate) fn bag_value(bag: &[u8], wanted: u16, wanted_ty: u16) -> Option<&[u8]> {
     let u32_at = |i: usize| bag.get(i..i + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
+    let fixed = |t: u16| match t {
+        0x0002 => Some(2),
+        0x0003 | 0x0004 | 0x000A => Some(4),
+        0x0005 | 0x0006 | 0x0007 | 0x0014 | 0x0040 | 0x000D => Some(8),
+        0x000B => Some(1),
+        0x0048 => Some(16),
+        _ => None,
+    };
     let mut i = 0;
     while i + 4 <= bag.len() {
         let id = u16::from_le_bytes([bag[i], bag[i + 1]]);
         let ty = u16::from_le_bytes([bag[i + 2], bag[i + 3]]);
         i += 4;
-        if id == wanted && ty == 0x000B {
-            return bag.get(i).map(|b| *b != 0);
-        }
-        let fixed = |t: u16| match t {
-            0x0002 => Some(2),
-            0x0003 | 0x0004 | 0x000A => Some(4),
-            0x0005 | 0x0006 | 0x0007 | 0x0014 | 0x0040 | 0x000D => Some(8),
-            0x000B => Some(1),
-            0x0048 => Some(16),
-            _ => None,
-        };
-        i += match ty {
-            0x0001 => 0,
-            0x001E | 0x001F | 0x0102 => 4 + u32_at(i)?,
+        let (start, len) = match ty {
+            0x0001 => (i, 0),
+            0x001E | 0x001F | 0x0102 => (i + 4, u32_at(i)?),
             t if t & 0x1000 != 0 => {
                 let n = u32_at(i)?;
-                i += 4;
+                let mut j = i + 4;
                 match t & !0x1000 {
                     0x001E | 0x001F | 0x0102 => {
                         for _ in 0..n {
-                            i += 4 + u32_at(i)?;
+                            j += 4 + u32_at(j)?;
                         }
-                        0
                     }
-                    base => n * fixed(base)?,
+                    base => j += n * fixed(base)?,
                 }
+                (i, j - i)
             }
-            t => fixed(t)?,
+            t => (i, fixed(t)?),
         };
+        if id == wanted && ty == wanted_ty {
+            return bag.get(start..start + len);
+        }
+        i = start + len;
     }
     None
 }
