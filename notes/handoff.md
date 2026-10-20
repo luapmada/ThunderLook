@@ -33,9 +33,16 @@
 - Résultats REA : `notes/rea/regles-outlook.md`. Catalogue des 104 éléments avec libellés : `notes/rea/rule_catalog.md`.
 - Outil : `cargo run --release -p thunderlook-mailbox --example rules -- <dossier> [x.rwz…] [--run f<id> [--subfolders] [--apply] [--only <origine>]]`.
 
+  6. Boîte « Règles et alertes » (`app/ui/src/rules.rs`) : Accueil › Règles ▾ et Dossier › Exécuter les règles ; aperçu puis exécution ; cas J6 dans `tools/ui_check.mjs` (passe, 12 règles, 74 à modifier, 1,5 s dans l'application). `9aada7b`
+     - L'application a été reconstruite : `data/store` est désormais au schéma 7 (règles du PST importées).
+
 ## Reste à faire pour le J6, dans l'ordre
-6. Boîte « Règles et alertes » : liste, case active, description, Exécuter maintenant (rapport de simulation, puis appliquer), Importer `.rwz`.
-7. Actions rapides : défauts et éditeur.
+7. Actions rapides : défauts et éditeur. Constats du 2026-10-20 :
+   - les dossiers « Quick Step Settings » / « Paramètres des étapes rapides » des deux PST ne contiennent aucune action rapide (seulement un FAI `IPC.MS.Outlook.AgingProperties`) : rien à importer ;
+   - les noms français des actions par défaut ne sont en clair dans aucune ressource installée (`1036\OUTLLIBR.DLL`, `OUTLOOK.EXE`, recherche UTF-16 et UTF-8) ;
+   - page Microsoft (fr-FR, lue via un résumé reformulé, terminologie actuelle « étapes rapides ») : Déplacer vers, Au responsable, E-mail de l'équipe, Terminé, Répondre et supprimer, Créer. À confirmer sur l'Outlook 2021 de Paul (libellés exacts de la galerie) ;
+   - le bouton existant de la barre s'appelle « Actions enregistrées » (`commandbar.rs`) : à aligner sur le libellé retenu ;
+   - à décider : stockage (schéma v8 ou réglages), envois (Au responsable, E-mail de l'équipe) à configurer au premier usage et exécutés au J7.
 8. Clôture :
    - mesures dans `PLAN.md`, cas J6 dans `tools/ui_check.mjs` ;
    - version 0.7.0 dans tous les `Cargo.toml` et dans `tauri.conf.json` ;
