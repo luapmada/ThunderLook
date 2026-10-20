@@ -187,6 +187,62 @@ CHECKS.push(['J5 : répondre à tous, écrire, enregistrer en brouillon, supprim
   log(`brouillon supprimé définitivement ; Brouillons revenu à « ${after} »`);
 }]);
 
+CHECKS.push(['J6 : Règles et alertes (liste, description, case active, aperçu d\'Exécuter maintenant)', async (log) => {
+  const openRules = async () => {
+    await clickTab('Accueil');
+    await js(`document.querySelector('button[aria-label="Règles"]').click()`);
+    await until(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Gérer les règles'))`, 'menu Règles');
+    await js(`[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.includes('Gérer les règles')).click()`);
+    await until(`document.querySelectorAll('.dialog.wide .rules-item').length > 0`, 'liste des règles');
+  };
+  const closeRules = async () => {
+    await js(`document.querySelector('.dialog.wide').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    await until(`!document.querySelector('.dialog.wide')`, 'fermeture de la boîte des règles');
+  };
+  await openRules();
+  const origins = await js(`[...document.querySelectorAll('.rules-origin')].map(e => e.textContent.trim())`);
+  const n = await js(`document.querySelectorAll('.rules-item').length`);
+  log(`${n} règles, jeux : ${origins.join(' ; ')}`);
+  // Règle du flux du PST : sa description reprend les libellés d'Outlook.
+  const idx = await js(`[...document.querySelectorAll('.rules-item')].findIndex(e => e.textContent.includes('contact@electromagnetisme.fr (1)'))`);
+  if (idx < 0) throw new Error('règle « contact@electromagnetisme.fr (1) » absente');
+  await js(`document.querySelectorAll('.rules-item')[${idx}].click()`);
+  await until(`document.querySelector('.rules-desc')?.textContent.includes('envoyé à contact@electromagnetisme.fr')`, 'description de la règle');
+  log(`description : ${await js(`[...document.querySelectorAll('.rules-desc p')].map(p => p.textContent).join(' / ')`)}`);
+  // Case « active » : décochée, gardée après réouverture, puis recochée (la base revient à l'état initial).
+  const box = (i) => `document.querySelectorAll('.rules-item')[${i}].querySelector('input')`;
+  const before = await js(`${box(idx)}.checked`);
+  await js(`${box(idx)}.click()`);
+  await sleep(400);
+  await closeRules();
+  await openRules();
+  const kept = await js(`${box(idx)}.checked`);
+  await js(`${box(idx)}.click()`);
+  await sleep(400);
+  if (kept === before) throw new Error('la case « active » n\'a pas été gardée');
+  if ((await js(`${box(idx)}.checked`)) !== before) throw new Error('la case « active » n\'est pas revenue à son état');
+  log(`case active : ${before} → ${kept} après réouverture → ${before}`);
+  // Exécuter maintenant : aperçu sur la Boîte de réception, sans rien modifier.
+  await js(`[...document.querySelectorAll('.dialog.wide button')].find(b => b.textContent.includes('Exécuter les règles')).click()`);
+  await until(`document.querySelector('.dialog.wide h2').textContent.includes('Exécuter les règles maintenant')`, 'mode Exécuter');
+  await js(`(() => { const s = document.querySelector('.dialog.wide select'); const o = [...s.options].find(o => o.textContent.trim().startsWith('Boîte de réception')); s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  // Seules les règles du PST : les jeux .rwz visent d'autres fichiers de données.
+  await js(`(() => { let on = false; for (const e of document.querySelector('.rules-list').children) {
+    if (e.classList.contains('rules-origin')) { on = !e.title.includes('.rwz'); continue; }
+    const c = e.querySelector('input'); if (c.checked !== (on && c.checked)) c.click(); } })()`);
+  const checked = await js(`[...document.querySelectorAll('.rules-item input')].filter(c => c.checked).length`);
+  await js(`[...document.querySelectorAll('.dialog.wide button')].find(b => b.textContent.trim() === 'Aperçu').click()`);
+  for (let i = 0; i < 6 && !(await js(`!!document.querySelector('.rules-report-head')`)); i++) await sleep(5000);
+  const head = await js(`document.querySelector('.rules-report-head')?.textContent ?? ''`);
+  if (!head.startsWith('Aperçu')) throw new Error(`pas de rapport d'aperçu : ${head}`);
+  const lines = await js(`[...document.querySelectorAll('.rules-report summary')].map(s => s.textContent)`);
+  if (lines.length !== checked) throw new Error(`${lines.length} lignes de rapport pour ${checked} règles cochées`);
+  if (checked !== 12) throw new Error(`${checked} règles du PST cochées, 12 actives attendues`);
+  log(`${checked} règles du PST : ${head}`);
+  log(lines.slice(0, 4).join(' | '));
+  await closeRules();
+}]);
+
 // --- Exécution ------------------------------------------------------------------------------------
 const app = spawn(exe, [], {
   env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },

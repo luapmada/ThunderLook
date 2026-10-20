@@ -56,11 +56,17 @@ pub enum Action {
     Refine(&'static str, bool),
     SaveSearch,
     CloseSearch,
+    // J6 : règles.
+    RulesMenu,
+    RunRules,
 }
 
 impl Action {
     fn is_menu(self) -> bool {
-        matches!(self, Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu)
+        matches!(
+            self,
+            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu
+        )
     }
 }
 
@@ -118,6 +124,7 @@ fn perform(ui: Ui, action: Action) {
             }
         }
         Action::SaveSearch => ui.dialog.set(Some(Dialog::SaveSearch)),
+        Action::RunRules => ui.dialog.set(Some(Dialog::Rules { run: true })),
         Action::CloseSearch => {
             if let Some(s) = ui.refs.search.get_untracked() {
                 s.set_value("");
@@ -133,6 +140,10 @@ fn menu_entries(ui: Ui, action: Action) -> Vec<MenuEntry> {
         Action::MoveMenu => menus::move_entries(ui),
         Action::CategoriesMenu => menus::category_entries(ui),
         Action::FlagMenu => menus::flag_entries(ui),
+        Action::RulesMenu => vec![
+            MenuEntry::action("Gérer les règles et les alertes…", move || ui.dialog.set(Some(Dialog::Rules { run: false }))),
+            MenuEntry::action("Exécuter les règles…", move || ui.dialog.set(Some(Dialog::Rules { run: true }))),
+        ],
         Action::NewItemsMenu => vec![
             MenuEntry::action("Message électronique", move || actions::compose(ui, ComposeKind::New)),
             MenuEntry::action("Choisir un modèle (.oft)…", move || actions::compose_from_template(ui)),
@@ -183,7 +194,10 @@ const fn wired(label: &'static str, icon: Icon, shortcut: Option<&'static str>, 
 
 impl Action {
     const fn is_menu_const(self) -> bool {
-        matches!(self, Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu)
+        matches!(
+            self,
+            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu
+        )
     }
 }
 
@@ -224,7 +238,7 @@ const MAIL_HOME: &[Group] = &[
         label: "Déplacer",
         cmds: &[
             wired("Déplacer vers", FOLDER_INPUT, Some("Ctrl+Maj+V"), true, true, Action::MoveMenu),
-            cmd("Règles", LIST_FILTER, None, true, false, true),
+            wired("Règles", LIST_FILTER, None, true, true, Action::RulesMenu),
         ],
     },
     Group {
@@ -299,7 +313,7 @@ const FOLDER: &[Group] = &[
         label: "Nettoyer",
         cmds: &[
             wired("Tout marquer comme lu", CHECK_CHECK, None, true, false, Action::MarkAllRead),
-            cmd("Exécuter les règles", LIST_CHECKS, None, false, false, false),
+            wired("Exécuter les règles", LIST_CHECKS, None, false, false, Action::RunRules),
             cmd("Trier les dossiers de A à Z", SORT_AZ, None, false, false, false),
             wired("Vider le dossier", ERASER, None, false, false, Action::EmptyFolder),
         ],

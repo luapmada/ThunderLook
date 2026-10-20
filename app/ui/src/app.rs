@@ -14,6 +14,7 @@ use crate::{
     commandbar::CommandBar,
     compose::ComposePane,
     dialogs::Dialogs,
+    rules::RulesDialog,
     menus::ContextMenu,
     folders::FolderPane,
     ipc,
@@ -414,6 +415,7 @@ pub fn App() -> impl IntoView {
             <StatusBar />
             <ContextMenu />
             <Dialogs />
+            <RulesDialog />
         </div>
     }
 }

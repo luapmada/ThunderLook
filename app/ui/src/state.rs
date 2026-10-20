@@ -87,6 +87,8 @@ pub enum Dialog {
     SaveSearch,
     /// « Réglages de l'affichage » : classement, conversations, espacement, lecture (J3b).
     ViewSettings,
+    /// « Règles et alertes », ou directement « Exécuter les règles maintenant » (J6).
+    Rules { run: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

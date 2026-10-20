@@ -3,7 +3,8 @@
 use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
-    MessageSummary, MessageView, OpResult, SearchQuery, Selection, Signature, SortField, settings::Settings,
+    MessageSummary, MessageView, OpResult, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
+    settings::Settings,
 };
 use wasm_bindgen::prelude::*;
 
@@ -186,6 +187,33 @@ pub async fn signatures() -> Result<Vec<Signature>, String> {
 
 pub async fn pick_attachments() -> Result<Vec<DraftAttachment>, String> {
     call("pick_attachments", &NoArgs {}).await
+}
+
+pub async fn rules() -> Result<Vec<RuleSummary>, String> {
+    call("rules", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct RuleActiveArg<'a> {
+    id: &'a str,
+    active: bool,
+}
+
+pub async fn set_rule_active(id: &str, active: bool) -> Result<(), String> {
+    call("set_rule_active", &RuleActiveArg { id, active }).await
+}
+
+pub async fn import_rwz() -> Result<Option<usize>, String> {
+    call("import_rwz", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct RunRulesArg<'a> {
+    request: &'a RuleRunRequest,
+}
+
+pub async fn run_rules(request: &RuleRunRequest) -> Result<RuleRunReport, String> {
+    call("run_rules", &RunRulesArg { request }).await
 }
 
 /// Mesure de performance, journalisée par le cœur si `THUNDERLOOK_PERF` est défini.

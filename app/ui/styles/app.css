@@ -1274,3 +1274,98 @@ input {
   border: 0;
   background: #fff;
 }
+
+/* Règles et alertes (J6). */
+.dialog.wide {
+  width: min(720px, calc(100vw - 32px));
+  overflow-y: auto;
+}
+
+.rules-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 2);
+}
+
+.rules-list {
+  min-height: 120px;
+  max-height: 32vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.rules-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.rules-origin {
+  position: sticky;
+  top: 0;
+  padding: var(--u) calc(var(--u) * 2);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.rules-item {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  min-height: 28px;
+  padding: 0 calc(var(--u) * 2);
+  cursor: default;
+}
+
+.rules-item[aria-selected="true"] {
+  background: var(--selected);
+}
+
+.rules-item input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.rules-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rules-desc,
+.rules-report {
+  max-height: 24vh;
+  overflow-y: auto;
+  padding: calc(var(--u) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+
+.rules-desc p,
+.rules-report p {
+  margin: 0 0 var(--u);
+}
+
+.rules-warn {
+  color: var(--text-2);
+}
+
+.rules-report-head {
+  font-weight: 600;
+}
+
+.rules-report summary {
+  min-height: 24px;
+  cursor: default;
+}
+
+.rules-samples {
+  margin: 0 0 calc(var(--u) * 2);
+  padding-left: calc(var(--u) * 5);
+  color: var(--text-2);
+}

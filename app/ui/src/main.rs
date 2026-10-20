@@ -12,6 +12,7 @@ mod list;
 mod menu;
 mod menus;
 mod reading;
+mod rules;
 mod splitter;
 mod state;
 mod statusbar;

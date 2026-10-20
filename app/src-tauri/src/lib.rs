@@ -19,7 +19,8 @@ use tauri_plugin_opener::OpenerExt;
 use thunderlook_mailbox::Mailbox;
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
-    MessageOp, MessageSummary, MessageView, OpResult, SearchQuery, Selection, Signature, SortField, format, settings::Settings,
+    MessageOp, MessageSummary, MessageView, OpResult, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
+    SortField, format, settings::Settings,
 };
 
 /// Boîte aux lettres ouverte à la première demande ; `Err` mémorise l'échec d'ouverture.
@@ -165,6 +166,37 @@ fn undo(app: AppHandle, store: State<Store>) -> Result<Option<String>, String> {
 #[tauri::command(async)]
 fn categories(app: AppHandle, store: State<Store>) -> Result<Vec<CategoryInfo>, String> {
     with_mailbox(&app, &store, |mb| mb.categories())
+}
+
+/// Règles importées (J6), dans l'ordre d'exécution.
+#[tauri::command(async)]
+fn rules(app: AppHandle, store: State<Store>) -> Result<Vec<RuleSummary>, String> {
+    with_mailbox(&app, &store, |mb| mb.rules())
+}
+
+#[tauri::command(async)]
+fn set_rule_active(app: AppHandle, store: State<Store>, id: String, active: bool) -> Result<(), String> {
+    with_mailbox(&app, &store, |mb| mb.set_rule_active(&id, active))
+}
+
+/// Importe un `.rwz` choisi par l'utilisateur ; renvoie le nombre de règles (`None` s'il annule).
+#[tauri::command(async)]
+fn import_rwz(app: AppHandle, store: State<Store>) -> Result<Option<usize>, String> {
+    let Some(file) = app.dialog().file().add_filter("Règles Outlook", &["rwz"]).blocking_pick_file() else { return Ok(None) };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    with_mailbox(&app, &store, |mb| mb.import_rwz(&path)).map(Some)
+}
+
+/// « Exécuter maintenant » : aperçu ou exécution ; les messages modifiés sont à réindexer s'ils ont été copiés.
+#[tauri::command(async)]
+fn run_rules(app: AppHandle, store: State<Store>, request: RuleRunRequest) -> Result<RuleRunReport, String> {
+    with_mailbox(&app, &store, |mb| {
+        let report = mb.run_rules(&request)?;
+        if report.applied {
+            app.state::<Indexer>().ensure(mb.data_dir());
+        }
+        Ok(report)
+    })
 }
 
 /// Prépare un nouveau message, une réponse, une réponse à tous ou un transfert (J5).
@@ -343,6 +375,10 @@ pub fn run() {
             folder_op,
             undo,
             categories,
+            rules,
+            set_rule_active,
+            import_rwz,
+            run_rules,
             open_attachment,
             save_attachment,
             load_settings,

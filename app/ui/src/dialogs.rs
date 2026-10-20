@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// Dossiers réels (hors favoris), aplatis avec leur profondeur.
-fn flat_folders(ui: crate::state::Ui) -> Vec<(String, String, usize, String)> {
+pub(crate) fn flat_folders(ui: crate::state::Ui) -> Vec<(String, String, usize, String)> {
     fn walk(out: &mut Vec<(String, String, usize, String)>, folders: &[Folder], depth: usize, section: &str) {
         for f in folders {
             out.push((f.id.clone(), f.name.clone(), depth, section.to_string()));
@@ -133,6 +133,7 @@ pub fn Dialogs() -> impl IntoView {
                     folder_id: real_folder(&ui.folder.get_untracked()),
                 },
             ),
+            Dialog::Rules { .. } => {}
             Dialog::PickFolder { purpose } => {
                 let list = candidates();
                 let Some((id, ..)) = list.get(picked.get_untracked()).cloned() else { return };
@@ -194,11 +195,12 @@ pub fn Dialogs() -> impl IntoView {
         Some(Dialog::NewCategory) => "Nouvelle catégorie",
         Some(Dialog::SaveSearch) => "Enregistrer la recherche",
         Some(Dialog::ViewSettings) => "Réglages de l'affichage",
-        None => "",
+        Some(Dialog::Rules { .. }) | None => "",
     };
 
     view! {
-        <Show when=move || ui.dialog.get().is_some()>
+        // « Règles et alertes » a sa propre boîte (`rules.rs`).
+        <Show when=move || ui.dialog.get().is_some_and(|d| !matches!(d, Dialog::Rules { .. }))>
             <div class="modal-backdrop" on:pointerdown=move |ev| {
                 if ev.target() == ev.current_target() {
                     close();
@@ -323,7 +325,7 @@ pub fn Dialogs() -> impl IntoView {
                             </div>
                         }
                         .into_any(),
-                        None => ().into_any(),
+                        Some(Dialog::Rules { .. }) | None => ().into_any(),
                     }}
                     <div class="dialog-buttons">
                         <button class="btn primary" on:click=move |_| submit()>"OK"</button>
