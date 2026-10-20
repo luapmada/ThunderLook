@@ -14,6 +14,7 @@ use crate::{
     commandbar::CommandBar,
     compose::ComposePane,
     dialogs::Dialogs,
+    quicksteps::QuickStepsDialog,
     rules::RulesDialog,
     menus::ContextMenu,
     folders::FolderPane,
@@ -204,6 +205,10 @@ pub fn App() -> impl IntoView {
             Err(e) => ui.error.set(Some(e)),
         }
         ui.settings_loaded.set(true);
+        match ipc::load_quick_steps().await {
+            Ok(q) => ui.quick_steps.set(q),
+            Err(e) => ui.error.set(Some(e)),
+        }
         match ipc::folder_tree().await {
             Ok(t) => {
                 if let Some(e) = &t.error {
@@ -416,6 +421,7 @@ pub fn App() -> impl IntoView {
             <ContextMenu />
             <Dialogs />
             <RulesDialog />
+            <QuickStepsDialog />
         </div>
     }
 }

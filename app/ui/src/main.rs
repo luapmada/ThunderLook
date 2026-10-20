@@ -11,6 +11,7 @@ mod ipc;
 mod list;
 mod menu;
 mod menus;
+mod quicksteps;
 mod reading;
 mod rules;
 mod splitter;

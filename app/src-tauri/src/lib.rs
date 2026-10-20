@@ -20,7 +20,9 @@ use thunderlook_mailbox::Mailbox;
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
     MessageOp, MessageSummary, MessageView, OpResult, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
-    SortField, format, settings::Settings,
+    SortField, format,
+    quicksteps::{QuickStep, default_quick_steps},
+    settings::Settings,
 };
 
 /// Boîte aux lettres ouverte à la première demande ; `Err` mémorise l'échec d'ouverture.
@@ -313,6 +315,28 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
+/// Actions rapides (J6) : `quicksteps.json`, à défaut celles d'Outlook.
+#[tauri::command]
+fn load_quick_steps(app: AppHandle) -> Vec<QuickStep> {
+    settings_path(&app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p.with_file_name("quicksteps.json")).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(default_quick_steps)
+}
+
+/// Écriture atomique, comme les réglages.
+#[tauri::command]
+fn save_quick_steps(app: AppHandle, steps: Vec<QuickStep>) -> Result<(), String> {
+    let path = settings_path(&app)?.with_file_name("quicksteps.json");
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string_pretty(&steps).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
 /// Mesure envoyée par l'interface, ajoutée à `perf.log` si `THUNDERLOOK_PERF` est défini.
 #[tauri::command]
 fn perf_mark(app: AppHandle, label: String, ms: f64) {
@@ -383,6 +407,8 @@ pub fn run() {
             save_attachment,
             load_settings,
             save_settings,
+            load_quick_steps,
+            save_quick_steps,
             perf_mark
         ])
         .run(tauri::generate_context!())

@@ -4,6 +4,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
     MessageSummary, MessageView, OpResult, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
+    quicksteps::QuickStep,
     settings::Settings,
 };
 use wasm_bindgen::prelude::*;
@@ -214,6 +215,19 @@ struct RunRulesArg<'a> {
 
 pub async fn run_rules(request: &RuleRunRequest) -> Result<RuleRunReport, String> {
     call("run_rules", &RunRulesArg { request }).await
+}
+
+pub async fn load_quick_steps() -> Result<Vec<QuickStep>, String> {
+    call("load_quick_steps", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct StepsArg<'a> {
+    steps: &'a [QuickStep],
+}
+
+pub async fn save_quick_steps(steps: &[QuickStep]) -> Result<(), String> {
+    call("save_quick_steps", &StepsArg { steps }).await
 }
 
 /// Mesure de performance, journalisée par le cœur si `THUNDERLOOK_PERF` est défini.

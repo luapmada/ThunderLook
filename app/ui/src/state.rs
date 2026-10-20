@@ -3,7 +3,9 @@
 use std::collections::{HashMap, HashSet};
 
 use leptos::{html, prelude::*};
-use thunderlook_model::{CategoryInfo, Draft, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, settings::Settings};
+use thunderlook_model::{
+    CategoryInfo, Draft, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, quicksteps::QuickStep, settings::Settings,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Module {
@@ -89,6 +91,9 @@ pub enum Dialog {
     ViewSettings,
     /// « Règles et alertes », ou directement « Exécuter les règles maintenant » (J6).
     Rules { run: bool },
+    /// « Gérer les actions rapides » (`edit` : `None`), ou l'éditeur d'une action rapide (indice ; la longueur de
+    /// la liste pour une nouvelle). `first_use` : ouverte à l'exécution d'une action rapide à configurer.
+    QuickSteps { edit: Option<usize>, first_use: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,6 +186,8 @@ pub struct Ui {
     pub compose_dirty: RwSignal<bool>,
     /// Incrémenté à chaque ouverture de rédaction : le volet est alors recréé avec le nouveau message.
     pub compose_epoch: RwSignal<u64>,
+    /// Actions rapides (J6), dans l'ordre de la galerie.
+    pub quick_steps: RwSignal<Vec<QuickStep>>,
     pub refs: Refs,
 }
 
@@ -222,6 +229,7 @@ impl Ui {
             compose: RwSignal::new(None),
             compose_dirty: RwSignal::new(false),
             compose_epoch: RwSignal::new(0),
+            quick_steps: RwSignal::new(Vec::new()),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),

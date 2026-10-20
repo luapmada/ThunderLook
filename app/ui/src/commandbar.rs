@@ -59,13 +59,15 @@ pub enum Action {
     // J6 : règles.
     RulesMenu,
     RunRules,
+    QuickStepsMenu,
+    ManageQuickSteps,
 }
 
 impl Action {
     fn is_menu(self) -> bool {
         matches!(
             self,
-            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu
+            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu | Self::QuickStepsMenu
         )
     }
 }
@@ -125,6 +127,7 @@ fn perform(ui: Ui, action: Action) {
         }
         Action::SaveSearch => ui.dialog.set(Some(Dialog::SaveSearch)),
         Action::RunRules => ui.dialog.set(Some(Dialog::Rules { run: true })),
+        Action::ManageQuickSteps => ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false })),
         Action::CloseSearch => {
             if let Some(s) = ui.refs.search.get_untracked() {
                 s.set_value("");
@@ -144,6 +147,15 @@ fn menu_entries(ui: Ui, action: Action) -> Vec<MenuEntry> {
             MenuEntry::action("Gérer les règles et les alertes…", move || ui.dialog.set(Some(Dialog::Rules { run: false }))),
             MenuEntry::action("Exécuter les règles…", move || ui.dialog.set(Some(Dialog::Rules { run: true }))),
         ],
+        Action::QuickStepsMenu => {
+            let steps = ui.quick_steps.get();
+            let n = steps.len();
+            let mut v: Vec<MenuEntry> =
+                steps.iter().enumerate().map(|(i, s)| MenuEntry::action(crate::quicksteps::step_label(s), move || crate::quicksteps::run(ui, i))).collect();
+            v.push(MenuEntry::action("Créer une action rapide…", move || ui.dialog.set(Some(Dialog::QuickSteps { edit: Some(n), first_use: false }))).separated());
+            v.push(MenuEntry::action("Gérer les actions rapides…", move || ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false }))));
+            v
+        }
         Action::NewItemsMenu => vec![
             MenuEntry::action("Message électronique", move || actions::compose(ui, ComposeKind::New)),
             MenuEntry::action("Choisir un modèle (.oft)…", move || actions::compose_from_template(ui)),
@@ -196,7 +208,7 @@ impl Action {
     const fn is_menu_const(self) -> bool {
         matches!(
             self,
-            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu
+            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu | Self::QuickStepsMenu
         )
     }
 }
@@ -233,7 +245,13 @@ const MAIL_HOME: &[Group] = &[
             cmd("Réunion", CALENDAR_PLUS, Some("Ctrl+Alt+R"), false, false, false),
         ],
     },
-    Group { label: "Actions enregistrées", cmds: &[cmd("Actions enregistrées", ZAP, None, true, true, true)] },
+    Group {
+        label: "Actions rapides",
+        cmds: &[
+            wired("Actions rapides", ZAP, None, true, true, Action::QuickStepsMenu),
+            wired("Gérer les actions rapides", SETTINGS, None, false, false, Action::ManageQuickSteps),
+        ],
+    },
     Group {
         label: "Déplacer",
         cmds: &[

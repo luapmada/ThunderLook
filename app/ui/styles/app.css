@@ -1369,3 +1369,40 @@ input {
   padding-left: calc(var(--u) * 5);
   color: var(--text-2);
 }
+
+/* Actions rapides (J6). */
+.qs-actions {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 2);
+}
+
+.qs-row {
+  display: flex;
+  gap: calc(var(--u) * 2);
+  align-items: center;
+}
+
+.qs-row .btn {
+  flex: none;
+}
+
+/* Colonnes égales : les longs noms de dossiers ne font pas déborder la ligne. */
+.qs-row select,
+.qs-row input {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--target);
+  padding: 0 calc(var(--u) * 2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.qs-row select:focus-visible,
+.qs-row input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}

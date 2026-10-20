@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const exe = process.argv[2] ?? path.join(root, 'target', 'release', 'thunderlook.exe');
@@ -241,6 +242,68 @@ CHECKS.push(['J6 : Règles et alertes (liste, description, case active, aperçu 
   log(`${checked} règles du PST : ${head}`);
   log(lines.slice(0, 4).join(' | '));
   await closeRules();
+}]);
+
+CHECKS.push(['J6 : actions rapides (galerie, première utilisation, éditeur, exécution annulée par Ctrl+Z)', async (log) => {
+  // Le fichier des actions rapides est remis tel quel à la fin, et la catégorie posée est annulée.
+  const file = path.join(process.env.APPDATA, 'fr.local.thunderlook', 'quicksteps.json');
+  const saved = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  const STEP = 'Vérification ThunderLook';
+  const CAT = 'Vérif ThunderLook';
+  const btn = (text) => `[...document.querySelectorAll('.dialog.wide button')].find(b => b.textContent.trim().startsWith(${JSON.stringify(text)}))`;
+  const openMenu = async () => {
+    await clickTab('Accueil');
+    await js(`document.querySelector('button[aria-label="Actions rapides"]').click()`);
+    await until(`document.querySelectorAll('[role=menuitem]').length > 0`, 'menu Actions rapides');
+    return js(`[...document.querySelectorAll('[role=menuitem]')].map(b => b.textContent.trim())`);
+  };
+  const pick = async (label) => js(`[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.trim() === ${JSON.stringify(label)}).click()`);
+  try {
+    await js(`(() => { const t = [...document.querySelectorAll('.treeitem')].find(e => /Boîte de réception/.test(e.textContent)); t.click(); })()`);
+    await sleep(900);
+    await js(`${ROW(1)}.click()`);
+    const items = await openMenu();
+    log(`galerie : ${items.join(' | ')}`);
+    if (!items.includes('Déplacer vers : ?')) throw new Error('« Déplacer vers : ? » absent de la galerie');
+    // Première utilisation : l'éditeur s'ouvre au lieu d'exécuter.
+    await pick('Déplacer vers : ?');
+    await until(`document.querySelector('.dialog.wide')?.textContent.includes('Première utilisation')`, 'éditeur de première utilisation');
+    log('« Déplacer vers : ? » : éditeur de première utilisation, annulé');
+    await js(`${btn('Annuler')}.click()`);
+    await until(`!document.querySelector('.dialog.wide')`, 'fermeture de l\'éditeur');
+    // Création d'une action rapide « classer » dans l'éditeur.
+    await openMenu();
+    await pick('Créer une action rapide…');
+    await until(`document.querySelector('.qs-row select')`, 'éditeur');
+    await js(`(() => { const i = document.querySelector('.dialog.wide .field input'); i.value = ${JSON.stringify(STEP)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await js(`(() => { const s = document.querySelector('.qs-row select'); s.value = [...s.options].find(o => o.textContent === 'Classer le message').value; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await until(`document.querySelector('.qs-row input[aria-label="Catégorie"]')`, 'champ Catégorie');
+    await js(`(() => { const i = document.querySelector('.qs-row input[aria-label="Catégorie"]'); i.value = ${JSON.stringify(CAT)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await js(`${btn('Enregistrer')}.click()`);
+    await until(`!document.querySelector('.dialog.wide')`, 'enregistrement');
+    const after = await openMenu();
+    if (!after.includes(STEP)) throw new Error(`« ${STEP} » absente de la galerie : ${after.join(' | ')}`);
+    await pick(STEP);
+    await until(`!!${ROW(1)}.querySelector('.cat[title=${JSON.stringify(CAT)}]')`, 'catégorie posée sur le message');
+    log(`« ${STEP} » exécutée : catégorie « ${CAT} » sur la ligne 1`);
+    await js(`document.querySelector('[role=listbox]').focus()`);
+    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: 2 });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: 2 });
+    await until(`!${ROW(1)}.querySelector('.cat[title=${JSON.stringify(CAT)}]')`, 'annulation par Ctrl+Z');
+    log('Ctrl+Z : catégorie retirée');
+    // Gérer : l'action rapide créée est supprimée.
+    await openMenu();
+    await pick('Gérer les actions rapides…');
+    await until(`document.querySelectorAll('.dialog.wide .rules-item').length > 0`, 'boîte Gérer');
+    await js(`[...document.querySelectorAll('.dialog.wide .rules-item')].find(e => e.textContent.trim() === ${JSON.stringify(STEP)}).click()`);
+    await js(`${btn('Supprimer')}.click()`);
+    await until(`![...document.querySelectorAll('.dialog.wide .rules-item')].some(e => e.textContent.trim() === ${JSON.stringify(STEP)})`, 'suppression');
+    log(`Gérer : ${await js(`document.querySelectorAll('.dialog.wide .rules-item').length`)} actions rapides après suppression`);
+    await js(`${btn('OK')}.click()`);
+  } finally {
+    await sleep(300);
+    if (saved) fs.writeFileSync(file, saved); else if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
 }]);
 
 // --- Exécution ------------------------------------------------------------------------------------

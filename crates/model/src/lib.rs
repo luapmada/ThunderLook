@@ -4,6 +4,7 @@
 //! l'interface ne fait qu'afficher.
 
 pub mod format;
+pub mod quicksteps;
 pub mod settings;
 
 use serde::{Deserialize, Serialize};
