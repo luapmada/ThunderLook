@@ -500,6 +500,58 @@ pub struct RuleSummary {
     pub warnings: Vec<String>,
 }
 
+/// Messages concernés par « Exécuter maintenant » (« Appliquer les règles à »).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RunFilter {
+    #[default]
+    All,
+    Read,
+    Unread,
+}
+
+/// Demande « Exécuter maintenant » : règles (`r<id>`, exécutées dans l'ordre de la liste), dossier parcouru.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleRunRequest {
+    pub rule_ids: Vec<String>,
+    pub folder_id: String,
+    pub subfolders: bool,
+    pub filter: RunFilter,
+    /// Faux : simulation seulement, rien n'est modifié.
+    pub apply: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleRunEntry {
+    pub rule_id: String,
+    pub name: String,
+    /// Messages qui remplissent les conditions (avant un éventuel « arrêter » d'une règle précédente : non comptés).
+    pub matched: u32,
+    /// Premiers messages concernés : « date · expéditeur · objet ».
+    pub samples: Vec<String>,
+    /// Actions exécutées (libellés d'Outlook).
+    pub actions: Vec<String>,
+    /// Actions non exécutées, avec la raison.
+    pub not_run: Vec<String>,
+    pub warnings: Vec<String>,
+    /// Règle écartée : raison.
+    pub skipped: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleRunReport {
+    pub scanned: u32,
+    /// Messages qui ont au moins une action à exécuter.
+    pub changed: u32,
+    pub applied: bool,
+    pub elapsed_ms: u32,
+    pub rules: Vec<RuleRunEntry>,
+    pub errors: Vec<String>,
+}
+
 /// Initiales pour la pastille de l'expéditeur.
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphanumeric()));

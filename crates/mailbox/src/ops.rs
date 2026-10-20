@@ -49,7 +49,7 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     if n == 1 { format!("1 {one}") } else { format!("{} {many}", format::thousands(n as u32)) }
 }
 
-fn local_midnight_ms(d: NaiveDate) -> i64 {
+pub(crate) fn local_midnight_ms(d: NaiveDate) -> i64 {
     Local
         .from_local_datetime(&d.and_hms_opt(0, 0, 0).expect("minuit"))
         .earliest()

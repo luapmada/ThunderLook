@@ -63,6 +63,16 @@ fn truncate(mut s: String, max: usize) -> String {
     s
 }
 
+/// Corps en texte brut : la partie texte, sinon la partie HTML convertie.
+pub(crate) fn body_text(m: &mail_parser::Message) -> String {
+    let text_part = m.text_part(0).filter(|t| t.is_text() && !t.is_text_html());
+    match (text_part.and_then(|t| t.text_contents()), m.html_part(0).filter(|h| h.is_text_html())) {
+        (Some(t), _) => t.to_string(),
+        (None, Some(h)) => h.text_contents().map(thunderlook_mime::html_to_text).unwrap_or_default(),
+        (None, None) => String::new(),
+    }
+}
+
 /// Lit le `.eml` : corps en texte brut et destinataires des en-têtes.
 fn parse(data_dir: &Path, p: Pending) -> Doc {
     let mut recipients = p.to_cc;
@@ -74,13 +84,7 @@ fn parse(data_dir: &Path, p: Pending) -> Doc {
         addresses(m.to(), &mut recipients);
         addresses(m.cc(), &mut recipients);
         addresses(m.bcc(), &mut recipients);
-        let text_part = m.text_part(0).filter(|t| t.is_text() && !t.is_text_html());
-        body = match (text_part.and_then(|t| t.text_contents()), m.html_part(0).filter(|h| h.is_text_html())) {
-            (Some(t), _) => t.to_string(),
-            (None, Some(h)) => h.text_contents().map(thunderlook_mime::html_to_text).unwrap_or_default(),
-            (None, None) => String::new(),
-        };
-        body = truncate(body, BODY_MAX);
+        body = truncate(body_text(&m), BODY_MAX);
     }
     Doc { id: p.id, subject: p.subject, sender: p.sender, recipients, body }
 }
