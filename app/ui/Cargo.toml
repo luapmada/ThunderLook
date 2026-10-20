@@ -1,6 +1,6 @@
 [package]
 name = "thunderlook-ui"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 publish = false
 description = "Interface de ThunderLook (Leptos, compilée en WebAssembly)"

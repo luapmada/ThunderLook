@@ -79,7 +79,7 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | J3b ✅ | Conversations et affichages | « Afficher en conversations », « Organiser par » au-delà des 4 tris (catégories, indicateur, pièces jointes), boîte « Réglages de l'affichage », options de lecture (marquer comme lu) dans l'interface | Liste en conversations sur la Boîte de réception de 22 000 éléments en moins de 300 ms | M |
 | J4 ✅ | Recherche | Index FTS5, zone de recherche et portées, onglet Recherche, mots-clés, recherche avancée, dossiers de recherche (Non lus, Pour le suivi, personnalisés) | Moins de 300 ms sur l'archive de 217 000 éléments | M |
 | J5 ✅ | Rédaction (brouillons) | Fenêtre de rédaction HTML, réponse et transfert avec citation, signatures (import HTM), modèles `.oft`, brouillons | Réponse à tous fidèle (en-têtes, citation) enregistrée en brouillon | M |
-| J6 | Règles et actions rapides | Import du flux de règles et des `.rwz`, assistant de règles, « Exécuter maintenant », actions rapides (défauts plus éditeur) | Tes 2 `.rwz` et le flux du PST importés, et rejoués sur une copie | L |
+| J6 ✅ | Règles et actions rapides | Import du flux de règles et des `.rwz`, assistant de règles, « Exécuter maintenant », actions rapides (défauts plus éditeur) | Tes 2 `.rwz` et le flux du PST importés, et rejoués sur une copie | L |
 | J7 | IMAP + SMTP (Hostinger) | Comptes, synchronisation, envoi, boîte d'envoi, F9, hors connexion, notifications, réponse automatique locale | Envoi et réception réels sur un compte de test | L |
 | J8 | POP3 | Si toujours utile (profil « pop-original ») | — | S |
 | J9+ | Calendrier, puis Contacts, puis Tâches | Ordre fixé par Q3. Import de 854 rendez-vous, 6 046 contacts, tâches, .ics/.vcf | Jalons détaillés plus tard | L |
@@ -259,6 +259,21 @@ Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nomb
   - carnet d'adresses, saisie semi-automatique, orthographe ;
   - glisser-déposer de pièces jointes ;
   - signature différente selon nouveau message ou réponse.
+
+### Vérifications du J6 (2026-10-20, même base)
+- **Décodage** : crate `thunderlook-rules` identique au prototype Python sur les 3 flux réels (60 règles : 30 et 17 dans les `.rwz`, 13 dans le flux du PST ; 198 textes et 611 nombres comparés).
+- **Import** (schéma v7, table `rule`) : flux du PST à l'ouverture, `.rwz` à la demande ; 60 règles, 0 en échec.
+- **Dossiers cibles** : flux du PST, 7 sur 7 par EntryID ; `.rwz` (anciens PST non importés), tous retrouvés par le nom.
+- **« Exécuter maintenant »** :
+  - simulation sur la Boîte de réception (22 188 éléments), 12 règles actives du PST : 74 messages à modifier, **1,5 s** (168 s avant l'évaluation parallèle) ;
+  - simulation sur l'archive entière (217 257 éléments) : environ 3 min à froid (lecture des `.eml` pour les conditions sur le corps).
+- **Critère du jalon**, sur une copie (base et `.eml` de la Boîte de réception copiés) :
+  - flux du PST : 74 messages modifiés, puis rejeu : 0 ;
+  - `regles240913.rwz` : 219 déplacés, rejeu : 0 ; `regles.rwz` : 0 (déjà couvert) ;
+  - contrôle par dossier : [electromagnetisme.fr] +35, catégorie CEM +7, LBC | FB +5, Ebay & Paypal +3, Hébergements WEB +2, Accusés +28, conformes à la simulation.
+- Règle écartée : « OXALIS » (carnet d'adresses), sans objet : listes anciennes, archivées.
+- **Interface** (`tools/ui_check.mjs`, CDP) : Règles et alertes (case active gardée puis rétablie, aperçu 74 à modifier en 1,5 s), actions rapides (première utilisation, création, exécution annulée par Ctrl+Z, suppression).
+- Actions rapides par défaut d'après l'aide Microsoft en français (libellés non trouvés dans les ressources d'Outlook installées) ; aucune action rapide personnalisée dans les PST.
 
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).
