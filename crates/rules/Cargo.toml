@@ -7,3 +7,6 @@ description = "Règles côté client d'Outlook : lecture du flux PR_RW_RULES_STR
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"
