@@ -33,8 +33,8 @@ fn stream(names: &[&str]) -> Vec<u8> {
     out
 }
 
-fn setup() -> (Fixture, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("tl-rules-{}", std::process::id()));
+fn setup(name: &str) -> (Fixture, PathBuf) {
+    let dir = std::env::temp_dir().join(format!("tl-rules-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     let c = thunderlook_store::open(&dir).unwrap();
     c.execute(
@@ -68,7 +68,7 @@ fn setup() -> (Fixture, PathBuf) {
 
 #[test]
 fn pst_stream_imported_once_and_rwz_replaced() {
-    let (_f, dir) = setup();
+    let (_f, dir) = setup("import");
     let mut mb = Mailbox::open(&dir).unwrap();
     let rules = mb.rules().unwrap();
     assert_eq!(rules.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Factures", "Lettres"]);
@@ -93,4 +93,42 @@ fn pst_stream_imported_once_and_rwz_replaced() {
 
     assert!(mb.import_rwz(&dir.join("absent.rwz")).is_err());
     assert!(mb.set_rule_active("r999", true).is_err());
+}
+
+#[test]
+fn folder_targets_by_entry_id_then_name() {
+    use thunderlook_mailbox::{FolderMatch, FolderResolver};
+    let (_f, dir) = setup("folders");
+    let c = thunderlook_store::open(&dir).unwrap();
+    let entry = |nid: u32| -> Vec<u8> { [0, 0, 0, 0].into_iter().chain([7u8; 16]).chain(nid.to_le_bytes()).collect() };
+    let mut add = |name: &str, props: Vec<u8>, messages: usize| -> i64 {
+        c.execute(
+            "INSERT INTO folder (source_id, parent_id, nid, name, role, container_class, hidden, position, props) VALUES (1, 1, 0, ?1, 'folder', NULL, 0, 0, ?2)",
+            params![name, props],
+        )
+        .unwrap();
+        let id = c.last_insert_rowid();
+        for _ in 0..messages {
+            c.execute(
+                "INSERT INTO message (folder_id, nid, message_class, subject, from_name, from_addr, to_line, cc_line, message_flags, is_read,
+                    flag_status, importance, sensitivity, size, attachment_count, body_kind, preview, eml_path, props)
+                 VALUES (?1, 0, 'IPM.Note', '', '', '', '', '', 0, 1, 0, 1, 0, 0, 0, 'text', '', '', x'')",
+                params![id],
+            )
+            .unwrap();
+        }
+        id
+    };
+    // Sac MAPI avec PidTagEntryId (binaire de 24 octets).
+    let bag = |e: &[u8]| -> Vec<u8> { [0xFFu8, 0x0F, 0x02, 0x01].into_iter().chain((e.len() as u32).to_le_bytes()).chain(e.iter().copied()).collect() };
+    let factures = add("Factures", bag(&entry(0x8022)), 0);
+    let petit = add("Listes", vec![], 1);
+    let gros = add("listes", vec![], 3);
+    let r = FolderResolver::load(&c).unwrap();
+    assert_eq!(r.resolve(&entry(0x8022), "autre nom"), FolderMatch::EntryId(factures));
+    assert_eq!(r.resolve(&entry(0x9999), "FACTURES"), FolderMatch::Name { folder: factures, homonyms: 1 });
+    assert_eq!(r.resolve(&[], "Listes"), FolderMatch::Name { folder: gros, homonyms: 2 });
+    assert_ne!(gros, petit);
+    assert_eq!(r.resolve(&[], "Absent"), FolderMatch::Missing);
+    assert_eq!(r.path(factures), "Courrier › Boîte de réception › Factures");
 }

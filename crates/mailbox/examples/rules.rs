@@ -25,6 +25,9 @@ fn main() {
         for line in &r.description {
             println!("      {line}");
         }
+        for w in &r.warnings {
+            println!("      ⚠ {w}");
+        }
     }
     println!("{} règles, {} en échec", rules.len(), rules.iter().filter(|r| r.error.is_some()).count());
 }

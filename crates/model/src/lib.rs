@@ -496,6 +496,8 @@ pub struct RuleSummary {
     pub description: Vec<String>,
     /// Décodage incomplet : raison (la règle est alors ignorée par « Exécuter maintenant »).
     pub error: Option<String>,
+    /// Points à vérifier avant d'exécuter : dossier cible introuvable, ou choisi par le nom parmi des homonymes.
+    pub warnings: Vec<String>,
 }
 
 /// Initiales pour la pastille de l'expéditeur.
