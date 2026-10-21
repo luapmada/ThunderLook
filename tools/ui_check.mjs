@@ -229,7 +229,7 @@ CHECKS.push(['J6 : Règles et alertes (liste, description, case active, aperçu 
   await js(`(() => { const s = document.querySelector('.dialog.wide select'); const o = [...s.options].find(o => o.textContent.trim().startsWith('Boîte de réception')); s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   // Seules les règles du PST : les jeux .rwz visent d'autres fichiers de données.
   await js(`(() => { let on = false; for (const e of document.querySelector('.rules-list').children) {
-    if (e.classList.contains('rules-origin')) { on = !e.title.includes('.rwz'); continue; }
+    if (e.classList.contains('rules-origin')) { on = e.title.startsWith('pst:'); continue; }
     const c = e.querySelector('input'); if (c.checked !== (on && c.checked)) c.click(); } })()`);
   const checked = await js(`[...document.querySelectorAll('.rules-item input')].filter(c => c.checked).length`);
   await js(`[...document.querySelectorAll('.dialog.wide button')].find(b => b.textContent.trim() === 'Aperçu').click()`);
