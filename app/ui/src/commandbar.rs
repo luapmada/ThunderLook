@@ -165,17 +165,7 @@ fn menu_entries(ui: Ui, action: Action) -> Vec<MenuEntry> {
         Action::MoveMenu => menus::move_entries(ui),
         Action::CategoriesMenu => menus::category_entries(ui),
         Action::FlagMenu => menus::flag_entries(ui),
-        Action::JunkMenu => {
-            use thunderlook_model::FolderRole;
-            let target = |role: FolderRole, label: &'static str| match actions::section_folder(ui, role) {
-                Some(f) => MenuEntry::action(label, move || actions::run(ui, MessageOp::Move { folder_id: f.clone() })),
-                None => MenuEntry::pending(label),
-            };
-            vec![
-                target(FolderRole::Inbox, "Courrier légitime (vers la Boîte de réception)"),
-                target(FolderRole::Junk, "Courrier indésirable (vers Courrier indésirable)"),
-            ]
-        }
+        Action::JunkMenu => menus::junk_entries(ui),
         Action::RulesMenu => vec![
             MenuEntry::action("Gérer les règles et les alertes…", move || ui.dialog.set(Some(Dialog::Rules { run: false }))),
             MenuEntry::action("Exécuter les règles…", move || ui.dialog.set(Some(Dialog::Rules { run: true }))),

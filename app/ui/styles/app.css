@@ -1916,3 +1916,49 @@ input {
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
+
+/* ---------- Options du courrier indésirable ---------- */
+.junk-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--u) * 4);
+}
+
+.junk-col h3 {
+  margin: 0 0 var(--u);
+  font-size: var(--fs);
+}
+
+.junk-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--u);
+  min-height: 120px;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.junk-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u);
+  padding: 2px var(--u);
+  border-radius: 3px;
+}
+
+.junk-list li:hover {
+  background: var(--hover);
+}
+
+.junk-empty {
+  color: var(--text-2);
+}
+
+.junk-add {
+  display: flex;
+  gap: calc(var(--u) * 2);
+  margin-top: var(--u);
+}

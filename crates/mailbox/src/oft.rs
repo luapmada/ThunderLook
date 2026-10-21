@@ -154,5 +154,6 @@ pub fn draft_from_oft(path: &Path, scratch: &Path) -> Result<Draft> {
         html,
         styles,
         attachments,
+        from_account: None,
     })
 }

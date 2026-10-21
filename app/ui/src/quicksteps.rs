@@ -97,7 +97,7 @@ pub fn run(ui: Ui, index: usize) {
                 }),
             };
             let src = if kind == ComposeKind::New { None } else { source.clone() };
-            match ipc::compose(kind, src.as_deref()).await {
+            match ipc::compose(kind, src.as_deref(), Some(ui.folder.get_untracked().as_str())).await {
                 Ok(mut d) => {
                     if !to.trim().is_empty() {
                         d.to = if d.to.trim().is_empty() { to } else { format!("{}; {to}", d.to) };

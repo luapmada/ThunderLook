@@ -472,6 +472,9 @@ pub struct Draft {
     /// Feuilles de style du message cité (`<style>` de son en-tête), gardées pour sa mise en forme.
     pub styles: String,
     pub attachments: Vec<DraftAttachment>,
+    /// Compte d'envoi (`s<source>`, champ « De ») ; absent : compte du message d'origine, sinon le premier.
+    #[serde(default)]
+    pub from_account: Option<String>,
 }
 
 /// Signature d'Outlook (`%APPDATA%\Microsoft\Signatures`), images intégrées en URI `data:`.
@@ -612,6 +615,53 @@ pub struct AutoReply {
     pub replied: Vec<String>,
 }
 
+/// Courrier indésirable : expéditeurs bloqués et approuvés (adresses, ou domaines écrits « @exemple.fr »), comme
+/// les listes d'Outlook. Un expéditeur approuvé n'est jamais bloqué.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct JunkLists {
+    pub blocked: Vec<String>,
+    pub safe: Vec<String>,
+}
+
+impl JunkLists {
+    fn listed(list: &[String], address: &str) -> bool {
+        let a = address.trim().to_lowercase();
+        let domain = a.rsplit_once('@').map(|(_, d)| format!("@{d}"));
+        list.iter().map(|x| x.trim().to_lowercase()).any(|x| x == a || Some(&x) == domain.as_ref())
+    }
+
+    pub fn is_blocked(&self, address: &str) -> bool {
+        !address.trim().is_empty() && Self::listed(&self.blocked, address) && !Self::listed(&self.safe, address)
+    }
+
+    /// Ajoute à une liste (sans doublon) et retire de l'autre.
+    pub fn add(&mut self, entry: &str, blocked: bool) {
+        let e = entry.trim().to_lowercase();
+        if e.is_empty() {
+            return;
+        }
+        let (into, from) = if blocked { (&mut self.blocked, &mut self.safe) } else { (&mut self.safe, &mut self.blocked) };
+        from.retain(|x| x.to_lowercase() != e);
+        if !into.iter().any(|x| x.to_lowercase() == e) {
+            into.push(e);
+            into.sort();
+        }
+    }
+}
+
+/// Classement d'expéditeurs depuis un message (menu « Courrier indésirable »).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum JunkMark {
+    /// « Bloquer l'expéditeur ».
+    Block,
+    /// « Ne jamais bloquer l'expéditeur ».
+    Safe,
+    /// « Ne jamais bloquer le domaine de l'expéditeur ».
+    SafeDomain,
+}
+
 /// Initiales pour la pastille de l'expéditeur.
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphanumeric()));
@@ -621,6 +671,21 @@ pub fn initials(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn junk_lists_block_by_address_or_domain_and_safe_wins() {
+        let mut l = JunkLists::default();
+        l.add("Spam@Exemple.fr", true);
+        l.add("@pub.example", true);
+        assert!(l.is_blocked("spam@exemple.fr"));
+        assert!(l.is_blocked("qui@pub.example"));
+        assert!(!l.is_blocked("autre@exemple.fr"));
+        assert!(!l.is_blocked(""));
+        l.add("ami@pub.example", false);
+        assert!(!l.is_blocked("ami@pub.example"), "approuvé : jamais bloqué");
+        l.add("spam@exemple.fr", false);
+        assert!(l.blocked.iter().all(|x| x != "spam@exemple.fr"), "passé dans les approuvés");
+    }
+
     use super::*;
 
     #[test]

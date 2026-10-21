@@ -653,10 +653,13 @@ impl Mailbox {
         if parse_addresses(&d.to).is_empty() && parse_addresses(&d.cc).is_empty() && parse_addresses(&d.bcc).is_empty() {
             return Err("Ajoutez au moins un destinataire.".into());
         }
-        let source = match (&d.id, &d.source_id) {
-            (Some(id), _) => self.row(message_db_id(id)?)?.source,
-            (None, Some(s)) => self.row(message_db_id(s)?)?.source,
-            (None, None) => self.default_source()?,
+        // Compte d'envoi : celui du champ « De », sinon celui de la source du brouillon.
+        let chosen = d.from_account.as_deref().and_then(|a| a.strip_prefix('s')).and_then(|s| s.parse::<i64>().ok());
+        let source = match (chosen, &d.id, &d.source_id) {
+            (Some(c), _, _) => c,
+            (None, Some(id), _) => self.row(message_db_id(id)?)?.source,
+            (None, None, Some(s)) => self.row(message_db_id(s)?)?.source,
+            (None, None, None) => self.default_source()?,
         };
         let account: Option<(i64, i64, String, String)> = self
             .conn()
@@ -704,10 +707,12 @@ impl Mailbox {
     pub fn save_draft(&mut self, d: &Draft) -> Result<Draft> {
         let now = Local::now().timestamp_millis();
         let existing = d.id.as_deref().map(|id| self.existing_draft(id)).transpose()?;
-        let source = match (&existing, &d.source_id) {
-            (Some(e), _) => e.source,
-            (None, Some(s)) => self.row(message_db_id(s)?)?.source,
-            (None, None) => self.default_source()?,
+        let chosen = d.from_account.as_deref().and_then(|a| a.strip_prefix('s')).and_then(|s| s.parse::<i64>().ok());
+        let source = match (&existing, &d.source_id, chosen) {
+            (Some(e), _, _) => e.source,
+            (None, _, Some(c)) => c,
+            (None, Some(s), None) => self.row(message_db_id(s)?)?.source,
+            (None, None, None) => self.default_source()?,
         };
         let folder: i64 = match &existing {
             Some(e) => e.folder,
@@ -938,6 +943,13 @@ impl Mailbox {
             html,
             styles,
             attachments,
+            // Brouillon d'un compte : il repart de ce compte.
+            from_account: self
+                .conn()
+                .query_row("SELECT 1 FROM account WHERE source_id = ?1", [row.source], |_| Ok(()))
+                .optional()
+                .map_err(err)?
+                .map(|()| format!("s{}", row.source)),
         })
     }
 

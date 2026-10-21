@@ -98,6 +98,8 @@ pub enum Dialog {
     Accounts,
     /// « Réponses automatiques » (J7).
     AutoReply,
+    /// Expéditeurs bloqués et approuvés.
+    JunkOptions,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

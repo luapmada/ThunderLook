@@ -1,11 +1,13 @@
 //! Contenus des menus d'organisation (ruban et menus contextuels) et menu contextuel positionné.
 
 use leptos::{html, prelude::*};
-use thunderlook_model::{FlagAction, FolderOp, FolderRole, MessageOp};
+use leptos::task::spawn_local;
+use thunderlook_model::{ComposeKind, FlagAction, FolderOp, FolderRole, JunkMark, MessageOp};
 use wasm_bindgen::JsCast;
 
 use crate::{
     actions::{self, folder_name, real_folder},
+    ipc,
     menu::{MenuEntry, entry_body, items, move_focus},
     state::{ConfirmAction, ContextTarget, Dialog, PickPurpose, Ui, use_ui},
 };
@@ -63,17 +65,66 @@ pub fn move_entries(ui: Ui) -> Vec<MenuEntry> {
     v
 }
 
+/// Ajoute les expéditeurs de la sélection à une liste, puis déplace la sélection (bloquer : vers le Courrier
+/// indésirable ; « ce n'est pas du courrier indésirable » : vers la Boîte de réception).
+fn junk_mark(ui: Ui, mark: JunkMark, then: Option<FolderRole>) {
+    let Some(sel) = actions::selection(ui) else { return };
+    spawn_local(async move {
+        match ipc::junk_mark(&sel, mark).await {
+            Ok(msg) => {
+                ui.status.set(Some(msg));
+                if let Some(f) = then.and_then(|role| actions::section_folder(ui, role)) {
+                    actions::run(ui, MessageOp::Move { folder_id: f });
+                }
+            }
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
+/// Menu « Courrier indésirable » (clic droit et ruban), comme celui d'Outlook.
+pub fn junk_entries(ui: Ui) -> Vec<MenuEntry> {
+    let in_junk = actions::section_folder(ui, FolderRole::Junk).is_some_and(|j| real_folder(&ui.folder.get_untracked()) == j);
+    let mut v = vec![
+        MenuEntry::action("Bloquer l'expéditeur", move || junk_mark(ui, JunkMark::Block, Some(FolderRole::Junk))),
+        MenuEntry::action("Ne jamais bloquer l'expéditeur", move || junk_mark(ui, JunkMark::Safe, None)),
+        MenuEntry::action("Ne jamais bloquer le domaine de l'expéditeur", move || junk_mark(ui, JunkMark::SafeDomain, None)),
+    ];
+    let not_junk = MenuEntry::action("Ce n'est pas du courrier indésirable", move || junk_mark(ui, JunkMark::Safe, Some(FolderRole::Inbox))).separated();
+    v.push(if in_junk { not_junk } else { MenuEntry::pending("Ce n'est pas du courrier indésirable").separated() });
+    if !in_junk {
+        if let Some(j) = actions::section_folder(ui, FolderRole::Junk) {
+            v.push(MenuEntry::action("Déplacer vers le Courrier indésirable", move || actions::run(ui, MessageOp::Move { folder_id: j.clone() })));
+        }
+    }
+    v.push(MenuEntry::action("Options du courrier indésirable…", move || ui.dialog.set(Some(Dialog::JunkOptions))).separated());
+    v
+}
+
 pub fn message_context(ui: Ui) -> Vec<MenuEntry> {
     vec![
-        MenuEntry::action("Marquer comme lu", move || actions::run(ui, MessageOp::Read { read: true })),
+        MenuEntry::action("Répondre", move || actions::compose(ui, ComposeKind::Reply)),
+        MenuEntry::action("Répondre à tous", move || actions::compose(ui, ComposeKind::ReplyAll)),
+        MenuEntry::action("Transférer", move || actions::compose(ui, ComposeKind::Forward)),
+        MenuEntry::action("Marquer comme lu", move || actions::run(ui, MessageOp::Read { read: true })).separated(),
         MenuEntry::action("Marquer comme non lu", move || actions::run(ui, MessageOp::Read { read: false })),
         MenuEntry::submenu("Catégoriser", category_entries(ui)).separated(),
         MenuEntry::submenu("Assurer un suivi", flag_entries(ui)),
+        MenuEntry::submenu("Actions rapides", quick_step_entries(ui)),
         MenuEntry::submenu("Déplacer", move_entries(ui)).separated(),
+        MenuEntry::submenu("Courrier indésirable", junk_entries(ui)),
         MenuEntry::action("Archiver", move || actions::run(ui, MessageOp::Archive)),
         MenuEntry::action("Supprimer", move || actions::delete(ui, false)).separated(),
         MenuEntry::action("Supprimer définitivement", move || actions::delete(ui, true)),
     ]
+}
+
+fn quick_step_entries(ui: Ui) -> Vec<MenuEntry> {
+    let steps = ui.quick_steps.get_untracked();
+    let mut v: Vec<MenuEntry> =
+        steps.iter().enumerate().map(|(i, s)| MenuEntry::action(crate::quicksteps::step_label(s), move || crate::quicksteps::run(ui, i))).collect();
+    v.push(MenuEntry::action("Gérer les actions rapides…", move || ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false }))).separated());
+    v
 }
 
 pub fn is_favorite(ui: Ui, id: &str) -> bool {

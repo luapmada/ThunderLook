@@ -15,6 +15,7 @@ use crate::{
     compose::ComposePane,
     accounts::AccountsDialog,
     autoreply::AutoReplyDialog,
+    junk::JunkOptionsDialog,
     calendar::{self, CalendarPane},
     dialogs::Dialogs,
     quicksteps::QuickStepsDialog,
@@ -451,6 +452,7 @@ pub fn App() -> impl IntoView {
             <QuickStepsDialog />
             <AccountsDialog />
             <AutoReplyDialog />
+            <JunkOptionsDialog />
         </div>
     }
 }

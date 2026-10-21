@@ -18,7 +18,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use thunderlook_mailbox::Mailbox;
 use thunderlook_model::{
-    AccountSummary, AutoReply, CategoryInfo, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
+    AccountSummary, AutoReply, CategoryInfo, JunkLists, JunkMark, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
     MessageOp, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
     SortField, format,
     quicksteps::{QuickStep, default_quick_steps},
@@ -148,15 +148,23 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
             Ok(r) => {
                 sent += r.sent;
                 received += r.new_messages;
-                if !r.new_inbox_ids.is_empty() {
+                // Expéditeurs bloqués d'abord : leurs messages vont dans le Courrier indésirable, sans réponse ni règle.
+                let new_ids = match junk_on_arrival(app, a.source_id, &r.new_inbox_ids) {
+                    Ok(kept) => kept,
+                    Err(e) => {
+                        errors.push(format!("{} : courrier indésirable : {e}", a.address));
+                        r.new_inbox_ids.clone()
+                    }
+                };
+                if !new_ids.is_empty() {
                     // Réponses d'abord (sur les messages tels que reçus), puis règles (qui peuvent les déplacer).
-                    match auto_replies(app, a.source_id, &r.new_inbox_ids) {
+                    match auto_replies(app, a.source_id, &new_ids) {
                         Ok(n) if n > 0 => app.state::<Syncer>().again.store(true, Ordering::SeqCst),
                         Ok(_) => {}
                         Err(e) => errors.push(format!("{} : réponse automatique : {e}", a.address)),
                     }
                     if a.rules_on_arrival {
-                        if let Err(e) = rules_on_arrival(app, a.source_id, &r.new_inbox_ids) {
+                        if let Err(e) = rules_on_arrival(app, a.source_id, &new_ids) {
                             errors.push(format!("{} : règles : {e}", a.address));
                         }
                     }
@@ -186,6 +194,82 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
         (None, false) => parts.join(" · "),
     };
     SyncEvent { running: false, message, sent, received, error: errors.into_iter().next() }
+}
+
+fn junk_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(settings_path(app)?.with_file_name("junk.json"))
+}
+
+fn load_junk(app: &AppHandle) -> JunkLists {
+    junk_path(app).ok().and_then(|p| fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+fn store_junk(app: &AppHandle, lists: &JunkLists) -> Result<(), String> {
+    let path = junk_path(app)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string_pretty(lists).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+/// Nouveaux messages d'expéditeurs bloqués : déplacés dans le Courrier indésirable du compte (report sur le serveur
+/// au passage suivant). Renvoie les autres, qui passent ensuite à la réponse automatique et aux règles.
+fn junk_on_arrival(app: &AppHandle, source: i64, ids: &[i64]) -> Result<Vec<i64>, String> {
+    let lists = load_junk(app);
+    if lists.blocked.is_empty() || ids.is_empty() {
+        return Ok(ids.to_vec());
+    }
+    let dir = data_dir(app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    let junk: Option<i64> = conn
+        .query_row("SELECT id FROM folder WHERE source_id = ?1 AND role = 'junk' ORDER BY imap_name IS NULL LIMIT 1", [source], |r| r.get(0))
+        .ok();
+    let Some(junk) = junk else { return Ok(ids.to_vec()) };
+    let (mut blocked, mut kept) = (Vec::new(), Vec::new());
+    for &id in ids {
+        let from: String = conn.query_row("SELECT from_addr FROM message WHERE id = ?1", [id], |r| r.get(0)).unwrap_or_default();
+        if lists.is_blocked(&from) { blocked.push(format!("m{id}")) } else { kept.push(id) }
+    }
+    if !blocked.is_empty() {
+        let store = app.state::<Store>();
+        with_mailbox(app, &store, |mb| mb.apply(&Selection::ids(blocked), &MessageOp::Move { folder_id: format!("f{junk}") }).map(|_| ()))?;
+    }
+    Ok(kept)
+}
+
+#[tauri::command]
+fn junk_lists(app: AppHandle) -> JunkLists {
+    load_junk(&app)
+}
+
+#[tauri::command]
+fn set_junk_lists(app: AppHandle, lists: JunkLists) -> Result<(), String> {
+    store_junk(&app, &lists)
+}
+
+/// « Bloquer l'expéditeur », « Ne jamais bloquer l'expéditeur / son domaine » sur les messages sélectionnés ;
+/// renvoie le message de résultat.
+#[tauri::command(async)]
+fn junk_mark(app: AppHandle, store: State<Store>, selection: Selection, mark: JunkMark) -> Result<String, String> {
+    let addresses = with_mailbox(&app, &store, |mb| mb.sender_addresses(&selection))?;
+    if addresses.is_empty() {
+        return Err("expéditeur sans adresse : rien à ajouter".into());
+    }
+    let mut lists = load_junk(&app);
+    let entries: Vec<String> = match mark {
+        JunkMark::SafeDomain => addresses.iter().filter_map(|a| a.rsplit_once('@').map(|(_, d)| format!("@{d}"))).collect(),
+        _ => addresses,
+    };
+    for e in &entries {
+        lists.add(e, mark == JunkMark::Block);
+    }
+    store_junk(&app, &lists)?;
+    Ok(match mark {
+        JunkMark::Block => format!("Expéditeur(s) bloqué(s) : {}", entries.join(", ")),
+        _ => format!("Ne seront jamais bloqués : {}", entries.join(", ")),
+    })
 }
 
 fn auto_reply_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -561,8 +645,23 @@ fn set_offline(app: AppHandle, offline: bool) -> bool {
 
 /// Prépare un nouveau message, une réponse, une réponse à tous ou un transfert (J5).
 #[tauri::command(async)]
-fn compose(app: AppHandle, store: State<Store>, kind: ComposeKind, source_id: Option<String>) -> Result<Draft, String> {
-    with_mailbox(&app, &store, |mb| mb.compose(kind, source_id.as_deref()))
+fn compose(app: AppHandle, store: State<Store>, kind: ComposeKind, source_id: Option<String>, folder_id: Option<String>) -> Result<Draft, String> {
+    let mut draft = with_mailbox(&app, &store, |mb| mb.compose(kind, source_id.as_deref()))?;
+    // Champ « De » : le compte du message d'origine, sinon celui du dossier affiché (comme Outlook), s'il en est un.
+    let dir = data_dir(&app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    let folder_of = |id: &str| -> Option<i64> {
+        let n: i64 = id.trim_start_matches("fav-").strip_prefix('f')?.parse().ok()?;
+        conn.query_row("SELECT source_id FROM folder WHERE id = ?1", [n], |r| r.get(0)).ok()
+    };
+    let message_of = |id: &str| -> Option<i64> {
+        let n: i64 = id.strip_prefix('m')?.parse().ok()?;
+        conn.query_row("SELECT f.source_id FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id = ?1", [n], |r| r.get(0)).ok()
+    };
+    let source = source_id.as_deref().and_then(message_of).or_else(|| folder_id.as_deref().and_then(folder_of));
+    let has_account = |s: i64| conn.query_row("SELECT 1 FROM account WHERE source_id = ?1", [s], |_| Ok(())).is_ok();
+    draft.from_account = source.filter(|s| has_account(*s)).map(|s| format!("s{s}"));
+    Ok(draft)
 }
 
 /// Enregistre un brouillon ; le message enregistré est à indexer.
@@ -955,7 +1054,10 @@ pub fn run() {
             set_calendar_shown,
             calendar_import,
             calendar_export,
-            calendar_remove
+            calendar_remove,
+            junk_lists,
+            set_junk_lists,
+            junk_mark
         ])
         .run(tauri::generate_context!())
         .expect("échec du démarrage de ThunderLook");

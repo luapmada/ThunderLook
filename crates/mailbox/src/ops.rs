@@ -212,6 +212,20 @@ fn subtree_messages(conn: &Connection, folder: i64) -> Result<Vec<i64>> {
 
 impl Mailbox {
     /// Identifiants (base) d'une sélection.
+/// Adresses des expéditeurs des messages sélectionnés (sans doublon, en minuscules).
+    pub fn sender_addresses(&self, sel: &Selection) -> Result<Vec<String>> {
+        let ids = self.resolve(sel)?;
+        let mut out: Vec<String> = Vec::new();
+        for id in ids {
+            let a: String = self.conn.query_row("SELECT from_addr FROM message WHERE id = ?1", [id], |r| r.get(0)).map_err(err)?;
+            let a = a.trim().to_lowercase();
+            if !a.is_empty() && !out.contains(&a) {
+                out.push(a);
+            }
+        }
+        Ok(out)
+    }
+
     pub fn resolve(&self, sel: &Selection) -> Result<Vec<i64>> {
         let mut out = Vec::with_capacity(sel.len() as usize);
         if !sel.ranges.is_empty() {

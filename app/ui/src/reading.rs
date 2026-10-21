@@ -94,6 +94,20 @@ pub fn ReadingPane() -> impl IntoView {
                                 {action("Répondre", REPLY, "Ctrl+R", ComposeKind::Reply)}
                                 {action("Répondre à tous", REPLY_ALL, "Ctrl+Maj+R", ComposeKind::ReplyAll)}
                                 {action("Transférer", FORWARD, "Ctrl+F", ComposeKind::Forward)}
+                                {m.remote_blocked.then(|| {
+                                    let id = m.id.clone();
+                                    view! {
+                                        <button class="cmd" title="Afficher les images et le contenu distant de ce message" on:click=move |_| {
+                                            let id = id.clone();
+                                            ui.remote_allowed.update(|r| {
+                                                r.insert(id);
+                                            });
+                                        }>
+                                            <Svg icon=DOWNLOAD />
+                                            <span>"Télécharger les images"</span>
+                                        </button>
+                                    }
+                                })}
                             </div>
                             <h1 class="reading-subject">{if m.subject.trim().is_empty() { "(aucun objet)".to_string() } else { m.subject.clone() }}</h1>
                             <div class="reading-who">
@@ -134,13 +148,13 @@ pub fn ReadingPane() -> impl IntoView {
                             {m.remote_blocked.then(|| view! {
                                 <p class="infobar" role="note">
                                     <Svg icon=IMAGE_OFF size=14 />
-                                    "Le contenu distant de ce message a été bloqué pour protéger votre vie privée."
+                                    "Images bloquées par ThunderLook (protection de la vie privée)."
                                     <button class="link-btn" on:click=move |_| {
                                         let id = allow_id.clone();
                                         ui.remote_allowed.update(|r| {
                                             r.insert(id);
                                         });
-                                    }>"Télécharger les images"</button>
+                                    }>"Les afficher"</button>
                                 </p>
                             })}
                             {(!m.attachments.is_empty()).then(|| {

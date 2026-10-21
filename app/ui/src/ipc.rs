@@ -3,7 +3,7 @@
 use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
-    AccountSummary, AutoReply, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
+    AccountSummary, AutoReply, JunkLists, JunkMark, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
     quicksteps::QuickStep,
     calendar::{CalendarQuery, CalendarView},
     settings::Settings,
@@ -149,6 +149,29 @@ pub async fn set_calendar_shown(id: &str, shown: bool) -> Result<(), String> {
     call("set_calendar_shown", &ShownArg { id, shown }).await
 }
 
+pub async fn junk_lists() -> Result<JunkLists, String> {
+    call("junk_lists", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct JunkListsArg<'a> {
+    lists: &'a JunkLists,
+}
+
+pub async fn set_junk_lists(lists: &JunkLists) -> Result<(), String> {
+    call("set_junk_lists", &JunkListsArg { lists }).await
+}
+
+#[derive(Serialize)]
+struct JunkMarkArg<'a> {
+    selection: &'a Selection,
+    mark: JunkMark,
+}
+
+pub async fn junk_mark(selection: &Selection, mark: JunkMark) -> Result<String, String> {
+    call("junk_mark", &JunkMarkArg { selection, mark }).await
+}
+
 pub async fn calendar_import() -> Result<Option<String>, String> {
     call("calendar_import", &NoArgs {}).await
 }
@@ -192,6 +215,7 @@ pub async fn save_settings(settings: Settings) -> Result<(), String> {
 struct ComposeArg<'a> {
     kind: ComposeKind,
     source_id: Option<&'a str>,
+    folder_id: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -204,8 +228,8 @@ struct IdArg<'a> {
     id: &'a str,
 }
 
-pub async fn compose(kind: ComposeKind, source_id: Option<&str>) -> Result<Draft, String> {
-    call("compose", &ComposeArg { kind, source_id }).await
+pub async fn compose(kind: ComposeKind, source_id: Option<&str>, folder_id: Option<&str>) -> Result<Draft, String> {
+    call("compose", &ComposeArg { kind, source_id, folder_id }).await
 }
 
 pub async fn save_draft(draft: &Draft) -> Result<Draft, String> {

@@ -308,7 +308,11 @@ CHECKS.push(['J6 : actions rapides (galerie, première utilisation, éditeur, ex
 
 // Critère du J7 : envoi réel puis réception, sur le compte de test uniquement (data/test-account.json, non versionné).
 // Le compte est ajouté s'il manque, puis retiré s'il a été ajouté ici ; les deux messages de test sont supprimés.
-CHECKS.push(['J7 : envoi réel puis réception sur le compte de test', async (log) => {
+/** Envoi réel puis réception sur le compte de test ; `blocked` : l'expéditeur (le compte lui-même) est bloqué, le
+ * message doit arriver dans son Courrier indésirable et non dans sa Boîte de réception. */
+async function realSend(log, blocked) {
+  const junkFile = path.join(process.env.APPDATA, 'fr.local.thunderlook', 'junk.json');
+  const junkSaved = fs.existsSync(junkFile) ? fs.readFileSync(junkFile) : null;
   const accountFile = path.join(root, 'data', 'test-account.json');
   if (!fs.existsSync(accountFile)) throw new Error('data/test-account.json absent : compte de test non configuré');
   const acc = JSON.parse(fs.readFileSync(accountFile, 'utf8'));
@@ -331,13 +335,26 @@ CHECKS.push(['J7 : envoi réel puis réception sur le compte de test', async (lo
     added = true;
     log(`compte ${acc.address} ajouté`);
   }
-  const subject = `ThunderLook J7 ${new Date().toISOString()}`;
+  const subject = `ThunderLook J7${blocked ? ' bloqué' : ''} ${new Date().toISOString()}`;
   const inbox = `[...document.querySelectorAll('.treeitem')].find(e => (e.getAttribute('data-source') ?? '').includes(${JSON.stringify(acc.address)}) && /Boîte de réception/.test(e.textContent))`;
+  const junk = `[...document.querySelectorAll('.treeitem')].find(e => (e.getAttribute('data-source') ?? '').includes(${JSON.stringify(acc.address)}) && /Courrier indésirable/.test(e.textContent))`;
+  const target = blocked ? junk : inbox;
+  if (blocked) {
+    fs.writeFileSync(junkFile, JSON.stringify({ blocked: [acc.address.toLowerCase()], safe: [] }));
+    log(`expéditeur ${acc.address} bloqué le temps de la vérification`);
+  }
   try {
     // Rédaction et envoi.
+    // Rédaction depuis la Boîte de réception du compte de test : « De » propose ce compte (jamais un compte réel).
     await clickTab('Accueil');
+    for (let i = 0; i < 30 && !(await js(`!!${inbox}`)); i++) await sleep(2000);
+    if (!(await js(`!!${inbox}`))) throw new Error('Boîte de réception du compte de test absente du volet des dossiers après 60 s');
+    await js(`${inbox}.click()`);
+    await sleep(800);
     await js(`document.querySelector('button[aria-label="Nouveau message"]').click()`);
     await until(`document.querySelector('.pane.compose iframe')?.contentDocument?.designMode === 'on'`, 'volet de rédaction');
+    await until(`(document.querySelector('.compose-field select[aria-label="De"]')?.selectedOptions[0]?.textContent ?? '').includes(${JSON.stringify(acc.address)})`, `champ « De » sur ${acc.address}`);
+    log(`De : ${await js(`document.querySelector('.compose-field select[aria-label="De"]').selectedOptions[0].textContent`)}`);
     await js(`(() => { const f = [...document.querySelectorAll('.compose-field input')]; const set = (i, v) => { i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); };
       set(f[0], ${JSON.stringify(acc.address)}); set(f[2], ${JSON.stringify(subject)}); })()`);
     await js(`(() => { const d = document.querySelector('.pane.compose iframe').contentDocument; d.body.focus(); d.execCommand('insertText', false, 'Envoi réel de vérification du J7.'); })()`);
@@ -355,18 +372,29 @@ CHECKS.push(['J7 : envoi réel puis réception sur le compte de test', async (lo
     await js(`document.querySelector('[role=listbox]').focus()`);
     await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120 });
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120 });
-    await js(`${inbox}.click()`);
+    await js(`${target}.click()`);
     let found = false;
     for (let i = 0; i < 45 && !found; i++) {
       await sleep(2000);
       found = await js(`[...document.querySelectorAll('.msg')].some(e => (e.getAttribute('aria-label') ?? '').includes(${JSON.stringify(subject)}))`);
-      if (!found && i % 5 === 4) await js(`${inbox}.click()`);
+      if (!found && i % 5 === 4) await js(`${target}.click()`);
     }
-    if (!found) throw new Error('message envoyé non reçu en 90 s');
-    log(`reçu dans la Boîte de réception du compte ${((Date.now() - t0) / 1000).toFixed(1)} s après l'envoi`);
+    if (!found) throw new Error(`message envoyé non reçu en 90 s dans ${blocked ? 'le Courrier indésirable' : 'la Boîte de réception'}`);
+    if (blocked) {
+      await js(`${inbox}.click()`);
+      await sleep(1500);
+      if (await js(`[...document.querySelectorAll('.msg')].some(e => (e.getAttribute('aria-label') ?? '').includes(${JSON.stringify(subject)}))`)) {
+        throw new Error('message d\'un expéditeur bloqué resté dans la Boîte de réception');
+      }
+    }
+    log(`reçu dans ${blocked ? 'le Courrier indésirable (pas dans la Boîte de réception)' : 'la Boîte de réception'} du compte ${((Date.now() - t0) / 1000).toFixed(1)} s après l'envoi`);
   } finally {
+    if (blocked) {
+      if (junkSaved) fs.writeFileSync(junkFile, junkSaved);
+      else if (fs.existsSync(junkFile)) fs.unlinkSync(junkFile);
+    }
     // Nettoyage : les messages de test (reçu et envoyé) sont supprimés définitivement, sur le serveur aussi.
-    for (const folder of [/Boîte de réception/, /Éléments envoyés|Envoyés|Sent/]) {
+    for (const folder of [/Boîte de réception/, /Courrier indésirable/, /Éléments envoyés|Envoyés|Sent/]) {
       const ok = await js(`(() => { const t = [...document.querySelectorAll('.treeitem')].find(e => (e.getAttribute('data-source') ?? '').includes(${JSON.stringify(acc.address)}) && ${folder}.test(e.textContent)); if (!t) return false; t.click(); return true; })()`);
       if (!ok) continue;
       await sleep(1200);
@@ -396,7 +424,9 @@ CHECKS.push(['J7 : envoi réel puis réception sur le compte de test', async (lo
       log('compte de test retiré de ThunderLook (rien n\'est effacé sur le serveur)');
     }
   }
-}]);
+}
+CHECKS.push(['J7 : envoi réel puis réception sur le compte de test', (log) => realSend(log, false)]);
+CHECKS.push(['J7 : expéditeur bloqué, message reçu dans le Courrier indésirable', (log) => realSend(log, true)]);
 
 CHECKS.push(['J9 : calendrier (vues, navigateur, superposition, détail), comparé aux occurrences d\'Outlook', async (log) => {
   // Le choix des calendriers affichés (calendar.json) et le type de vue sont remis tels quels à la fin.

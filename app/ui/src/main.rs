@@ -10,6 +10,7 @@ mod compose;
 mod dialogs;
 mod folders;
 mod icons;
+mod junk;
 mod ipc;
 mod list;
 mod menu;

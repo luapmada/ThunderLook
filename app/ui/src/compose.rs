@@ -182,6 +182,33 @@ pub fn ComposePane() -> impl IntoView {
     let (cc, set_cc) = field(|d| d.cc.clone(), |d, v| d.cc = v);
     let (bcc, set_bcc) = field(|d| d.bcc.clone(), |d, v| d.bcc = v);
     let (subject, set_subject) = field(|d| d.subject.clone(), |d, v| d.subject = v);
+    // Champ « De » : comptes de messagerie ; sans choix, le premier compte.
+    let accounts = RwSignal::new(Vec::<thunderlook_model::AccountSummary>::new());
+    spawn_local(async move {
+        if let Ok(list) = ipc::accounts().await {
+            if ui.compose.with_untracked(|d| d.as_ref().is_some_and(|d| d.from_account.is_none())) {
+                if let Some(first) = list.first() {
+                    let id = first.id.clone();
+                    ui.compose.update(|d| {
+                        if let Some(d) = d {
+                            d.from_account = Some(id);
+                        }
+                    });
+                }
+            }
+            accounts.set(list);
+        }
+    });
+    let from = move || ui.compose.with(|d| d.as_ref().and_then(|d| d.from_account.clone()).unwrap_or_default());
+    let set_from = move |ev: leptos::ev::Event| {
+        let v = event_target_value(&ev);
+        ui.compose.update(|d| {
+            if let Some(d) = d {
+                d.from_account = Some(v);
+            }
+        });
+        ui.compose_dirty.set(true);
+    };
 
     let attach = move |_| {
         spawn_local(async move {
@@ -269,6 +296,18 @@ pub fn ComposePane() -> impl IntoView {
                 </button>
             </div>
             <div class="compose-fields">
+                <Show when=move || accounts.with(|a| !a.is_empty())>
+                    <label class="compose-field">
+                        <span>"De"</span>
+                        <select aria-label="De" prop:value=from on:change=set_from>
+                            {move || accounts.get().into_iter().map(|a| {
+                                let label = if a.sender_name.is_empty() { a.address.clone() } else { format!("{} <{}>", a.sender_name, a.address) };
+                                let id = a.id.clone();
+                                view! { <option value=a.id.clone() selected=move || from() == id>{label}</option> }
+                            }).collect_view()}
+                        </select>
+                    </label>
+                </Show>
                 <label class="compose-field">
                     <span>"À"</span>
                     <input id="compose-to" type="text" autocomplete="off" prop:value=to on:input=set_to />

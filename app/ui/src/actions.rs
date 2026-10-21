@@ -81,8 +81,9 @@ pub fn compose(ui: Ui, kind: ComposeKind) {
             }
         },
     };
+    let folder = ui.folder.get_untracked();
     spawn_local(async move {
-        match ipc::compose(kind, source.as_deref()).await {
+        match ipc::compose(kind, source.as_deref(), Some(folder.as_str())).await {
             Ok(d) => {
                 ui.compose_dirty.set(false);
                 ui.compose.set(Some(d));
