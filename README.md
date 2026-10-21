@@ -23,6 +23,7 @@ a REA work on MSoutlook21
 | J3. Organisation : lu/non lu, déplacer, indicateurs, catégories, dossiers, favoris, annulation | Fait (2026-10-19), sans les conversations (J3b) |
 | J3b. Conversations et affichages | À faire |
 | J4. Recherche : index plein texte, mots-clés, étendues, dossiers de recherche | Fait (2026-10-19) : 252 846 éléments indexés en 4 min 19, recherches en moins de 300 ms |
+| J9. Calendrier : vues Jour, Semaine de travail, Semaine, Mois, superposition, import/export `.ics` et CSV (lecture seule, Outlook fait foi) | Fait (2026-10-22), v0.9.0 : 4 198 rendez-vous lus, occurrences identiques à Outlook sur 2023-2026 (`PLAN.md` §5) |
 
 ## Fichiers
 - `SPEC.md` : fonctions inventoriées et priorités (le mail d'abord).

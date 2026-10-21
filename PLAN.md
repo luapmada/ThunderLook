@@ -82,7 +82,8 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | J6 ✅ | Règles et actions rapides | Import du flux de règles et des `.rwz`, assistant de règles, « Exécuter maintenant », actions rapides (défauts plus éditeur) | Tes 2 `.rwz` et le flux du PST importés, et rejoués sur une copie | L |
 | J7 ✅ | IMAP + SMTP (Hostinger) | Comptes, synchronisation, envoi, boîte d'envoi, F9, hors connexion, notifications, réponse automatique locale | Envoi et réception réels sur un compte de test | L |
 | J8 ✖ | POP3 | Abandonné le 2026-10-21 : pendant la transition, Outlook et ThunderLook relèvent les mêmes boîtes en IMAP (en POP3, ce qu'un client relève, l'autre ne le voit pas) | — | — |
-| J9+ | Calendrier, puis Contacts, puis Tâches | Ordre fixé par Q3. Import de 854 rendez-vous, 6 046 contacts, tâches, .ics/.vcf | Jalons détaillés plus tard | L |
+| J9 ✅ | Calendrier (option A : Outlook fait foi) | Lecture des 4 198 rendez-vous du PST (périodicités, exceptions, fuseaux), expansion des occurrences, vues Jour, Semaine de travail, Semaine, Mois, navigateur de dates, superposition des calendriers, détail en lecture seule ; rechargement depuis une copie plus récente du PST (`tl-import --calendars`) ; import/export `.ics` et CSV d'Outlook, calendriers importés en lecture seule. Création/modification sans objet en option A ; réunions iTIP/iMIP abandonnées le 2026-10-22 à la demande de Paul (« pas besoin ») | Occurrences identiques à celles calculées par Outlook sur 2023-2026 ; aller-retour `.ics` sans écart (`notes/j9-plan.md`) | L |
+| J10+ | Contacts, puis Tâches | Ordre fixé par Q3. Import de 6 046 contacts, tâches, .vcf | Jalons détaillés plus tard | L |
 
 ## 5. Vérification
 - Tests Rust : unitaires, plus des tests « dorés » d'import sur les copies locales (non versionnées), comparés à `pst-probe` et libpff.
@@ -284,6 +285,15 @@ Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nomb
 - **Réponse automatique** (seconde boîte de test `thunderlook-test2@`) : une réponse pour deux messages du même expéditeur, aucune pour le suivant ; `Auto-Submitted: auto-replied`.
 - **Sécurité** : mot de passe dans le gestionnaire d'identifiants de Windows (test : absent de tous les fichiers du dossier de données) ; TLS vérifié (rustls, racines Mozilla).
 - Schéma v8 repris d'une ébauche non validée trouvée dans l'arbre de travail (20/10, 22 h 48, autre outil), complété d'une colonne `last_error`.
+
+### Vérifications du J9 (2026-10-22, même base)
+- **Lecture** (`crates/calendar`, `examples/read_all`) : 4 198 rendez-vous lus sur 4 198, 0 échec ; 392 séries (351 annuelles, 28 mensuelles, 9 hebdomadaires, 4 quotidiennes), 142 exceptions, 206 occurrences supprimées, toutes en fuseau Paris.
+- **Contrôle croisé** avec l'export `.ics` d'Outlook du 03/10/2023 (`examples/crosscheck_ics`) : 466 événements retrouvés par UID sur 472, 466 concordants (début, journée entière, objet, fréquence) ; 50 occurrences modifiées sur 54 retrouvées dans leur série. Les 6 UID absents sont des éléments supprimés ou recréés dans Outlook depuis l'export.
+- **Occurrences** comparées à celles calculées par Outlook lui-même (COM, `IncludeRecurrences`, lecture seule, `examples/occurrences`) : 2023 507 = 507, 2024 148 = 148, 2025 158 = 158 ; après rechargement depuis la sauvegarde du PST du 21/10 (`tl-import --calendars`), 2026 : 410 = 410.
+- **`.ics`** (`examples/ics_roundtrip`) : export puis relecture des 4 calendriers de la source 1, 1 217 occurrences 2023-2026, 0 écart ; l'export `.ics` d'Outlook (10/2023) importé redonne les 414 occurrences de Calendar Annexe calculées aujourd'hui par Outlook (7 de plus : éléments supprimés depuis). Série incohérente chez Outlook (OccurrenceCount 3, fin à la 2e) : UNTIL écrit pour donner ce qu'Outlook affiche.
+- **CSV** (`examples/csv_check`) contre l'export CSV d'Outlook du 19/12/2023 (Calendar Annexe) : en-tête identique ; sur 294 lignes communes, objet, dates, journée entière, lieu, confidentialité, participants identiques ; description 289/294 (mise en forme RTF par Outlook) ; écarts restants dus aux modifications faites depuis 2023. Aller-retour : 468 lignes, 0 écart.
+- **Interface** (`tools/ui_check.mjs`, cas J9, CDP) : bandeau « Journée » et rendez-vous identiques aux occurrences d'Outlook (6-12 février et 6 mars 2023, Calendar Annexe superposé) ; export `.ics` d'Outlook déposé dans `calendars/`, section, superposition et rendez-vous du 6 mars 2023 vérifiés, puis calendrier retiré.
+- Hors périmètre : création et modification (option A, Outlook fait foi) ; réunions iTIP/iMIP abandonnées le 2026-10-22 à la demande de Paul.
 
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).

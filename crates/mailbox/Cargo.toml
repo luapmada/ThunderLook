@@ -1,6 +1,6 @@
 [package]
 name = "thunderlook-mailbox"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 publish = false
 description = "Lecture du stockage de ThunderLook pour l'interface : arborescence, listes triées, messages"

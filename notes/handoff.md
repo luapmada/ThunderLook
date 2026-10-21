@@ -8,7 +8,7 @@
    - Pendant le réglage, une frappe clavier est arrivée dans la boîte de dialogue au premier plan (« rrent a charger ? ») : relire chaque champ avant OK.
 2. ~~Bogue du point dans un nom de dossier~~ — corrigé (`50e825a`) : le séparateur est remplacé par U+2024 / U+2215 côté serveur. paul@ : `INBOX.[electromagnetisme.fr]` renommé `INBOX.[electromagnetisme&ICQ-fr]`, cibles des 2 règles mises à jour. electromagnetisme : 7 règles copiées du PST désactivées (dont « contact@electromagnetisme.fr (1) », qui aurait déplacé tout le courrier du compte) ; restent actives AR, Mail Delivery System ×2, « a été lu le », catégories. Les 6 dossiers vides d'electromagnetisme ont été supprimés du serveur le 21/10 avec l'accord de Paul (`folder_fix.rs … delete`) ; restent INBOX, Accusés, Trash, Sent, Junk, Drafts. Sauvegarde de la base avant ces changements : `data/store/thunderlook.db.bak-2026-10-21-regles`.
 3. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : Paul doit le supprimer (garde-fou : suppression refusée à l'agent).
-4. **J9 Calendrier, option A** : étapes 1, 2, 3 (vues), 5 (`.ics`/CSV) et le rechargement depuis le PST (`tl-import --calendars`) faites ; occurrences identiques à Outlook sur 2023-2026. Reste : étape 6 (réunions iTIP/iMIP), étape 7 (clôture, v0.9.0). Détail : `notes/j9-plan.md`. Plan et avancement : `notes/j9-plan.md`.
+4. ~~J9 Calendrier, option A~~ — **clos le 22/10 en v0.9.0** : étapes 1, 2, 3 (vues), 5 (`.ics`/CSV) et rechargement depuis le PST (`tl-import --calendars`) ; occurrences identiques à Outlook sur 2023-2026. Étape 4 sans objet (Outlook fait foi), étape 6 (réunions iTIP/iMIP) abandonnée à la demande de Paul. Détail : `notes/j9-plan.md` ; mesures : `PLAN.md` §5. Prochain : J10 (Contacts, puis Tâches).
 
 Fait : construction à jour (`aa30da2`), `ui_check` 5/5 au vert, ThunderLook relancé. Une instance sans fenêtre (20 h 35) bloquait l'exécutable : `CloseMainWindow` ne suffit pas, il faut alors `Stop-Process`.
 
@@ -22,7 +22,7 @@ Fait : construction à jour (`aa30da2`), `ui_check` 5/5 au vert, ThunderLook rel
 - Outils (`crates/sync/examples`) : compare, find, dates, subscriptions, copy_rules, rehome, cross_move, junk_roundtrip, mkdir, account_rules. Dossier de test : `$CLAUDE_JOB_DIR/tmp/j7store` (comptes test et test2).
 
 ## Où on en est
-- Livré : J0 à J7 et J3b. La version courante est **v0.8.0** (étiquette git). Prochaine mineure : 0.9.0 (`notes/dev.md` § Versions).
+- Livré : J0 à J7, J3b et J9 (J8 abandonné). La version courante est **v0.9.0** (J9). Prochaine mineure : 0.10.0 (`notes/dev.md` § Versions).
 - `data/store` est au schéma 8 ; aucun compte n'y est configuré (le cas J7 de `ui_check` ajoute puis retire le compte de test).
 - ADI Facturation : hors sujet pour l'instant, à la demande de Paul. Ne pas relancer.
 

@@ -69,7 +69,8 @@ calendriers multiples et superposition ; import/export `.ics` et CSV ; catégori
   - Interface : ruban « Partager » (Ouvrir un calendrier, Enregistrer le calendrier (.ics), Exporter en CSV — période
     affichée) ; `ui_check` J9 dépose l'export `.ics` d'Outlook dans `calendars/`, vérifie section, superposition et
     rendez-vous du 6 mars 2023, puis le retire par ×.
-- Reste du J9 : étape 6 (réunions iTIP/iMIP) et étape 7 (clôture, version 0.9.0).
+- Étape 6 (réunions iTIP/iMIP) : **abandonnée le 22/10** à la demande de Paul (« pas besoin »).
+- Étape 7 faite le 22/10 : clôture du J9 en version 0.9.0 (`PLAN.md` §4 et §5 « Vérifications du J9 »).
 
 ## 3. Ordre proposé
 | # | Tâche | Vérification |
@@ -79,5 +80,5 @@ calendriers multiples et superposition ; import/export `.ics` et CSV ; catégori
 | 3 | Vues Jour, Semaine de travail, Semaine, Mois ; navigateur de dates ; superposition des calendriers | `ui_check` (CDP) |
 | 4 | Création, modification, suppression, rappels | Tests et `ui_check` |
 | 5 | Import/export `.ics` (RFC 5545) et CSV | Aller-retour sur les fichiers d'exemple |
-| 6 | Réunions par courrier (iTIP/iMIP) : demandes reçues (accepter, refuser), envoi | Compte de test |
+| 6 | ~~Réunions par courrier (iTIP/iMIP) : demandes reçues (accepter, refuser), envoi~~ (abandonnée le 22/10) | Compte de test |
 | 7 | Clôture : mesures, version 0.9.0, étiquette, push | — |
