@@ -166,6 +166,45 @@ pub(crate) fn queue(conn: &Connection, change: Change) -> Result<()> {
     Ok(())
 }
 
+/// Dossier créé dans ThunderLook sous un dossier d'un compte : son nom sur le serveur est calculé (sous la Boîte de
+/// réception au premier niveau, comme l'exige Hostinger) et sa création est mise en attente. Sans effet hors compte.
+pub(crate) fn folder_created(conn: &Connection, folder: i64) -> Result<()> {
+    let (source, parent, name): (i64, Option<i64>, String) =
+        conn.query_row("SELECT source_id, parent_id, name FROM folder WHERE id = ?1", [folder], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(err)?;
+    let Some(account): Option<i64> = conn.query_row("SELECT id FROM account WHERE source_id = ?1", [source], |r| r.get(0)).optional().map_err(err)?
+    else {
+        return Ok(());
+    };
+    let parent_name: Option<String> = match parent {
+        Some(p) => conn.query_row("SELECT imap_name FROM folder WHERE id = ?1", [p], |r| r.get(0)).map_err(err)?,
+        None => None,
+    };
+    let inbox: Option<String> = conn
+        .query_row("SELECT imap_name FROM folder WHERE source_id = ?1 AND role = 'inbox' AND imap_name IS NOT NULL", [source], |r| r.get(0))
+        .optional()
+        .map_err(err)?;
+    let base = parent_name.or(inbox).unwrap_or_else(|| "INBOX".into());
+    // Séparateur du serveur : celui qui suit « INBOX » dans un nom existant (« INBOX.Sent »), sinon « / ».
+    let delimiter = conn
+        .query_row(
+            "SELECT substr(imap_name, length(?2) + 1, 1) FROM folder WHERE source_id = ?1 AND imap_name LIKE ?2 || '_%' LIMIT 1",
+            params![source, base],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(err)?
+        .or_else(|| {
+            conn.query_row("SELECT substr(imap_name, 6, 1) FROM folder WHERE source_id = ?1 AND imap_name LIKE 'INBOX_%' LIMIT 1", [source], |r| r.get(0))
+                .optional()
+                .ok()
+                .flatten()
+        })
+        .unwrap_or_else(|| "/".into());
+    let imap_name = format!("{base}{delimiter}{name}");
+    conn.execute("UPDATE folder SET imap_name = ?2 WHERE id = ?1", params![folder, imap_name]).map_err(err)?;
+    push(conn, account, "mkdir", &imap_name, None, None, "{}".into())
+}
+
 /// Classe un message dans un dossier en dehors des opérations de l'interface (envoi : Boîte d'envoi vers Éléments
 /// envoyés) ; le changement est reporté sur le serveur comme un déplacement.
 pub fn file_message(conn: &Connection, id: i64, folder: i64) -> Result<()> {

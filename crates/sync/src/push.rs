@@ -145,6 +145,9 @@ async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &
             *current = None;
             attach(s, conn, data_dir, current, account, id, &to).await?;
         }
+        "mkdir" => {
+            s.create(&p.mailbox).await.map_err(e)?;
+        }
         other => return Err(format!("opération « {other} » non prise en charge")),
     }
     Ok(())

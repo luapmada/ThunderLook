@@ -155,7 +155,9 @@ fn create_folder(tx: &Transaction, parent: i64, name: &str, role: &str) -> Resul
         params![p.source, parent, name, role, position],
     )
     .map_err(err)?;
-    Ok(tx.last_insert_rowid())
+    let id = tx.last_insert_rowid();
+    remote::folder_created(tx, id)?;
+    Ok(id)
 }
 
 fn check_name(conn: &Connection, parent: i64, name: &str, except: Option<i64>) -> Result<String> {

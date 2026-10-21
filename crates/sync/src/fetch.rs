@@ -125,6 +125,15 @@ fn reconcile_folders(conn: &Connection, data_dir: &Path, source: i64, remotes: &
         .into_iter()
         .filter(|id| !ids.iter().any(|(_, x)| x == id))
         .collect();
+    // Un dossier dont la création n'est pas encore reportée sur le serveur n'a pas disparu.
+    let creating: Vec<i64> = conn
+        .prepare("SELECT f.id FROM folder f JOIN imap_pending p ON p.kind = 'mkdir' AND p.mailbox = f.imap_name WHERE f.source_id = ?1")
+        .map_err(e)?
+        .query_map([source], |r| r.get(0))
+        .map_err(e)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(e)?;
+    let gone: Vec<i64> = gone.into_iter().filter(|id| !creating.contains(id)).collect();
     for id in gone {
         purge_messages(conn, data_dir, &format!("folder_id = {id}"))?;
         conn.execute("DELETE FROM folder WHERE id = ?1", [id]).map_err(e)?;
