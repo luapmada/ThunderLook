@@ -25,6 +25,9 @@ pub struct SyncReport {
     pub elapsed_ms: u32,
     /// Opération locale qui n'a pas pu être reportée sur le serveur (gardée pour la relève suivante).
     pub push_error: Option<String>,
+    /// Messages envoyés depuis la Boîte d'envoi, et dernière erreur d'envoi.
+    pub sent: u32,
+    pub send_error: Option<String>,
 }
 
 fn now_ms() -> i64 {

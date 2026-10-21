@@ -28,6 +28,7 @@ use thunderlook_store::rusqlite::{Connection, params_from_iter, types::Value};
 pub use compose::{MailAddress, default_signature, format_address, parse_addresses, signatures};
 pub use index::{body_text, index_pending};
 pub use oft::draft_from_oft;
+pub use remote::file_message;
 pub use rules::{FolderMatch, FolderResolver};
 pub use message::{AttachmentData, BLOCKED_EXTENSIONS, is_blocked};
 
@@ -52,6 +53,8 @@ pub struct Mailbox {
     undo: Vec<ops::UndoEntry>,
     /// Conversations dépliées, gardées d'une ouverture de vue à l'autre (après une opération par exemple).
     expanded: HashSet<[u8; 16]>,
+    /// Pendant `send_draft` : nom et adresse du compte d'envoi, qui priment sur ceux de la source du brouillon.
+    send_as: Option<(String, String)>,
 }
 
 /// Vue ouverte : lignes dans l'ordre, et recherche ou non (les lignes indiquent alors leur dossier).
@@ -246,6 +249,7 @@ impl Mailbox {
             next_token: 1,
             undo: Vec::new(),
             expanded: HashSet::new(),
+            send_as: None,
         })
     }
 

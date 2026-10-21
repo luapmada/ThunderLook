@@ -454,7 +454,7 @@ impl Mailbox {
         ids.iter().map(|&id| stmt.query_row([id], |r| Ok((id, r.get::<_, i64>(0)?))).map_err(err)).collect()
     }
 
-    fn write_folders(&mut self, moves: &[(i64, i64)]) -> Result<()> {
+    pub(crate) fn write_folders(&mut self, moves: &[(i64, i64)]) -> Result<()> {
         let tx = self.conn.transaction().map_err(err)?;
         {
             let mut get = tx.prepare_cached("SELECT folder_id FROM message WHERE id = ?1").map_err(err)?;

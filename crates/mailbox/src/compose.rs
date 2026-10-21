@@ -331,6 +331,14 @@ struct Original {
 impl Mailbox {
     /// Adresses du compte d'une source : expéditeurs de ses dossiers « Éléments envoyés », du plus fréquent au moins.
     pub fn my_addresses(&self, source: i64) -> Result<Vec<String>> {
+        if let Some((_, addr)) = &self.send_as {
+            return Ok(vec![addr.to_ascii_lowercase()]);
+        }
+        let account: Option<String> =
+            self.conn().query_row("SELECT lower(email) FROM account WHERE source_id = ?1", [source], |r| r.get(0)).optional().map_err(err)?;
+        if let Some(a) = account {
+            return Ok(vec![a]);
+        }
         let mut stmt = self
             .conn()
             .prepare_cached(
@@ -343,6 +351,17 @@ impl Mailbox {
 
     /// Nom affiché le plus fréquent pour l'adresse principale du compte.
     fn my_name(&self, source: i64, addr: &str) -> Result<Option<String>> {
+        if let Some((name, _)) = &self.send_as {
+            return Ok(Some(name.clone()).filter(|n| !n.is_empty()));
+        }
+        let account: Option<String> = self
+            .conn()
+            .query_row("SELECT name FROM account WHERE source_id = ?1 AND name <> ''", [source], |r| r.get(0))
+            .optional()
+            .map_err(err)?;
+        if account.is_some() {
+            return Ok(account);
+        }
         self.conn()
             .query_row(
                 "SELECT m.from_name FROM message m JOIN folder f ON f.id = m.folder_id
@@ -625,6 +644,59 @@ impl Mailbox {
                 },
             )
             .map_err(err)
+    }
+
+    /// « Envoyer » (J7) : le brouillon est enregistré au nom du compte d'envoi, puis placé dans la Boîte d'envoi de ce
+    /// compte et dans la file `outbox` ; `thunderlook-sync` le transmet. Compte d'envoi : celui de la source du
+    /// brouillon, sinon le premier compte. Renvoie l'identifiant du message.
+    pub fn send_draft(&mut self, d: &Draft) -> Result<String> {
+        if parse_addresses(&d.to).is_empty() && parse_addresses(&d.cc).is_empty() && parse_addresses(&d.bcc).is_empty() {
+            return Err("Ajoutez au moins un destinataire.".into());
+        }
+        let source = match (&d.id, &d.source_id) {
+            (Some(id), _) => self.row(message_db_id(id)?)?.source,
+            (None, Some(s)) => self.row(message_db_id(s)?)?.source,
+            (None, None) => self.default_source()?,
+        };
+        let account: Option<(i64, i64, String, String)> = self
+            .conn()
+            .query_row(
+                "SELECT id, source_id, name, email FROM account ORDER BY source_id = ?1 DESC, id LIMIT 1",
+                [source],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()
+            .map_err(err)?;
+        let (account_id, account_source, name, email) =
+            account.ok_or("Aucun compte de messagerie : ajoutez-en un (Envoyer/Recevoir › Paramètres du compte).")?;
+        self.send_as = Some((name, email));
+        let saved = self.save_draft(d);
+        self.send_as = None;
+        let saved = saved?;
+        let id = message_db_id(saved.id.as_deref().ok_or("brouillon non enregistré")?)?;
+        // Message définitif : sans la marque de brouillon.
+        let row = self.row(id)?;
+        let path = thunderlook_store::resolve(self.data_dir(), &row.eml_path);
+        let bytes = fs::read(&path).map_err(|e| format!("{} : {e}", path.display()))?;
+        let text = String::from_utf8_lossy(&bytes);
+        if let Some(pos) = text.find("X-Unsent: 1\r\n") {
+            let mut out = bytes[..pos].to_vec();
+            out.extend_from_slice(&bytes[pos + "X-Unsent: 1\r\n".len()..]);
+            fs::write(&path, out).map_err(|e| format!("{} : {e}", path.display()))?;
+        }
+        let outbox: i64 = self
+            .conn()
+            .query_row("SELECT id FROM folder WHERE source_id = ?1 AND role = 'outbox' ORDER BY id LIMIT 1", [account_source], |r| r.get(0))
+            .map_err(err)?;
+        let now = Local::now().timestamp_millis();
+        self.write_folders(&[(id, outbox)])?;
+        self.conn()
+            .execute("UPDATE message SET is_read = 1, received_at = ?2, sent_at = ?2 WHERE id = ?1", params![id, now])
+            .map_err(err)?;
+        self.conn()
+            .execute("INSERT OR REPLACE INTO outbox (message_id, account_id, queued_at) VALUES (?1, ?2, ?3)", params![id, account_id, now])
+            .map_err(err)?;
+        Ok(format!("m{id}"))
     }
 
     /// Enregistre le brouillon dans le dossier Brouillons de sa source (création ou mise à jour) et le renvoie

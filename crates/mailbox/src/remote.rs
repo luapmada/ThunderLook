@@ -165,3 +165,13 @@ pub(crate) fn queue(conn: &Connection, change: Change) -> Result<()> {
     }
     Ok(())
 }
+
+/// Classe un message dans un dossier en dehors des opérations de l'interface (envoi : Boîte d'envoi vers Éléments
+/// envoyés) ; le changement est reporté sur le serveur comme un déplacement.
+pub fn file_message(conn: &Connection, id: i64, folder: i64) -> Result<()> {
+    let tx = conn.unchecked_transaction().map_err(err)?;
+    let from: i64 = tx.query_row("SELECT folder_id FROM message WHERE id = ?1", [id], |r| r.get(0)).map_err(err)?;
+    tx.execute("UPDATE message SET folder_id = ?2 WHERE id = ?1", params![id, folder]).map_err(err)?;
+    queue(&tx, Change::Moved { id, from, to: folder })?;
+    tx.commit().map_err(err)
+}
