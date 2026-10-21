@@ -94,6 +94,8 @@ pub enum Dialog {
     /// « Gérer les actions rapides » (`edit` : `None`), ou l'éditeur d'une action rapide (indice ; la longueur de
     /// la liste pour une nouvelle). `first_use` : ouverte à l'exécution d'une action rapide à configurer.
     QuickSteps { edit: Option<usize>, first_use: bool },
+    /// « Paramètres du compte » (J7).
+    Accounts,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

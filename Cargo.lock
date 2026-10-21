@@ -5052,6 +5052,9 @@ dependencies = [
  "tauri-plugin-opener",
  "thunderlook-mailbox",
  "thunderlook-model",
+ "thunderlook-store",
+ "thunderlook-sync",
+ "tokio",
 ]
 
 [[package]]

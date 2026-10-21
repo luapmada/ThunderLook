@@ -61,10 +61,12 @@ struct Row {
     badge: Option<String>,
     badge_total: bool,
     parent: Option<String>,
+    /// Nom de la section (fichier de données ou compte) : `data-source`.
+    source: String,
 }
 
 fn flatten(tree: &FolderTree, collapsed: &HashSet<String>, expanded_set: &HashSet<String>) -> Vec<Row> {
-    fn push_folders(rows: &mut Vec<Row>, folders: &[Folder], level: u32, parent: &str, expanded_set: &HashSet<String>) {
+    fn push_folders(rows: &mut Vec<Row>, folders: &[Folder], level: u32, parent: &str, expanded_set: &HashSet<String>, source: &str) {
         for f in folders {
             let expanded = expanded_set.contains(&f.id);
             rows.push(Row {
@@ -77,9 +79,10 @@ fn flatten(tree: &FolderTree, collapsed: &HashSet<String>, expanded_set: &HashSe
                 badge: f.badge(),
                 badge_total: f.role.shows_total(),
                 parent: Some(parent.to_string()),
+                source: source.to_string(),
             });
             if expanded {
-                push_folders(rows, &f.children, level + 1, &f.id, expanded_set);
+                push_folders(rows, &f.children, level + 1, &f.id, expanded_set, source);
             }
         }
     }
@@ -96,9 +99,10 @@ fn flatten(tree: &FolderTree, collapsed: &HashSet<String>, expanded_set: &HashSe
             badge: None,
             badge_total: false,
             parent: None,
+            source: s.name.clone(),
         });
         if expanded {
-            push_folders(&mut rows, &s.folders, 2, &s.id, expanded_set);
+            push_folders(&mut rows, &s.folders, 2, &s.id, expanded_set, &s.name);
         }
     }
     rows
@@ -240,6 +244,7 @@ pub fn FolderPane() -> impl IntoView {
                                         role="treeitem"
                                         id=node_dom_id(&row.id)
                                         class=if row.section { "tree-section" } else { "treeitem" }
+                                        data-source=row.source.clone()
                                         class:focused=is_focus
                                         // `aria-level` absent de la liste typée de Leptos 0.8 : propriété DOM
                                         // reflétée en attribut par Chromium (WebView2).

@@ -13,6 +13,7 @@ use crate::{
     actions::{self, real_folder, select_single},
     commandbar::CommandBar,
     compose::ComposePane,
+    accounts::AccountsDialog,
     dialogs::Dialogs,
     quicksteps::QuickStepsDialog,
     rules::RulesDialog,
@@ -114,6 +115,11 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
             actions::compose(ui, kind);
             return;
         }
+        if key == "F9" && !ctrl && !alt && !shift {
+            ev.prevent_default();
+            actions::sync_now(ui);
+            return;
+        }
         if ctrl && !alt && !shift && key.eq_ignore_ascii_case("z") {
             ev.prevent_default();
             actions::undo(ui);
@@ -197,6 +203,20 @@ pub fn App() -> impl IntoView {
     provide_context(requested);
 
     actions::load_categories(ui);
+
+    // Envoi et réception (J7) : barre d'état, puis liste et arborescence rafraîchies à la fin d'un passage.
+    ipc::on_sync(move |e| {
+        ui.status.set(Some(e.message.clone()));
+        if !e.running {
+            if e.error.is_some() {
+                ui.error.set(e.error.clone());
+            }
+            if e.sent > 0 || e.received > 0 {
+                actions::refresh_tree(ui);
+                actions::reopen_view(ui);
+            }
+        }
+    });
 
     // Chargement initial : réglages puis arborescence ; ouverture de la Boîte de réception.
     spawn_local(async move {
@@ -422,6 +442,7 @@ pub fn App() -> impl IntoView {
             <Dialogs />
             <RulesDialog />
             <QuickStepsDialog />
+            <AccountsDialog />
         </div>
     }
 }

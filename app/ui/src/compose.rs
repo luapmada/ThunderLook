@@ -75,6 +75,23 @@ fn save(ui: Ui, frame: NodeRef<html::Iframe>, then: impl FnOnce() + 'static) {
     });
 }
 
+/// « Envoyer » (J7) : le message part dans la Boîte d'envoi du compte ; l'envoi suit (événement « sync »).
+fn send(ui: Ui, frame: NodeRef<html::Iframe>) {
+    let Some(d) = current(ui, frame) else { return };
+    spawn_local(async move {
+        match ipc::send_draft(&d).await {
+            Ok(_) => {
+                ui.compose_dirty.set(false);
+                ui.compose.set(None);
+                ui.status.set(Some("Envoi en cours…".into()));
+                actions::refresh_tree(ui);
+                actions::reopen_view(ui);
+            }
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
 fn exec(frame: NodeRef<html::Iframe>, command: &str, value: Option<&str>) {
     if let Some(doc) = frame_doc(frame) {
         let _ = doc.exec_command_with_show_ui_and_value(command, false, value.unwrap_or(""));
@@ -106,6 +123,10 @@ pub fn ComposePane() -> impl IntoView {
         if ev.ctrl_key() && ev.key().eq_ignore_ascii_case("s") {
             ev.prevent_default();
             save(ui, frame, || {});
+        }
+        if ev.ctrl_key() && ev.key() == "Enter" {
+            ev.prevent_default();
+            send(ui, frame);
         }
     }));
     let on_input = StoredValue::new_local(Closure::<dyn Fn(web_sys::Event)>::new(move |_| ui.compose_dirty.set(true)));
@@ -204,10 +225,15 @@ pub fn ComposePane() -> impl IntoView {
                     ev.stop_propagation();
                     save(ui, frame, || {});
                 }
+                if ev.ctrl_key() && ev.key() == "Enter" {
+                    ev.prevent_default();
+                    ev.stop_propagation();
+                    send(ui, frame);
+                }
             }
         >
             <div class="compose-bar" role="toolbar" aria-label="Actions de rédaction">
-                <button class="cmd primary" aria-disabled="true" tabindex="-1" title="Envoyer — l'envoi viendra avec SMTP (jalon J7)">
+                <button class="cmd primary" title="Envoyer (Ctrl+Entrée)" aria-keyshortcuts="Control+Enter" on:click=move |_| send(ui, frame)>
                     <Svg icon=SEND />
                     <span>"Envoyer"</span>
                 </button>

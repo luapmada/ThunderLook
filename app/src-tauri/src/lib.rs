@@ -13,17 +13,90 @@ use std::{
 };
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State, WebviewWindowBuilder, webview::NewWindowResponse};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindowBuilder, webview::NewWindowResponse};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use thunderlook_mailbox::Mailbox;
 use thunderlook_model::{
-    CategoryInfo, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
-    MessageOp, MessageSummary, MessageView, OpResult, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
+    AccountSummary, CategoryInfo, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
+    MessageOp, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
     SortField, format,
     quicksteps::{QuickStep, default_quick_steps},
     settings::Settings,
 };
+
+/// Envoi et réception (J7) : un passage à la fois, dans un fil dédié ; une demande pendant un passage en relance un.
+#[derive(Default)]
+struct Syncer {
+    running: Arc<AtomicBool>,
+    again: Arc<AtomicBool>,
+}
+
+/// Lance un passage d'envoi et de réception sur tous les comptes ; l'interface suit l'événement « sync ».
+fn start_sync(app: &AppHandle) {
+    let syncer = app.state::<Syncer>();
+    if syncer.running.swap(true, Ordering::SeqCst) {
+        syncer.again.store(true, Ordering::SeqCst);
+        return;
+    }
+    let (running, again) = (syncer.running.clone(), syncer.again.clone());
+    let app = app.clone();
+    std::thread::spawn(move || {
+        loop {
+            again.store(false, Ordering::SeqCst);
+            let _ = app.emit("sync", SyncEvent { running: true, message: "Envoi et réception…".into(), ..Default::default() });
+            let event = sync_all(&app);
+            let _ = app.emit("sync", event);
+            if !again.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+        running.store(false, Ordering::SeqCst);
+    });
+}
+
+fn sync_all(app: &AppHandle) -> SyncEvent {
+    let dir = match data_dir(app) {
+        Ok(d) => d,
+        Err(e) => return SyncEvent { message: e.clone(), error: Some(e), ..Default::default() },
+    };
+    let accounts = thunderlook_store::open(&dir).map_err(|e| e.to_string()).and_then(|c| thunderlook_sync::account::accounts(&c));
+    let accounts = match accounts {
+        Ok(a) => a,
+        Err(e) => return SyncEvent { message: format!("Échec de la relève : {e}"), error: Some(e), ..Default::default() },
+    };
+    if accounts.is_empty() {
+        return SyncEvent { message: "Aucun compte de messagerie".into(), ..Default::default() };
+    }
+    let (mut sent, mut received, mut errors) = (0, 0, Vec::new());
+    for a in &accounts {
+        match thunderlook_sync::sync_account_blocking(&dir, a.source_id) {
+            Ok(r) => {
+                sent += r.sent;
+                received += r.new_messages;
+                errors.extend(r.send_error.map(|e| format!("{} : envoi : {e}", a.address)));
+                errors.extend(r.push_error.map(|e| format!("{} : {e}", a.address)));
+            }
+            Err(e) => errors.push(format!("{} : {e}", a.address)),
+        }
+    }
+    if received > 0 {
+        app.state::<Indexer>().ensure(&dir);
+    }
+    let mut parts = Vec::new();
+    if sent > 0 {
+        parts.push(if sent == 1 { "Message envoyé".to_string() } else { format!("{sent} messages envoyés") });
+    }
+    if received > 0 {
+        parts.push(if received == 1 { "1 nouveau message".to_string() } else { format!("{received} nouveaux messages") });
+    }
+    let message = match (errors.first(), parts.is_empty()) {
+        (Some(e), _) => format!("Échec de l'envoi/réception : {e}"),
+        (None, true) => "Tous les dossiers sont à jour".into(),
+        (None, false) => parts.join(" · "),
+    };
+    SyncEvent { running: false, message, sent, received, error: errors.into_iter().next() }
+}
 
 /// Boîte aux lettres ouverte à la première demande ; `Err` mémorise l'échec d'ouverture.
 struct Store(Mutex<Option<Result<Mailbox, String>>>);
@@ -201,6 +274,76 @@ fn run_rules(app: AppHandle, store: State<Store>, request: RuleRunRequest) -> Re
     })
 }
 
+/// Comptes de messagerie (J7).
+#[tauri::command(async)]
+fn accounts(app: AppHandle) -> Result<Vec<AccountSummary>, String> {
+    let conn = thunderlook_store::open(&data_dir(&app)?).map_err(|e| e.to_string())?;
+    thunderlook_sync::account::summaries(&conn)
+}
+
+/// Ajoute un compte après avoir vérifié l'identification IMAP et SMTP (TLS, ports 993 et 465), puis lance la
+/// première relève. Le mot de passe va dans le gestionnaire d'identifiants de Windows.
+#[tauri::command(async)]
+fn add_account(
+    app: AppHandle,
+    address: String,
+    name: String,
+    password: String,
+    imap_host: String,
+    smtp_host: String,
+) -> Result<Vec<AccountSummary>, String> {
+    let address = address.trim().to_string();
+    if !address.contains('@') {
+        return Err("Adresse de messagerie invalide.".into());
+    }
+    let mut ep = thunderlook_sync::Endpoints::hostinger(&address);
+    if !imap_host.trim().is_empty() {
+        ep.imap.host = imap_host.trim().to_string();
+    }
+    if !smtp_host.trim().is_empty() {
+        ep.smtp.host = smtp_host.trim().to_string();
+    }
+    // Vérification dans un fil à part : la commande tourne déjà sur le runtime de Tauri.
+    let (ep2, pw) = (ep.clone(), password.clone());
+    std::thread::spawn(move || -> Result<(), String> {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+        rt.block_on(async {
+            thunderlook_sync::imap_login(&ep2.imap, &ep2.username, &pw).await?.logout().await.map_err(|e| e.to_string())?;
+            thunderlook_sync::smtp_check(&ep2.smtp, &ep2.username, &pw).await
+        })
+    })
+    .join()
+    .map_err(|_| "vérification de la connexion interrompue".to_string())??;
+    let conn = thunderlook_store::open(&data_dir(&app)?).map_err(|e| e.to_string())?;
+    thunderlook_sync::account::create(&conn, &address, &name, &ep, &password)?;
+    start_sync(&app);
+    thunderlook_sync::account::summaries(&conn)
+}
+
+/// Retire un compte de ThunderLook (rien n'est effacé sur le serveur).
+#[tauri::command(async)]
+fn remove_account(app: AppHandle, id: String) -> Result<Vec<AccountSummary>, String> {
+    let source: i64 = id.strip_prefix('s').and_then(|n| n.parse().ok()).ok_or_else(|| format!("identifiant invalide : {id}"))?;
+    let dir = data_dir(&app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    thunderlook_sync::account::remove(&conn, &dir, source)?;
+    thunderlook_sync::account::summaries(&conn)
+}
+
+/// « Envoyer » : le message va dans la Boîte d'envoi et un passage d'envoi démarre aussitôt.
+#[tauri::command(async)]
+fn send_draft(app: AppHandle, store: State<Store>, draft: Draft) -> Result<String, String> {
+    let id = with_mailbox(&app, &store, |mb| mb.send_draft(&draft))?;
+    start_sync(&app);
+    Ok(id)
+}
+
+/// F9 : envoyer et recevoir sur tous les comptes.
+#[tauri::command]
+fn sync_now(app: AppHandle) {
+    start_sync(&app);
+}
+
 /// Prépare un nouveau message, une réponse, une réponse à tous ou un transfert (J5).
 #[tauri::command(async)]
 fn compose(app: AppHandle, store: State<Store>, kind: ComposeKind, source_id: Option<String>) -> Result<Draft, String> {
@@ -359,6 +502,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(Store(Mutex::new(None)))
         .manage(Indexer::default())
+        .manage(Syncer::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -400,6 +544,11 @@ pub fn run() {
             undo,
             categories,
             rules,
+            accounts,
+            add_account,
+            remove_account,
+            send_draft,
+            sync_now,
             set_rule_active,
             import_rwz,
             run_rules,

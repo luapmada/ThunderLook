@@ -94,6 +94,15 @@ pub fn compose(ui: Ui, kind: ComposeKind) {
     });
 }
 
+/// F9 : envoyer et recevoir sur tous les comptes (le résultat arrive par l'événement « sync »).
+pub fn sync_now(ui: Ui) {
+    spawn_local(async move {
+        if let Err(e) = ipc::sync_now().await {
+            ui.error.set(Some(e));
+        }
+    });
+}
+
 /// Nouveau message d'après un modèle `.oft`.
 pub fn compose_from_template(ui: Ui) {
     if ui.compose.with_untracked(Option::is_some) && ui.compose_dirty.get_untracked() {

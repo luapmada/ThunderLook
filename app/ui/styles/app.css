@@ -1406,3 +1406,12 @@ input {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+
+/* Paramètres du compte (J7). */
+.acc-item {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  min-height: 44px;
+}

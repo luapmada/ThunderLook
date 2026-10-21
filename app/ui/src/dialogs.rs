@@ -133,7 +133,7 @@ pub fn Dialogs() -> impl IntoView {
                     folder_id: real_folder(&ui.folder.get_untracked()),
                 },
             ),
-            Dialog::Rules { .. } | Dialog::QuickSteps { .. } => {}
+            Dialog::Rules { .. } | Dialog::QuickSteps { .. } | Dialog::Accounts => {}
             Dialog::PickFolder { purpose } => {
                 let list = candidates();
                 let Some((id, ..)) = list.get(picked.get_untracked()).cloned() else { return };
@@ -195,12 +195,12 @@ pub fn Dialogs() -> impl IntoView {
         Some(Dialog::NewCategory) => "Nouvelle catégorie",
         Some(Dialog::SaveSearch) => "Enregistrer la recherche",
         Some(Dialog::ViewSettings) => "Réglages de l'affichage",
-        Some(Dialog::Rules { .. } | Dialog::QuickSteps { .. }) | None => "",
+        Some(Dialog::Rules { .. } | Dialog::QuickSteps { .. } | Dialog::Accounts) | None => "",
     };
 
     view! {
         // « Règles et alertes » et les actions rapides ont leur propre boîte (`rules.rs`, `quicksteps.rs`).
-        <Show when=move || ui.dialog.get().is_some_and(|d| !matches!(d, Dialog::Rules { .. } | Dialog::QuickSteps { .. }))>
+        <Show when=move || ui.dialog.get().is_some_and(|d| !matches!(d, Dialog::Rules { .. } | Dialog::QuickSteps { .. } | Dialog::Accounts))>
             <div class="modal-backdrop" on:pointerdown=move |ev| {
                 if ev.target() == ev.current_target() {
                     close();
@@ -325,7 +325,7 @@ pub fn Dialogs() -> impl IntoView {
                             </div>
                         }
                         .into_any(),
-                        Some(Dialog::Rules { .. } | Dialog::QuickSteps { .. }) | None => ().into_any(),
+                        Some(Dialog::Rules { .. } | Dialog::QuickSteps { .. } | Dialog::Accounts) | None => ().into_any(),
                     }}
                     <div class="dialog-buttons">
                         <button class="btn primary" on:click=move |_| submit()>"OK"</button>

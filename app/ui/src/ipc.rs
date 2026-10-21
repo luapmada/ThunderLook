@@ -3,7 +3,7 @@
 use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
-    MessageSummary, MessageView, OpResult, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
+    AccountSummary, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
     quicksteps::QuickStep,
     settings::Settings,
 };
@@ -228,6 +228,60 @@ struct StepsArg<'a> {
 
 pub async fn save_quick_steps(steps: &[QuickStep]) -> Result<(), String> {
     call("save_quick_steps", &StepsArg { steps }).await
+}
+
+pub async fn accounts() -> Result<Vec<AccountSummary>, String> {
+    call("accounts", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddAccountArg<'a> {
+    address: &'a str,
+    name: &'a str,
+    password: &'a str,
+    imap_host: &'a str,
+    smtp_host: &'a str,
+}
+
+pub async fn add_account(address: &str, name: &str, password: &str, imap_host: &str, smtp_host: &str) -> Result<Vec<AccountSummary>, String> {
+    call("add_account", &AddAccountArg { address, name, password, imap_host, smtp_host }).await
+}
+
+pub async fn remove_account(id: &str) -> Result<Vec<AccountSummary>, String> {
+    call("remove_account", &IdArg { id }).await
+}
+
+pub async fn send_draft(draft: &Draft) -> Result<String, String> {
+    call("send_draft", &DraftArg { draft }).await
+}
+
+pub async fn sync_now() -> Result<(), String> {
+    call("sync_now", &NoArgs {}).await
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"], js_name = listen, catch)]
+    async fn tauri_listen(event: &str, handler: &Closure<dyn FnMut(JsValue)>) -> Result<JsValue, JsValue>;
+}
+
+#[derive(serde::Deserialize)]
+struct EventEnvelope {
+    payload: SyncEvent,
+}
+
+/// Suit l'événement « sync » du cœur (envoi et réception) pendant toute la vie de l'interface.
+pub fn on_sync(f: impl Fn(SyncEvent) + 'static) {
+    let handler = Closure::<dyn FnMut(JsValue)>::new(move |v: JsValue| {
+        if let Ok(e) = serde_wasm_bindgen::from_value::<EventEnvelope>(v) {
+            f(e.payload);
+        }
+    });
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = tauri_listen("sync", &handler).await;
+        handler.forget();
+    });
 }
 
 /// Mesure de performance, journalisée par le cœur si `THUNDERLOOK_PERF` est défini.

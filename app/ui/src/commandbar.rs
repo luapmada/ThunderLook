@@ -61,6 +61,9 @@ pub enum Action {
     RunRules,
     QuickStepsMenu,
     ManageQuickSteps,
+    // J7 : comptes, envoi et réception.
+    SyncNow,
+    Accounts,
 }
 
 impl Action {
@@ -127,6 +130,8 @@ fn perform(ui: Ui, action: Action) {
         }
         Action::SaveSearch => ui.dialog.set(Some(Dialog::SaveSearch)),
         Action::RunRules => ui.dialog.set(Some(Dialog::Rules { run: true })),
+        Action::SyncNow => actions::sync_now(ui),
+        Action::Accounts => ui.dialog.set(Some(Dialog::Accounts)),
         Action::ManageQuickSteps => ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false })),
         Action::CloseSearch => {
             if let Some(s) = ui.refs.search.get_untracked() {
@@ -276,7 +281,7 @@ const MAIL_HOME: &[Group] = &[
     },
     Group {
         label: "Envoyer/Recevoir",
-        cmds: &[cmd("Tout envoyer et recevoir", REFRESH, Some("F9"), false, true, true)],
+        cmds: &[wired("Tout envoyer et recevoir", REFRESH, Some("F9"), true, true, Action::SyncNow)],
     },
 ];
 
@@ -284,7 +289,7 @@ const SEND_RECEIVE: &[Group] = &[
     Group {
         label: "Envoyer et recevoir",
         cmds: &[
-            cmd("Tout envoyer et recevoir", REFRESH, Some("F9"), false, true, true),
+            wired("Tout envoyer et recevoir", REFRESH, Some("F9"), true, true, Action::SyncNow),
             cmd("Mettre à jour le dossier", REFRESH, None, false, false, false),
             cmd("Tout envoyer", SEND, None, false, true, false),
             cmd("Groupes d'envoi/réception", ROWS_3, None, true, false, false),
@@ -309,6 +314,7 @@ const SEND_RECEIVE: &[Group] = &[
         label: "Préférences",
         cmds: &[cmd("Travailler hors connexion", CLOUD_OFF, None, false, true, true)],
     },
+    Group { label: "Comptes", cmds: &[wired("Paramètres du compte", SETTINGS, None, true, true, Action::Accounts)] },
 ];
 
 const FOLDER: &[Group] = &[

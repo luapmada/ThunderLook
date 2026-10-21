@@ -1,5 +1,6 @@
 //! Interface de ThunderLook : Leptos (rendu côté client) compilé en WebAssembly, hébergé par Tauri.
 
+mod accounts;
 mod actions;
 mod app;
 mod commandbar;

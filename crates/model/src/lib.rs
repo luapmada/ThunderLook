@@ -568,6 +568,18 @@ pub struct AccountSummary {
     pub last_error: Option<String>,
 }
 
+/// État de l'envoi et de la réception (J7), émis par le cœur (événement « sync ») à chaque début et fin de passage.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncEvent {
+    pub running: bool,
+    /// Texte de la barre d'état (« Envoi et réception… », « Message envoyé », « Tous les dossiers sont à jour »).
+    pub message: String,
+    pub sent: u32,
+    pub received: u32,
+    pub error: Option<String>,
+}
+
 /// Initiales pour la pastille de l'expéditeur.
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphanumeric()));
