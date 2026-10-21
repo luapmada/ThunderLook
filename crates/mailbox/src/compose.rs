@@ -782,6 +782,7 @@ impl Mailbox {
                 (id, rel)
             }
         };
+        crate::remote::queue(&tx, crate::remote::Change::Rewritten { id })?;
         let mut position = 0i64;
         for (cid, mime, bytes) in &images {
             tx.execute(

@@ -785,6 +785,7 @@ impl Mailbox {
                         params![id, text, due],
                     )
                     .map_err(err)?;
+                    crate::remote::queue(&tx, crate::remote::Change::Flagged { id: *id, on: true })?;
                 }
             }
             tx.commit().map_err(err)

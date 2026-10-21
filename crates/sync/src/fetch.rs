@@ -23,6 +23,8 @@ pub struct SyncReport {
     pub updated_flags: u32,
     pub removed: u32,
     pub elapsed_ms: u32,
+    /// Opération locale qui n'a pas pu être reportée sur le serveur (gardée pour la relève suivante).
+    pub push_error: Option<String>,
 }
 
 fn now_ms() -> i64 {

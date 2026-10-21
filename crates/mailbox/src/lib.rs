@@ -8,6 +8,7 @@ mod index;
 mod message;
 mod oft;
 mod ops;
+mod remote;
 mod rule_run;
 mod rules;
 mod search;

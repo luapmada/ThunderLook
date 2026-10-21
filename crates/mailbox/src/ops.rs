@@ -4,6 +4,7 @@
 //! Chaque opération tient dans une transaction. Les fichiers `.eml` ne sont effacés qu'après validation,
 //! et seulement pour une suppression définitive, qui n'est pas annulable.
 
+use crate::remote::{self, Change};
 use std::{collections::HashMap, fs};
 
 use chrono::{Datelike, Duration, Local, NaiveDate, TimeZone};
@@ -181,6 +182,9 @@ fn check_name(conn: &Connection, parent: i64, name: &str, except: Option<i64>) -
 fn purge(tx: &Transaction, ids: &[i64]) -> Result<Vec<String>> {
     let mut paths = Vec::with_capacity(ids.len());
     for chunk in ids.chunks(500) {
+        for &id in chunk {
+            remote::queue(tx, Change::Deleted { id })?;
+        }
         let marks = vec!["?"; chunk.len()].join(",");
         let mut stmt = tx.prepare(&format!("SELECT eml_path FROM message WHERE id IN ({marks})")).map_err(err)?;
         let rows = stmt.query_map(params_from_iter(chunk), |r| r.get::<_, String>(0)).map_err(err)?;
@@ -311,6 +315,7 @@ impl Mailbox {
                 if was != read {
                     prev.push((id, was));
                     set.execute(params![id, read, MSGFLAG_READ]).map_err(err)?;
+                    remote::queue(&tx, Change::Seen { id, on: read })?;
                 }
             }
         }
@@ -353,6 +358,7 @@ impl Mailbox {
                 .map_err(err)?;
             for r in rows {
                 set.execute(params![r.id, r.status, r.request, r.due, r.completed]).map_err(err)?;
+                remote::queue(&tx, Change::Flagged { id: r.id, on: r.status == 2 })?;
             }
         }
         tx.commit().map_err(err)
@@ -451,9 +457,12 @@ impl Mailbox {
     fn write_folders(&mut self, moves: &[(i64, i64)]) -> Result<()> {
         let tx = self.conn.transaction().map_err(err)?;
         {
+            let mut get = tx.prepare_cached("SELECT folder_id FROM message WHERE id = ?1").map_err(err)?;
             let mut set = tx.prepare_cached("UPDATE message SET folder_id = ?2 WHERE id = ?1").map_err(err)?;
             for (id, f) in moves {
+                let from: i64 = get.query_row([id], |r| r.get(0)).map_err(err)?;
                 set.execute([id, f]).map_err(err)?;
+                remote::queue(&tx, Change::Moved { id: *id, from, to: *f })?;
             }
         }
         tx.commit().map_err(err)
@@ -511,6 +520,7 @@ impl Mailbox {
                     params![id, new_id],
                 )
                 .map_err(err)?;
+                remote::queue(&tx, Change::Copied { source: id, copy: new_id, to: target })?;
                 created.push(new_id);
             }
             Ok(())
@@ -815,6 +825,7 @@ impl Mailbox {
                         .map_err(err)?;
                     for (id, was) in prev {
                         set.execute(params![id, was, MSGFLAG_READ]).map_err(err)?;
+                        remote::queue(&tx, Change::Seen { id, on: was })?;
                     }
                 }
                 tx.commit().map_err(err)?;

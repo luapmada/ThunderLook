@@ -6,6 +6,7 @@
 
 pub mod account;
 pub mod fetch;
+pub mod push;
 
 use std::sync::Arc;
 
@@ -95,7 +96,7 @@ pub async fn smtp_check(server: &Server, username: &str, password: &str) -> Resu
     }
 }
 
-/// Relève complète d'un compte, hors de tout runtime asynchrone (fil dédié) : ouvre sa propre connexion à la base,
+/// Report des changements locaux puis relève complète d'un compte, hors de tout runtime asynchrone (fil dédié) : ouvre sa propre connexion à la base,
 /// lit le mot de passe dans le gestionnaire d'identifiants, puis note le résultat dans `account`.
 pub fn sync_account_blocking(data_dir: &std::path::Path, source_id: i64) -> Result<fetch::SyncReport> {
     let conn = thunderlook_store::open(data_dir).map_err(|e| e.to_string())?;
@@ -104,7 +105,12 @@ pub fn sync_account_blocking(data_dir: &std::path::Path, source_id: i64) -> Resu
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
     let result = rt.block_on(async {
         let mut s = imap_login(&account.endpoints.imap, &account.endpoints.username, &password).await?;
-        let r = fetch::sync(&mut s, &conn, data_dir, &account).await;
+        // Les changements locaux d'abord : la relève ne doit pas les écraser.
+        let (_, push_error) = push::push(&mut s, &conn, data_dir, &account).await?;
+        let r = fetch::sync(&mut s, &conn, data_dir, &account).await.map(|mut r| {
+            r.push_error = push_error;
+            r
+        });
         let _ = s.logout().await;
         r
     });
