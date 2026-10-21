@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::calendar::CalendarViewKind;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BarMode {
@@ -45,6 +47,8 @@ pub struct Settings {
     pub mark_read_on_leave: bool,
     /// « Afficher en tant que conversations », pour tous les dossiers.
     pub conversations: bool,
+    /// Vue du calendrier (J9).
+    pub calendar_view: CalendarViewKind,
 }
 
 impl Default for Settings {
@@ -59,6 +63,7 @@ impl Default for Settings {
             list_height: 360,
             mark_read_on_leave: true,
             conversations: false,
+            calendar_view: CalendarViewKind::Week,
         }
     }
 }

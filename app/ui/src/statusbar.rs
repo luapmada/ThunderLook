@@ -31,6 +31,15 @@ pub fn StatusBar() -> impl IntoView {
                     }}
                 }
                 .into_any(),
+                Module::Calendar => view! {
+                    <span>{move || {
+                        ui.cal_view.with(|v| {
+                            let n: usize = v.as_ref().map(|v| v.days.iter().map(|d| d.all_day.iter().filter(|e| !e.continued).count() + d.timed.iter().filter(|t| !t.event.continued).count()).sum()).unwrap_or(0);
+                            format!("Éléments : {}", thousands(n as u32))
+                        })
+                    }}</span>
+                }
+                .into_any(),
                 other => view! { <span>{format!("{} : module prévu après le courrier", other.label())}</span> }.into_any(),
             }}
             <Show when=move || ui.module.get() == Module::Mail && ui.unread_only.get()>

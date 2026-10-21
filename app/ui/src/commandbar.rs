@@ -6,6 +6,7 @@ use icondata_core::Icon;
 use leptos::prelude::*;
 use thunderlook_model::{
     ComposeKind, FolderOp, MessageOp, SearchScope,
+    calendar::CalendarViewKind,
     settings::{BarMode, Density, ReadingPane},
 };
 
@@ -67,6 +68,9 @@ pub enum Action {
     OfflineToggle,
     AutoReply,
     JunkMenu,
+    // J9 : calendrier.
+    CalView(thunderlook_model::calendar::CalendarViewKind),
+    CalToday,
 }
 
 impl Action {
@@ -138,6 +142,8 @@ fn perform(ui: Ui, action: Action) {
         Action::AutoReply => ui.dialog.set(Some(Dialog::AutoReply)),
         Action::Accounts => ui.dialog.set(Some(Dialog::Accounts)),
         Action::ManageQuickSteps => ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false })),
+        Action::CalView(kind) => crate::calendar::set_kind(ui, kind),
+        Action::CalToday => crate::calendar::go_today(ui),
         Action::CloseSearch => {
             if let Some(s) = ui.refs.search.get_untracked() {
                 s.set_value("");
@@ -442,17 +448,17 @@ const CALENDAR_HOME: &[Group] = &[
     Group {
         label: "Atteindre",
         cmds: &[
-            cmd("Aujourd'hui", CALENDAR, None, false, true, true),
+            wired("Aujourd'hui", CALENDAR, None, true, true, Action::CalToday),
             cmd("7 prochains jours", CALENDAR_DAYS, None, false, true, false),
         ],
     },
     Group {
         label: "Organiser",
         cmds: &[
-            cmd("Jour", CALENDAR, Some("Ctrl+Alt+1"), false, true, false),
-            cmd("Semaine de travail", CALENDAR_DAYS, Some("Ctrl+Alt+2"), false, true, false),
-            cmd("Semaine", CALENDAR_DAYS, Some("Ctrl+Alt+3"), false, true, false),
-            cmd("Mois", CALENDAR, Some("Ctrl+Alt+4"), false, true, false),
+            wired("Jour", CALENDAR, Some("Ctrl+Alt+1"), true, true, Action::CalView(CalendarViewKind::Day)),
+            wired("Semaine de travail", CALENDAR_DAYS, Some("Ctrl+Alt+2"), true, true, Action::CalView(CalendarViewKind::WorkWeek)),
+            wired("Semaine", CALENDAR_DAYS, Some("Ctrl+Alt+3"), true, true, Action::CalView(CalendarViewKind::Week)),
+            wired("Mois", CALENDAR, Some("Ctrl+Alt+4"), true, true, Action::CalView(CalendarViewKind::Month)),
         ],
     },
 ];

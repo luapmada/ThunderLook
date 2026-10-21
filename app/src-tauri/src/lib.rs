@@ -22,6 +22,7 @@ use thunderlook_model::{
     MessageOp, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
     SortField, format,
     quicksteps::{QuickStep, default_quick_steps},
+    calendar::{CalendarQuery, CalendarView},
     settings::Settings,
 };
 
@@ -694,6 +695,52 @@ fn save_quick_steps(app: AppHandle, steps: Vec<QuickStep>) -> Result<(), String>
     fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
+/// Calendrier (J9, option A : lecture seule) : rendez-vous lus une fois puis gardés, jusqu'à un rechargement.
+#[derive(Default)]
+struct CalendarCache(Mutex<Option<thunderlook_calendar::Calendar>>);
+
+/// Calendriers affichés : `calendar.json` (identifiants `c<dossier>`) ; absent = calendrier principal seul.
+fn shown_calendars(app: &AppHandle) -> Option<Vec<String>> {
+    let path = settings_path(app).ok()?.with_file_name("calendar.json");
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+#[tauri::command(async)]
+fn calendar_view(app: AppHandle, cache: State<CalendarCache>, query: CalendarQuery) -> Result<CalendarView, String> {
+    let dir = data_dir(&app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    let mut calendars = thunderlook_calendar::view::calendars(&conn)?;
+    let shown = shown_calendars(&app).unwrap_or_else(|| thunderlook_calendar::view::default_shown(&calendars));
+    calendars.iter_mut().for_each(|c| c.shown = shown.contains(&c.id));
+    let mut guard = cache.0.lock().map_err(|_| "verrou du calendrier empoisonné".to_string())?;
+    if guard.is_none() {
+        *guard = Some(thunderlook_calendar::load(&conn)?);
+    }
+    let cal = guard.as_ref().unwrap();
+    let mut view = thunderlook_calendar::view::build(cal, calendars, &query, thunderlook_calendar::view::local_now(now_ms()));
+    view.source_note = thunderlook_calendar::view::source_note(&conn, &view.calendars)?;
+    Ok(view)
+}
+
+#[tauri::command]
+fn set_calendar_shown(app: AppHandle, id: String, shown: bool) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    let list = thunderlook_calendar::view::calendars(&conn)?;
+    let mut current = shown_calendars(&app).unwrap_or_else(|| thunderlook_calendar::view::default_shown(&list));
+    current.retain(|c| c != &id && list.iter().any(|l| &l.id == c));
+    if shown {
+        current.push(id);
+    }
+    let path = settings_path(&app)?.with_file_name("calendar.json");
+    if let Some(d) = path.parent() {
+        fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string(&current).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
 /// Mesure envoyée par l'interface, ajoutée à `perf.log` si `THUNDERLOOK_PERF` est défini.
 #[tauri::command]
 fn perf_mark(app: AppHandle, label: String, ms: f64) {
@@ -718,6 +765,7 @@ pub fn run() {
         .manage(Store(Mutex::new(None)))
         .manage(Indexer::default())
         .manage(Syncer::default())
+        .manage(CalendarCache::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -779,7 +827,9 @@ pub fn run() {
             save_settings,
             load_quick_steps,
             save_quick_steps,
-            perf_mark
+            perf_mark,
+            calendar_view,
+            set_calendar_shown
         ])
         .run(tauri::generate_context!())
         .expect("échec du démarrage de ThunderLook");

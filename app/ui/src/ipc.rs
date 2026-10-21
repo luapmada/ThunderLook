@@ -5,6 +5,7 @@ use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
     AccountSummary, AutoReply, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
     quicksteps::QuickStep,
+    calendar::{CalendarQuery, CalendarView},
     settings::Settings,
 };
 use wasm_bindgen::prelude::*;
@@ -127,6 +128,25 @@ pub async fn index_status() -> Result<IndexStatus, String> {
 
 pub async fn undo() -> Result<Option<String>, String> {
     call("undo", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct CalendarArg<'a> {
+    query: &'a CalendarQuery,
+}
+
+pub async fn calendar_view(query: &CalendarQuery) -> Result<CalendarView, String> {
+    call("calendar_view", &CalendarArg { query }).await
+}
+
+#[derive(Serialize)]
+struct ShownArg<'a> {
+    id: &'a str,
+    shown: bool,
+}
+
+pub async fn set_calendar_shown(id: &str, shown: bool) -> Result<(), String> {
+    call("set_calendar_shown", &ShownArg { id, shown }).await
 }
 
 pub async fn categories() -> Result<Vec<CategoryInfo>, String> {

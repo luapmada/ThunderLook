@@ -15,6 +15,7 @@ use crate::{
     compose::ComposePane,
     accounts::AccountsDialog,
     autoreply::AutoReplyDialog,
+    calendar::{self, CalendarPane},
     dialogs::Dialogs,
     quicksteps::QuickStepsDialog,
     rules::RulesDialog,
@@ -144,6 +145,10 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
             return;
         }
     }
+    if ui.module.get_untracked() == Module::Calendar && calendar::key(ui, ev) {
+        ev.prevent_default();
+        return;
+    }
     let module = match (ctrl, alt, key.as_str()) {
         (true, false, "1") => Some(Module::Mail),
         (true, false, "2") => Some(Module::Calendar),
@@ -204,6 +209,7 @@ pub fn App() -> impl IntoView {
     provide_context(requested);
 
     actions::load_categories(ui);
+    calendar::watch(ui);
 
     // Envoi et réception (J7) : barre d'état, puis liste et arborescence rafraîchies à la fin d'un passage.
     ipc::on_sync(move |e| {
@@ -512,6 +518,7 @@ fn Main() -> impl IntoView {
                 }
                 .into_any(),
                 (Module::Mail, ReadingPane::Off) => view! { <MessageList /> }.into_any(),
+                (Module::Calendar, _) => view! { <CalendarPane /> }.into_any(),
                 (other, _) => view! {
                     <section class="pane placeholder" aria-label=other.label()>
                         <div>

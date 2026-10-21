@@ -7,4 +7,5 @@ description = "Calendrier de ThunderLook (J9) : rendez-vous lus depuis les sacs 
 
 [dependencies]
 thunderlook-store = { path = "../store" }
+thunderlook-model = { path = "../model" }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }

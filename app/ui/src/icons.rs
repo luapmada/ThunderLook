@@ -6,7 +6,7 @@ use leptos::prelude::*;
 pub use icondata_lu::{
     LuArchive as ARCHIVE, LuArrowDown as ARROW_DOWN, LuArrowDownAZ as SORT_AZ, LuArrowUp as ARROW_UP, LuBan as BAN, LuBold as BOLD, LuItalic as ITALIC, LuList as LIST, LuListOrdered as LIST_ORDERED, LuBookUser as BOOK_USER,
     LuCalendar as CALENDAR, LuCalendarDays as CALENDAR_DAYS, LuCalendarPlus as CALENDAR_PLUS, LuCheck as CHECK,
-    LuCheckCheck as CHECK_CHECK, LuChevronDown as CHEVRON_DOWN,
+    LuCheckCheck as CHECK_CHECK, LuChevronDown as CHEVRON_DOWN, LuChevronLeft as CHEVRON_LEFT,
     LuChevronRight as CHEVRON_RIGHT, LuCircleAlert as CIRCLE_ALERT, LuCircleHelp as HELP, LuClock as CLOCK, LuCloudOff as CLOUD_OFF,
     LuDownload as DOWNLOAD, LuEllipsis as ELLIPSIS, LuEraser as ERASER, LuEye as EYE, LuFile as FILE, LuFlag as FLAG,
     LuFolderInput as FOLDER_INPUT, LuFolderPlus as FOLDER_PLUS, LuFolderSearch as FOLDER_SEARCH,

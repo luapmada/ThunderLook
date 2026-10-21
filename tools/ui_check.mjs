@@ -398,6 +398,84 @@ CHECKS.push(['J7 : envoi réel puis réception sur le compte de test', async (lo
   }
 }]);
 
+CHECKS.push(['J9 : calendrier (vues, navigateur, superposition, détail), comparé aux occurrences d\'Outlook', async (log) => {
+  // Le choix des calendriers affichés (calendar.json) et le type de vue sont remis tels quels à la fin.
+  const file = path.join(process.env.APPDATA, 'fr.local.thunderlook', 'calendar.json');
+  const saved = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  const press = (k, mods = {}) => js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, ctrlKey: ${!!mods.ctrl}, altKey: ${!!mods.alt}, bubbles: true }))`);
+  const title = () => js(`document.querySelector('.cal-title')?.textContent ?? ''`);
+  const KINDS = ['Jour', 'Semaine de travail', 'Semaine', 'Mois'];
+  const kind = (label) => press(String(KINDS.indexOf(label) + 1), { ctrl: true, alt: true });
+  const kindIs = (label) => `document.querySelector('.cal-kind[aria-checked=true]')?.textContent === ${JSON.stringify(label)}`;
+  /** Navigateur de dates : mois précédent jusqu'à `caption`, puis clic sur le jour. */
+  const goTo = async (caption, date) => {
+    for (let i = 0; i < 80 && (await js(`document.querySelector('.nav-title')?.textContent`)) !== caption; i++) {
+      const before = await js(`document.querySelector('.nav-title')?.textContent`);
+      await js(`document.querySelector('button[aria-label="Mois précédent"]').click()`);
+      await until(`document.querySelector('.nav-title')?.textContent !== ${JSON.stringify(before)}`, `mois précédent (${before})`);
+    }
+    await js(`document.querySelector('.nav-day[aria-label="${date}"]').click()`);
+    await until(`document.querySelector('.nav-day[aria-label="${date}"]')?.classList.contains('selected')`, `jour ${date} affiché`);
+  };
+  let initialKind;
+  try {
+    await press('2', { ctrl: true });
+    await until(`!!document.querySelector('.pane.calendar') && (document.querySelector('.cal-title')?.textContent ?? '') !== ''`, 'module Calendrier (Ctrl+2)');
+    initialKind = await js(`document.querySelector('.cal-kind[aria-checked=true]')?.textContent`);
+    await kind('Semaine');
+    await until(`${kindIs('Semaine')} && document.querySelectorAll('.cal-dayhead').length === 7`, 'vue Semaine (Ctrl+Alt+3)');
+    const today = await js(`!!document.querySelector('.nav-day.today') && !!document.querySelector('.cal-col.today .cal-now')`);
+    if (!today) throw new Error('aujourd\'hui sans repère (navigateur ou ligne de l\'heure)');
+    log(`Ctrl+2 puis Ctrl+Alt+3 : « ${await title()} », aujourd'hui et la ligne de l'heure marqués`);
+    const note = await js(`document.querySelector('.cal-note')?.textContent ?? ''`);
+    log(`mention : ${note}`);
+
+    // Semaine du 6 février 2023, calendrier principal : bandeau « Journée » d'après les occurrences d'Outlook.
+    await goTo('février 2023', '2023-02-08');
+    await until(`document.querySelector('.cal-title')?.textContent === '6 – 12 février 2023'`, 'titre de la semaine du 6 février 2023');
+    const band = await js(`[...document.querySelectorAll('.cal-allday-cell')].map(c => c.querySelectorAll('.cal-ev').length)`);
+    if (band.join() !== '0,0,2,1,3,0,0') throw new Error(`bandeau Journée : ${band.join()} ; attendu 0,0,2,1,3,0,0 (Outlook)`);
+    const bilan = await js(`[...document.querySelectorAll('.cal-allday-cell')].filter(c => c.textContent.includes('BILAN ADI')).length`);
+    if (bilan !== 3) throw new Error(`« BILAN ADI… » sur ${bilan} jours, attendu 3`);
+    log('semaine du 6 février 2023 : bandeau 0,0,2,1,3,0,0 comme Outlook ; « BILAN ADI… » sur 3 jours');
+
+    // Jour du 6 mars 2023 avec « Calendar Annexe » superposé : trois rendez-vous aux heures d'Outlook.
+    await kind('Jour');
+    await until(kindIs('Jour'), 'vue Jour (Ctrl+Alt+1)');
+    await js(`document.querySelector('.nav-day[aria-label="2023-03-06"]').click()`);
+    await until(`document.querySelector('.cal-title')?.textContent === 'lundi 6 mars 2023'`, 'jour du 6 mars 2023');
+    const annexe = `[...document.querySelectorAll('.cal-item')].find(l => l.querySelector('.name')?.textContent === 'Calendar Annexe')?.querySelector('input')`;
+    const wasOn = await js(`${annexe}?.checked`);
+    if (wasOn === undefined) throw new Error('calendrier « Calendar Annexe » absent de la liste');
+    if (!wasOn) await js(`${annexe}.click()`);
+    await until(`document.querySelectorAll('.cal-timed').length >= 3`, 'rendez-vous de Calendar Annexe superposés');
+    const timed = await js(`[...document.querySelectorAll('.cal-timed')].map(t => ({ top: parseFloat(t.style.top), s: t.querySelector('.cal-subject').textContent }))`);
+    const want = [[14, 'AV martine magné'], [15.5, 'Gendarmerie'], [16.5, 'ADI retour dieumegard ?']];
+    for (const [h, s] of want) {
+      if (!timed.some((t) => t.s === s && Math.abs(t.top - h * 44) < 0.5)) throw new Error(`« ${s} » absent ou mal placé (${JSON.stringify(timed)})`);
+    }
+    log(`6 mars 2023 avec Calendar Annexe : ${want.map(([h, s]) => `${s} à ${h} h`).join(', ')}`);
+    await js(`[...document.querySelectorAll('.cal-timed .cal-ev')].find(b => b.textContent.includes('Gendarmerie')).click()`);
+    await until(`document.querySelector('.cal-details h3')?.textContent === 'Gendarmerie'`, 'détail du rendez-vous');
+    const when = await js(`document.querySelector('.cal-details dd')?.textContent`);
+    if (!when.startsWith('15:30 – 16:30')) throw new Error(`détail : « ${when} »`);
+    log(`clic : détail « Gendarmerie », ${when}`);
+    await key('Escape');
+    if (!wasOn) await js(`${annexe}.click()`);
+
+    await kind('Mois');
+    await until(`${kindIs('Mois')} && document.querySelectorAll('.cal-cell').length === 42`, 'vue Mois (Ctrl+Alt+4)');
+    log(`Ctrl+Alt+4 : « ${await title()} », 42 cases`);
+  } finally {
+    if (initialKind) await kind(initialKind);
+    await sleep(300);
+    if (saved) fs.writeFileSync(file, saved);
+    else if (fs.existsSync(file)) fs.unlinkSync(file);
+    await press('1', { ctrl: true });
+    await sleep(300);
+  }
+}]);
+
 // --- Exécution ------------------------------------------------------------------------------------
 const app = spawn(exe, [], {
   env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
@@ -413,7 +491,8 @@ try {
   initialConversations = await settingsOn();
   // Les vérifications déplacent la sélection : sans cela, des messages réels seraient marqués lus.
   initialMarkRead = await setMarkRead(false);
-  for (const [name, run] of CHECKS) {
+  // UI_ONLY=J9 : seulement les vérifications dont le nom commence ainsi.
+  for (const [name, run] of CHECKS.filter(([n]) => !process.env.UI_ONLY || n.startsWith(process.env.UI_ONLY))) {
     const lines = [];
     try {
       await run((l) => lines.push(l));

@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use leptos::{html, prelude::*};
 use thunderlook_model::{
-    CategoryInfo, Draft, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, quicksteps::QuickStep, settings::Settings,
+    CategoryInfo, Draft, calendar::{CalendarEvent, CalendarView}, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, quicksteps::QuickStep, settings::Settings,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,6 +194,11 @@ pub struct Ui {
     pub quick_steps: RwSignal<Vec<QuickStep>>,
     /// « Travailler hors connexion » (J7).
     pub offline: RwSignal<bool>,
+    /// Calendrier (J9) : vue reçue du cœur, jour de référence (vide = aujourd'hui), rechargement, élément ouvert.
+    pub cal_view: RwSignal<Option<CalendarView>>,
+    pub cal_anchor: RwSignal<String>,
+    pub cal_epoch: RwSignal<u64>,
+    pub cal_selected: RwSignal<Option<CalendarEvent>>,
     pub refs: Refs,
 }
 
@@ -237,6 +242,10 @@ impl Ui {
             compose_epoch: RwSignal::new(0),
             quick_steps: RwSignal::new(Vec::new()),
             offline: RwSignal::new(false),
+            cal_view: RwSignal::new(None),
+            cal_anchor: RwSignal::new(String::new()),
+            cal_epoch: RwSignal::new(0),
+            cal_selected: RwSignal::new(None),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),

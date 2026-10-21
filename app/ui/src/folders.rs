@@ -7,6 +7,7 @@ use thunderlook_model::{Folder, FolderOp, FolderRole, FolderTree, MessageOp};
 
 use crate::{
     actions::{self, real_folder},
+    calendar::CalendarNav,
     icons::*,
     list::DRAG_MESSAGES,
     menus,
@@ -204,7 +205,10 @@ pub fn FolderPane() -> impl IntoView {
                     {move || if collapsed_pane() { view! { <Svg icon=PANEL_LEFT_OPEN /> } } else { view! { <Svg icon=PANEL_LEFT_CLOSE /> } }}
                 </button>
             </div>
-            <Show when=move || !collapsed_pane()>
+            <Show when=move || !collapsed_pane() && ui.module.get() == Module::Calendar>
+                <CalendarNav />
+            </Show>
+            <Show when=move || !collapsed_pane() && ui.module.get() != Module::Calendar>
                 <div
                     class="tree"
                     role="tree"

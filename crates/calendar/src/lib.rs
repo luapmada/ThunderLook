@@ -6,6 +6,7 @@ pub mod expand;
 pub mod named;
 pub mod recur;
 pub mod tz;
+pub mod view;
 
 use std::collections::HashMap;
 

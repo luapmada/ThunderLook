@@ -4,6 +4,7 @@ mod accounts;
 mod actions;
 mod app;
 mod autoreply;
+mod calendar;
 mod commandbar;
 mod compose;
 mod dialogs;

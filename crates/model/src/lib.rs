@@ -3,6 +3,7 @@
 //! Le cœur calcule tout ce qui dépend de l'heure locale (groupes de dates, libellés) ;
 //! l'interface ne fait qu'afficher.
 
+pub mod calendar;
 pub mod format;
 pub mod quicksteps;
 pub mod settings;
