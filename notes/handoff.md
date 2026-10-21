@@ -1,10 +1,11 @@
-# Passation — état au 2026-10-21, 21 h 30
+# Passation — état au 2026-10-21, 21 h 40
 
 ## À reprendre en premier
-1. **Outlook n'affiche aucun sous-dossier IMAP** — diagnostic du 21/10, 21 h 30 : les trois comptes IMAP sont touchés, pas seulement paul@ (electromagnetisme : Boîte de réception et Boîte d'envoi seulement).
-   - Cause : chez Hostinger tous les dossiers sont sous `INBOX.` (séparateur `.`) et `INBOX` n'est pas abonné (`subscriptions.rs`), alors que le « chemin du dossier racine » des comptes Outlook est vide.
-   - Correctif (Plesk, greatmail, msoutlook.info) : Fichier › Paramètres du compte › Modifier › Paramètres supplémentaires › Options avancées › Chemin du dossier racine = `INBOX`, pour chacun des trois comptes. À faire par Paul, dans Outlook. Ce réglage n'est pas une valeur de registre du compte : absent d'OLMAPI32.DLL, qui ne connaît que `IMAP Folder Path`, `IMAP Use LSUB`, `IMAP Full List`… (vérifié).
-   - Puis vérifier par COM que Envoyés, Indésirables, Corbeille et les dossiers des règles apparaissent.
+1. ~~Outlook n'affiche aucun sous-dossier IMAP~~ — **réglé le 21/10 à 21 h 35.**
+   - Vraie cause : la valeur de registre `IMAP Folder Path` du compte *est* le « chemin d'accès au dossier racine » (onglet Options avancées), et elle contenait le chemin d'un .ost (`A:\Fichiers Outlook\<compte>.ost`) pour les trois comptes. Les OST réellement utilisés sont dans `%LOCALAPPDATA%\Microsoft\Outlook` ; ceux de `A:\Fichiers Outlook` datent du 13/07 et ne servent plus.
+   - Correctif : racine = `INBOX` sur les trois comptes, via le panneau Courrier (MLCFG32.CPL) piloté par messages Win32 et UI Automation (scripts dans `$CLAUDE_JOB_DIR/tmp` : `uia.ps1`, `set_root.ps1`). Vérifié par COM : Sent, Drafts, Junk, Trash et les dossiers des règles apparaissent, avec les mêmes nombres que le serveur.
+   - Lancer Outlook : `explorer.exe "C:\Program Files\Microsoft Officeoot\Office16\OUTLOOK.EXE"`. Lancé par `Start-Process` ou par COM (`-Embedding`) depuis la session, il reste figé sans fenêtre. Ne lire par COM qu'un Outlook déjà ouvert, dans un `Start-Job` avec délai.
+   - Pendant le réglage, une frappe clavier est arrivée dans la boîte de dialogue au premier plan (« rrent a charger ? ») : relire chaque champ avant OK.
 2. **Bogue ThunderLook — point dans un nom de dossier** : `[electromagnetisme.fr]` a créé sur le serveur `INBOX.[electromagnetisme` (non abonné) avec `fr]` dessous, sur paul@ et electromagnetisme. Le nom local doit être converti (remplacer ou refuser le séparateur IMAP) avant le mkdir. À corriger, puis faire le ménage sur le serveur.
 3. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : Paul doit le supprimer (garde-fou : suppression refusée à l'agent).
 4. **J9 Calendrier, option A** (Outlook fait foi, ThunderLook en lecture seule) : pas commencé. Plan : `notes/j9-plan.md`.
