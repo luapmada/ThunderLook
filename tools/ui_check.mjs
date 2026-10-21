@@ -306,6 +306,87 @@ CHECKS.push(['J6 : actions rapides (galerie, première utilisation, éditeur, ex
   }
 }]);
 
+// Critère du J7 : envoi réel puis réception, sur le compte de test uniquement (data/test-account.json, non versionné).
+// Le compte est ajouté s'il manque, puis retiré s'il a été ajouté ici ; les deux messages de test sont supprimés.
+CHECKS.push(['J7 : envoi réel puis réception sur le compte de test', async (log) => {
+  const accountFile = path.join(root, 'data', 'test-account.json');
+  if (!fs.existsSync(accountFile)) throw new Error('data/test-account.json absent : compte de test non configuré');
+  const acc = JSON.parse(fs.readFileSync(accountFile, 'utf8'));
+  const section = `[...document.querySelectorAll('.tree-section, [role=treeitem]')].find(e => e.textContent.includes(${JSON.stringify(acc.address)}))`;
+  const fill = (label, value) => js(`(() => { const i = document.querySelector('.dialog input[aria-label=${JSON.stringify(label)}]'); i.value = ${JSON.stringify(value)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const click = (selector, text) => js(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim().startsWith(${JSON.stringify(text)})).click()`);
+  let added = false;
+  if (!(await js(`!!${section}`))) {
+    await clickTab('Envoyer/Recevoir');
+    await js(`document.querySelector('button[aria-label="Paramètres du compte"]').click()`);
+    await until(`!!document.querySelector('.dialog')`, 'boîte Paramètres du compte');
+    await click('.dialog button', 'Ajouter');
+    await fill('Adresse', acc.address);
+    await fill('Nom', 'ThunderLook test');
+    await fill('Mot de passe', acc.password);
+    await click('.dialog button', 'Enregistrer');
+    for (let i = 0; i < 12 && !(await js(`!!${section}`)); i++) await sleep(5000);
+    if (!(await js(`!!${section}`))) throw new Error('compte ajouté mais absent du volet des dossiers');
+    await js(`document.querySelector('.dialog')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    added = true;
+    log(`compte ${acc.address} ajouté`);
+  }
+  const subject = `ThunderLook J7 ${new Date().toISOString()}`;
+  const inbox = `[...document.querySelectorAll('.treeitem')].find(e => e.closest('[data-source]')?.textContent.includes(${JSON.stringify(acc.address)}) && /Boîte de réception/.test(e.textContent))`;
+  try {
+    // Rédaction et envoi.
+    await clickTab('Accueil');
+    await js(`document.querySelector('button[aria-label="Nouveau message"]').click()`);
+    await until(`document.querySelector('.pane.compose iframe')?.contentDocument?.designMode === 'on'`, 'volet de rédaction');
+    await js(`(() => { const f = [...document.querySelectorAll('.compose-field input')]; const set = (i, v) => { i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); };
+      set(f[0], ${JSON.stringify(acc.address)}); set(f[2], ${JSON.stringify(subject)}); })()`);
+    await js(`(() => { const d = document.querySelector('.pane.compose iframe').contentDocument; d.body.focus(); d.execCommand('insertText', false, 'Envoi réel de vérification du J7.'); })()`);
+    const t0 = Date.now();
+    await click('.compose-bar button', 'Envoyer');
+    for (let i = 0; i < 60 && !(await js(`(document.querySelector('.statusbar')?.textContent ?? '').includes('Message envoyé')`)); i++) await sleep(1000);
+    if (!(await js(`(document.querySelector('.statusbar')?.textContent ?? '').includes('Message envoyé')`))) throw new Error('pas de « Message envoyé » en 60 s');
+    log(`envoyé en ${((Date.now() - t0) / 1000).toFixed(1)} s : « ${subject} »`);
+    // Réception : F9, puis le message apparaît dans la Boîte de réception du compte.
+    await js(`document.querySelector('[role=listbox]').focus()`);
+    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120 });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120 });
+    await js(`${inbox}.click()`);
+    let found = false;
+    for (let i = 0; i < 45 && !found; i++) {
+      await sleep(2000);
+      found = await js(`[...document.querySelectorAll('.msg')].some(e => (e.getAttribute('aria-label') ?? '').includes(${JSON.stringify(subject)}))`);
+      if (!found && i % 5 === 4) await js(`${inbox}.click()`);
+    }
+    if (!found) throw new Error('message envoyé non reçu en 90 s');
+    log(`reçu dans la Boîte de réception du compte ${((Date.now() - t0) / 1000).toFixed(1)} s après l'envoi`);
+  } finally {
+    // Nettoyage : les messages de test (reçu et envoyé) sont supprimés définitivement, sur le serveur aussi.
+    for (const folder of [/Boîte de réception/, /Éléments envoyés|Envoyés|Sent/]) {
+      const ok = await js(`(() => { const t = [...document.querySelectorAll('.treeitem')].find(e => e.closest('[data-source]')?.textContent.includes(${JSON.stringify(acc.address)}) && ${folder}.test(e.textContent)); if (!t) return false; t.click(); return true; })()`);
+      if (!ok) continue;
+      await sleep(1200);
+      const pos = await js(`(() => { const r = [...document.querySelectorAll('.msg')].find(e => (e.getAttribute('aria-label') ?? '').includes(${JSON.stringify(subject)})); return r ? +r.getAttribute('aria-posinset') : 0; })()`);
+      if (!pos) continue;
+      await js(`${ROW(pos)}.click(); document.querySelector('[role=listbox]').focus()`);
+      await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46, modifiers: 8 });
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46, modifiers: 8 });
+      await until(`document.querySelector('.dialog')`, 'confirmation de suppression');
+      await js(`[...document.querySelectorAll('.dialog button')].find(b => b.textContent.trim() === 'OK').click()`);
+      await sleep(800);
+    }
+    if (added) {
+      await clickTab('Envoyer/Recevoir');
+      await js(`document.querySelector('button[aria-label="Paramètres du compte"]').click()`);
+      await until(`!!document.querySelector('.dialog')`, 'boîte Paramètres du compte');
+      await js(`[...document.querySelectorAll('.dialog .rules-item')].find(e => e.textContent.includes(${JSON.stringify(acc.address)}))?.click()`);
+      await click('.dialog button', 'Supprimer');
+      await sleep(1500);
+      await js(`document.querySelector('.dialog')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+      log('compte de test retiré de ThunderLook (rien n\'est effacé sur le serveur)');
+    }
+  }
+}]);
+
 // --- Exécution ------------------------------------------------------------------------------------
 const app = spawn(exe, [], {
   env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },

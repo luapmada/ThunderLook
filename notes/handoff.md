@@ -19,6 +19,11 @@
   - règles : les actions d'envoi (transférer, répondre, copie à…) sont signalées « pas avant le J7 » dans `crates/mailbox/src/rule_run.rs` ; les règles devront aussi s'appliquer à l'arrivée des messages ;
   - actions rapides : « Au responsable », « E-mail de l'équipe », « Répondre et supprimer » ouvrent la rédaction, l'envoi reste à faire.
 
+## J7 en cours
+- Plan détaillé : `notes/j7-plan.md` (choix techniques, schéma v8, synchronisation, envoi, interface, ordre des tâches).
+- Tâche 0 faite : cas « J7 : envoi réel puis réception » dans `tools/ui_check.mjs` ; il échoue tant que le J7 n'est pas fait.
+- `ui_check` : au premier lancement après un redémarrage (cache disque froid), le cas J5 peut dépasser le délai de 5 s d'ouverture de la rédaction ; il passe au lancement suivant.
+
 ## Points ouverts hérités du J6
 - `.rwz` d'anciens PST : entre homonymes, le dossier le plus rempli est retenu (pas forcément de la même branche). Sans importance pour Paul (listes Oxalis archivées).
 - Libellés des actions rapides par défaut : d'après l'aide Microsoft, à corriger si l'Outlook 2021 de Paul diffère.
