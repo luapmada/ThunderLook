@@ -163,6 +163,8 @@ async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &
         }
         "mkdir" => {
             s.create(&p.mailbox).await.map_err(e)?;
+            // Abonnement : Outlook n'affiche en IMAP que les dossiers abonnés.
+            s.subscribe(&p.mailbox).await.map_err(e)?;
         }
         other => return Err(format!("opération « {other} » non prise en charge")),
     }

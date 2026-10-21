@@ -697,8 +697,12 @@ impl Mailbox {
             }
         }
 
+        // Sécurité : au-delà de la limite, il faut confirmer le nombre exact de déplacements vu dans un aperçu.
+        let moves = plans.values().filter(|p| p.dest.is_some()).count() as u32;
+        let needs_confirmation = req.apply && moves > thunderlook_model::RULE_MOVES_LIMIT && req.confirm_moves != Some(moves);
+        let apply = req.apply && !needs_confirmation;
         let mut errors = Vec::new();
-        if req.apply {
+        if apply {
             errors = self.apply_plans(&plans);
         }
         let entries = rules
@@ -719,7 +723,9 @@ impl Mailbox {
         Ok(RuleRunReport {
             scanned,
             changed: plans.len() as u32,
-            applied: req.apply,
+            applied: apply,
+            moves,
+            needs_confirmation,
             elapsed_ms: started.elapsed().as_millis() as u32,
             rules: entries,
             errors,

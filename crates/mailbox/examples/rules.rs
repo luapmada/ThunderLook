@@ -1,6 +1,6 @@
 //! Règles d'un dossier de données (le flux des PST est importé à l'ouverture), après import éventuel de `.rwz`.
 //! Usage : `cargo run -p thunderlook-mailbox --example rules -- <dossier de données> [fichier.rwz…]
-//!   [--run f<dossier> [--subfolders] [--apply] [--only <origine>]]`
+//!   [--run f<dossier> [--subfolders] [--apply [--confirm <nombre de déplacements>]] [--only <origine>]]`
 //! `--run` exécute toutes les règles actives (d'une seule origine avec `--only`) sur le dossier : simulation, ou
 //! application avec `--apply`.
 //! Attention : l'ouverture migre la base au schéma courant ; travailler sur une copie.
@@ -47,8 +47,12 @@ fn main() {
         filter: RunFilter::All,
         apply: args.iter().any(|a| a == "--apply"),
         only: Vec::new(),
+        confirm_moves: opt("--confirm").and_then(|n| n.parse().ok()),
     };
     let report = mb.run_rules(&req).expect("exécution");
+    if report.needs_confirmation {
+        println!("RIEN N'EST APPLIQUÉ : {} déplacements ; relancer avec --confirm {} après l'aperçu", report.moves, report.moves);
+    }
     println!(
         "
 == {} : {} messages parcourus, {} avec au moins une action, {} ms",

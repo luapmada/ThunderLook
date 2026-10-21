@@ -524,7 +524,13 @@ pub struct RuleRunRequest {
     /// Non vide : seulement ces messages (`m<id>`) du dossier (règles à l'arrivée, J7).
     #[serde(default)]
     pub only: Vec<String>,
+    /// Au-delà de `RULE_MOVES_LIMIT` déplacements, l'application exige ce nombre exact, lu dans un aperçu.
+    #[serde(default)]
+    pub confirm_moves: Option<u32>,
 }
+
+/// Nombre de déplacements (ou suppressions) au-delà duquel une exécution de règles doit être confirmée.
+pub const RULE_MOVES_LIMIT: u32 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -554,6 +560,12 @@ pub struct RuleRunReport {
     pub elapsed_ms: u32,
     pub rules: Vec<RuleRunEntry>,
     pub errors: Vec<String>,
+    /// Messages qui changeraient de dossier (déplacés ou supprimés).
+    #[serde(default)]
+    pub moves: u32,
+    /// Application refusée faute de confirmation (plus de `RULE_MOVES_LIMIT` déplacements) : rien n'a été modifié.
+    #[serde(default)]
+    pub needs_confirmation: bool,
 }
 
 /// Compte de messagerie (J7), pour la boîte « Paramètres du compte ».

@@ -258,8 +258,16 @@ fn rules_on_arrival(app: &AppHandle, source: i64, ids: &[i64]) -> Result<(), Str
             filter: thunderlook_model::RunFilter::All,
             apply: true,
             only: ids.iter().map(|id| format!("m{id}")).collect(),
+            confirm_moves: None,
         };
         let report = mb.run_rules(&req)?;
+        if report.needs_confirmation {
+            return Err(format!(
+                "{} déplacements prévus par les règles à l'arrivée, au-delà de {} : rien n'est appliqué (Règles et alertes › Exécuter les règles pour un aperçu)",
+                report.moves,
+                thunderlook_model::RULE_MOVES_LIMIT
+            ));
+        }
         report.errors.into_iter().next().map_or(Ok(()), Err)
     })
 }

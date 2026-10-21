@@ -28,6 +28,8 @@ pub fn RulesDialog() -> impl IntoView {
     let subfolders = RwSignal::new(false);
     let filter = RwSignal::new(RunFilter::All);
     let report = RwSignal::new(None::<RuleRunReport>);
+    // Nombre de déplacements confirmé après un aperçu (au-delà de la limite de sécurité).
+    let confirmed = RwSignal::new(None::<u32>);
     // Copie vers un compte : comptes proposés, et message de résultat.
     let accounts = RwSignal::new(Vec::<thunderlook_model::AccountSummary>::new());
     let copy_note = RwSignal::new(None::<String>);
@@ -133,7 +135,8 @@ pub fn RulesDialog() -> impl IntoView {
             subfolders: subfolders.get_untracked(),
             filter: filter.get_untracked(),
             apply,
-    only: Vec::new(),
+            only: Vec::new(),
+            confirm_moves: if apply { confirmed.get_untracked() } else { None },
         };
         busy.set(true);
         spawn_local(async move {
@@ -145,6 +148,7 @@ pub fn RulesDialog() -> impl IntoView {
                         actions::refresh_tree(ui);
                         actions::load_categories(ui);
                     }
+                    confirmed.set(None);
                     report.set(Some(r));
                 }
                 Err(e) => ui.error.set(Some(e)),
@@ -259,6 +263,18 @@ pub fn RulesDialog() -> impl IntoView {
 
     let report_view = move || {
         report.get().map(|r| {
+            let confirm = r.needs_confirmation.then(|| {
+                let n = r.moves;
+                view! {
+                    <p class="rules-warn" role="alert">
+                        {format!("Sécurité : {n} messages changeraient de dossier (plus de {}). Rien n'a été modifié ; vérifiez l'aperçu ci-dessous.", thunderlook_model::RULE_MOVES_LIMIT)}
+                    </p>
+                    <button class="btn primary" on:click=move |_| {
+                        confirmed.set(Some(n));
+                        execute(true);
+                    }>{format!("Confirmer : déplacer {n} messages")}</button>
+                }
+            });
             let head = format!(
                 "{} : {} élément(s) parcouru(s), {} à modifier{} — {} ms",
                 if r.applied { "Exécution" } else { "Aperçu" },
@@ -269,6 +285,7 @@ pub fn RulesDialog() -> impl IntoView {
             );
             view! {
                 <div class="rules-report" aria-live="polite">
+                    {confirm}
                     <p class="rules-report-head">{head}</p>
                     {r.errors.into_iter().map(|e| view! { <p class="rules-warn">{format!("⚠ {e}")}</p> }).collect_view()}
                     {r

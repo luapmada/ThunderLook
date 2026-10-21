@@ -36,6 +36,7 @@ fn main() -> Result<(), String> {
         filter: RunFilter::All,
         apply: true,
         only: r.new_inbox_ids.iter().map(|id| format!("m{id}")).collect(),
+        confirm_moves: None,
     })?;
     println!("règles du compte sur {} nouveau(x) message(s) : {} modifié(s), erreurs {:?}", report.scanned, report.changed, report.errors);
     for e in report.rules.iter().filter(|e| e.matched > 0) {

@@ -198,6 +198,7 @@ fn run_now_simulates_then_applies() {
         filter: RunFilter::All,
         apply: false,
         only: Vec::new(),
+        confirm_moves: None,
     };
 
     // Simulation : m1 s'arrête à « Factures » (pas compté dans « Relances ») ; m2 est exclu par l'exception.
@@ -230,4 +231,53 @@ fn run_now_simulates_then_applies() {
     // Rejouer : seule la copie se refait (comme dans Outlook).
     req.apply = false;
     assert_eq!(mb.run_rules(&req).unwrap().changed, 1);
+}
+
+/// Sécurité : au-delà de 20 déplacements, rien n'est appliqué sans la confirmation du nombre exact.
+#[test]
+fn many_moves_need_confirmation() {
+    let dir = std::env::temp_dir().join(format!("tl-rule-confirm-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let _f = Fixture { dir: dir.clone() };
+    let c = thunderlook_store::open(&dir).unwrap();
+    c.execute(
+        "INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at) VALUES (1, 'pst', 'x', 'x', 'Courrier', 0, 0)",
+        [],
+    )
+    .unwrap();
+    let root = folder(&c, None, "", "root", None);
+    let ipm = folder(&c, Some(root), "IPM", "ipm", None);
+    let inbox = folder(&c, Some(ipm), "Boîte de réception", "inbox", None);
+    let target = folder(&c, Some(inbox), "Factures", "folder", Some(&entry_id(0x8022)));
+    for k in 0..21 {
+        message(&c, &dir, inbox, "compta@a.fr", &format!("Facture {k}"), "", k);
+    }
+    let rules = stream(&[rule("Factures", &[(0xCD, vec![words("facture")]), (0x12C, vec![folder_value(&entry_id(0x8022), "Factures")])])]);
+    let mut props = Vec::new();
+    props.extend(0x6802u16.to_le_bytes());
+    props.extend(0x0102u16.to_le_bytes());
+    props.extend((rules.len() as u32).to_le_bytes());
+    props.extend(&rules);
+    c.execute("INSERT INTO fai (folder_id, nid, message_class, subject, props) VALUES (?1, 0, 'IPM.RuleOrganizer', '', ?2)", params![inbox, props])
+        .unwrap();
+    let count = |f: i64| -> i64 { c.query_row("SELECT COUNT(*) FROM message WHERE folder_id = ?1", [f], |r| r.get(0)).unwrap() };
+    let mut mb = Mailbox::open(&dir).unwrap();
+    let mut req = RuleRunRequest {
+        rule_ids: mb.rules().unwrap().iter().map(|r| r.id.clone()).collect(),
+        folder_id: format!("f{inbox}"),
+        subfolders: false,
+        filter: RunFilter::All,
+        apply: true,
+        only: Vec::new(),
+        confirm_moves: None,
+    };
+    let r = mb.run_rules(&req).unwrap();
+    assert!(r.needs_confirmation && !r.applied && r.moves == 21);
+    assert_eq!((count(inbox), count(target)), (21, 0), "rien ne bouge sans confirmation");
+    req.confirm_moves = Some(20);
+    assert!(mb.run_rules(&req).unwrap().needs_confirmation, "un autre nombre ne vaut pas confirmation");
+    req.confirm_moves = Some(21);
+    let r = mb.run_rules(&req).unwrap();
+    assert!(r.applied && !r.needs_confirmation);
+    assert_eq!((count(inbox), count(target)), (0, 21));
 }
