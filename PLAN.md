@@ -53,7 +53,7 @@ crates/
   mime/                   MAPI → MIME ([MS-OXCMAIL]), RTF, TNEF ([MS-OXTNEF]), .msg/.oft ([MS-OXMSG])
   search/                 Syntaxe de recherche (mots-clés FR), requêtes FTS5, dossiers de recherche
   rules/                  Modèle de règle, analyseur du flux / .rwz (spec communautaire), moteur côté client
-  (jalon 7) sync/         IMAP, SMTP, boîte d'envoi
+  sync/                   Comptes (J7) : relève IMAP, report des changements, envoi SMTP, IDLE, réponse automatique
 tools/                    Outils d'analyse existants (UIA, sondes PST, en-têtes)
 ```
 
@@ -80,7 +80,7 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | J4 ✅ | Recherche | Index FTS5, zone de recherche et portées, onglet Recherche, mots-clés, recherche avancée, dossiers de recherche (Non lus, Pour le suivi, personnalisés) | Moins de 300 ms sur l'archive de 217 000 éléments | M |
 | J5 ✅ | Rédaction (brouillons) | Fenêtre de rédaction HTML, réponse et transfert avec citation, signatures (import HTM), modèles `.oft`, brouillons | Réponse à tous fidèle (en-têtes, citation) enregistrée en brouillon | M |
 | J6 ✅ | Règles et actions rapides | Import du flux de règles et des `.rwz`, assistant de règles, « Exécuter maintenant », actions rapides (défauts plus éditeur) | Tes 2 `.rwz` et le flux du PST importés, et rejoués sur une copie | L |
-| J7 | IMAP + SMTP (Hostinger) | Comptes, synchronisation, envoi, boîte d'envoi, F9, hors connexion, notifications, réponse automatique locale | Envoi et réception réels sur un compte de test | L |
+| J7 ✅ | IMAP + SMTP (Hostinger) | Comptes, synchronisation, envoi, boîte d'envoi, F9, hors connexion, notifications, réponse automatique locale | Envoi et réception réels sur un compte de test | L |
 | J8 | POP3 | Si toujours utile (profil « pop-original ») | — | S |
 | J9+ | Calendrier, puis Contacts, puis Tâches | Ordre fixé par Q3. Import de 854 rendez-vous, 6 046 contacts, tâches, .ics/.vcf | Jalons détaillés plus tard | L |
 
@@ -274,6 +274,16 @@ Vérification : `verify_store` relit chaque `.eml` avec mail-parser (sujet, nomb
 - Règle écartée : « OXALIS » (carnet d'adresses), sans objet : listes anciennes, archivées.
 - **Interface** (`tools/ui_check.mjs`, CDP) : Règles et alertes (case active gardée puis rétablie, aperçu 74 à modifier en 1,5 s), actions rapides (première utilisation, création, exécution annulée par Ctrl+Z, suppression).
 - Actions rapides par défaut d'après l'aide Microsoft en français (libellés non trouvés dans les ressources d'Outlook installées) ; aucune action rapide personnalisée dans les PST.
+
+### Vérifications du J7 (2026-10-21, compte de test Hostinger `thunderlook-test@adam-declic.fr`)
+- **Critère du jalon** (`tools/ui_check.mjs`, dans l'application) : compte ajouté par « Paramètres du compte », message rédigé puis envoyé en **4,0 s**, reçu dans la Boîte de réception du compte **6,1 s** après l'envoi ; messages de test supprimés jusque sur le serveur, compte retiré.
+- **Relève** (dossier de données de test) : 5 dossiers SPECIAL-USE ; première relève de 2 messages en 1,2 s, relève sans changement en 0,8 à 1,0 s ; nouveau message, message marqué lu et message supprimé sur le serveur : chacun répercuté, `.eml` compris.
+- **Report des changements** : lu, indicateur, copie, déplacement, suppression définitive vérifiés côté serveur (relu par IMAP) ; déplacements successifs fusionnés en un seul MOVE ; copie puis suppression annulées avant d'atteindre le serveur ; nouvel UID retrouvé par Message-ID.
+- **Envoi** : Bcc retiré des en-têtes transmis (enveloppe À + Cc + Cci), `X-Unsent` retiré, copie déposée dans Éléments envoyés du serveur.
+- **IDLE** : signal 1,5 s après un envoi extérieur ; relève au démarrage et toutes les 10 min s'il existe un compte ; « Travailler hors connexion ».
+- **Réponse automatique** (seconde boîte de test `thunderlook-test2@`) : une réponse pour deux messages du même expéditeur, aucune pour le suivant ; `Auto-Submitted: auto-replied`.
+- **Sécurité** : mot de passe dans le gestionnaire d'identifiants de Windows (test : absent de tous les fichiers du dossier de données) ; TLS vérifié (rustls, racines Mozilla).
+- Schéma v8 repris d'une ébauche non validée trouvée dans l'arbre de travail (20/10, 22 h 48, autre outil), complété d'une colonne `last_error`.
 
 ## 6. Suite de l'expérience REA
 - REA sur `OUTLOOK.EXE` : uniquement pour les champs inconnus du flux de règles, au jalon J6 et seulement s'ils bloquent. Nécessite le serveur MCP (redémarrage de Claude Code).

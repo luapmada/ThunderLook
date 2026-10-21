@@ -69,7 +69,7 @@ Un nouvel import du même fichier d'origine n'est accepté qu'avec `--replace`. 
 - Éditeur : iframe `sandbox="allow-same-origin"` (aucun script), `designMode`. Le document de l'iframe se convertit avec `unchecked_into`, pas `dyn_into` (autre royaume JavaScript).
 
 ## Versions
-- **Application** : une version mineure par jalon, dans l'ordre de livraison. J0 = 0.0.0, J1 = 0.1.0, J2 = 0.2.0, J3 = 0.3.0, J4 = 0.4.0, J3b = 0.5.0, J5 = 0.6.0, J6 = 0.7.0, etc.
+- **Application** : une version mineure par jalon, dans l'ordre de livraison. J0 = 0.0.0, J1 = 0.1.0, J2 = 0.2.0, J3 = 0.3.0, J4 = 0.4.0, J3b = 0.5.0, J5 = 0.6.0, J6 = 0.7.0, J7 = 0.8.0, etc.
   - Un correctif après un jalon augmente le dernier chiffre (0.5.1).
   - La version est la même dans tous les `Cargo.toml` et dans `app/src-tauri/tauri.conf.json`.
 - **Étiquettes git** : `v0.N.0` annotée du nom du jalon, posée sur le commit de clôture du jalon et poussée avec `git push origin --tags`.

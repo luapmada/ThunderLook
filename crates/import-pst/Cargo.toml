@@ -1,6 +1,6 @@
 [package]
 name = "thunderlook-import-pst"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 publish = false
 description = "Import PST en lecture seule vers le stockage de ThunderLook (SQLite + .eml)"

@@ -5136,7 +5136,7 @@ dependencies = [
 
 [[package]]
 name = "thunderlook"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "log",
@@ -5157,7 +5157,7 @@ dependencies = [
 
 [[package]]
 name = "thunderlook-import-pst"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "mail-builder",
  "mail-parser",
@@ -5171,7 +5171,7 @@ dependencies = [
 
 [[package]]
 name = "thunderlook-mailbox"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "base64 0.22.1",
  "cfb",
@@ -5189,7 +5189,7 @@ dependencies = [
 
 [[package]]
 name = "thunderlook-mime"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "codepage",
  "compressed-rtf",
@@ -5198,7 +5198,7 @@ dependencies = [
 
 [[package]]
 name = "thunderlook-model"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "serde",
@@ -5207,7 +5207,7 @@ dependencies = [
 
 [[package]]
 name = "thunderlook-rules"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5215,7 +5215,7 @@ dependencies = [
 
 [[package]]
 name = "thunderlook-store"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "md-5",
  "rusqlite",
@@ -5223,7 +5223,7 @@ dependencies = [
 
 [[package]]
 name = "thunderlook-sync"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-imap",
  "chrono",
@@ -5245,7 +5245,7 @@ dependencies = [
 
 [[package]]
 name = "thunderlook-ui"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "console_error_panic_hook",
  "icondata_core",

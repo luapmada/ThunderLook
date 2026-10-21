@@ -65,13 +65,13 @@ Repris d'une ébauche non validée trouvée dans l'arbre de travail le 21/10 (é
 | 0 ✅ | Cas J7 de `tools/ui_check.mjs` : envoi réel puis réception (écrit d'abord, échoue tant que le J7 n'est pas fait) | Échec attendu, puis réussite |
 | 1 ✅ | Crate `sync` : connexion IMAP et SMTP (TLS rustls), exemple qui liste les dossiers du compte de test (`b06da4a`) | Exemple en ligne de commande |
 | 2 ✅ | Schéma v8, comptes, mot de passe dans le gestionnaire d'identifiants (`74bcc67`) | Tests synthétiques ; aucun secret en base (vérifié par requête) |
-| 3 | Relève initiale et incrémentale (dossiers, messages, drapeaux, suppressions) | Exemple sur le compte de test ; second passage sans changement |
-| 4 | Opérations locales rejouées sur le serveur (`pending_op`) | Lu/déplacer/supprimer dans ThunderLook, vérifiés côté serveur par `check_account.py` étendu |
-| 5 | Envoi : `outbox`, SMTP, APPEND Envoyés, bouton Envoyer | Message reçu par le compte de test |
-| 6 | Fond : IDLE, relève périodique, F9, hors connexion, notifications, règles à l'arrivée | Message envoyé depuis l'extérieur visible sans action |
-| 7 | Interface : paramètres du compte, Envoyer/Recevoir, barre d'état | `ui_check` |
-| 8 | Réponse automatique locale | Test synthétique et réel |
-| 9 | Clôture : mesures dans `PLAN.md`, version 0.8.0, étiquette, push | — |
+| 3 ✅ (ff0bada) | Relève initiale et incrémentale (dossiers, messages, drapeaux, suppressions) | Exemple sur le compte de test ; second passage sans changement |
+| 4 ✅ (a761156) | Opérations locales rejouées sur le serveur (`pending_op`) | Lu/déplacer/supprimer dans ThunderLook, vérifiés côté serveur par `check_account.py` étendu |
+| 5 ✅ (87ed46f) | Envoi : `outbox`, SMTP, APPEND Envoyés, bouton Envoyer | Message reçu par le compte de test |
+| 6 ✅ (f4ee10a) | Fond : IDLE, relève périodique, F9, hors connexion, notifications, règles à l'arrivée | Message envoyé depuis l'extérieur visible sans action |
+| 7 ✅ (2366a07) | Interface : paramètres du compte, Envoyer/Recevoir, barre d'état | `ui_check` |
+| 8 ✅ (0fa9244) | Réponse automatique locale | Test synthétique et réel |
+| 9 ✅ | Clôture : mesures dans `PLAN.md`, version 0.8.0, étiquette, push | — |
 
 ## 7. Sécurité et prudence
 
