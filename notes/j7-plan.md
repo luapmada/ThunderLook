@@ -15,15 +15,16 @@ Compte : `thunderlook-test@adam-declic.fr` (voir `notes/handoff.md`), IMAP `imap
 
 Nouvelle crate **`crates/sync`** (`thunderlook-sync`) : connexion, synchronisation, envoi, file d'envoi. Elle écrit dans la même base et le même magasin `.eml` que l'import PST, si bien que liste, recherche, conversations, règles et actions rapides fonctionnent sans changement sur un compte IMAP.
 
-## 2. Stockage (schéma v8, ajouts seulement)
+## 2. Stockage (schéma v8, ajouts seulement ; fait, `74bcc67`)
 
-- `source.kind = 'imap'` : un compte est une source, comme un PST.
-- Table **`account`** : `source_id`, nom affiché, adresse, nom de l'expéditeur, serveur IMAP (hôte, port, sécurité), serveur SMTP (idem), identifiant de connexion, intervalle de relève, dernière synchronisation, dernière erreur. **Pas de mot de passe.**
-- Mot de passe : entrée `ThunderLook/<adresse>` du gestionnaire d'identifiants de Windows.
-- `folder` : `remote_name` (nom IMAP, séparateur compris), `uidvalidity`, `uidnext` (dernier état vu). Rôles tirés des attributs SPECIAL-USE (`\Sent`, `\Drafts`, `\Junk`, `\Trash`) et de `INBOX`.
-- `message` : `remote_uid`. Un message sans `remote_uid` dans un dossier IMAP est local et reste à envoyer au serveur.
-- Table **`pending_op`** : opérations locales à rejouer sur le serveur (lu/non lu, indicateur, déplacer, copier, supprimer), avec tentatives et dernière erreur. Le J3 écrit ici quand la source est IMAP ; l'interface reste immédiate, le serveur suit.
-- Table **`outbox`** : message à envoyer, état (en attente, en cours, envoyé, échec), tentatives, erreur, date. La Boîte d'envoi du compte affiche ces messages.
+Repris d'une ébauche non validée trouvée dans l'arbre de travail le 21/10 (écrite le 20/10 à 22 h 48 par un autre outil), complétée d'une colonne `last_error`.
+- `source.kind = 'imap'` : un compte est une source, comme un PST ; dossiers de base créés avec le compte : racine, haut du compte (`ipm`, nom = adresse), Boîte d'envoi locale.
+- Table **`account`** : nom de l'expéditeur, adresse, identifiant, serveurs IMAP et SMTP (hôte, port, `tls` / `starttls`), `save_sent`, `last_sync`, `last_error`. **Pas de mot de passe.**
+- Mot de passe : gestionnaire d'identifiants de Windows, service `ThunderLook`, utilisateur = adresse en minuscules (`keyring` 3.6.3, `windows-native`).
+- `folder` : `imap_name` (nom sur le serveur ; NULL = dossier local), `imap_uidvalidity`, `imap_uidnext`, `imap_modseq` (CONDSTORE/QRESYNC). Colonnes ajoutées seulement si elles manquent.
+- `message.imap_uid` (index unique par dossier).
+- **`imap_pending`** : opérations à reporter sur le serveur, dans l'ordre (`flags`, `move`, `copy`, `expunge`, `append`, `mkdir`, `rename`, `rmdir`), argument JSON, tentatives, erreur.
+- **`outbox`** : messages à envoyer (compte, date, tentatives, erreur).
 
 ## 3. Synchronisation
 
@@ -61,9 +62,9 @@ Nouvelle crate **`crates/sync`** (`thunderlook-sync`) : connexion, synchronisati
 
 | # | Tâche | Vérification |
 |---|---|---|
-| 0 | Cas J7 de `tools/ui_check.mjs` : envoi réel puis réception (écrit d'abord, échoue tant que le J7 n'est pas fait) | Échec attendu, puis réussite |
-| 1 | Crate `sync` : connexion IMAP et SMTP (TLS rustls), exemple qui liste les dossiers du compte de test | Exemple en ligne de commande |
-| 2 | Schéma v8, comptes, mot de passe dans le gestionnaire d'identifiants | Tests synthétiques ; aucun secret en base (vérifié par requête) |
+| 0 ✅ | Cas J7 de `tools/ui_check.mjs` : envoi réel puis réception (écrit d'abord, échoue tant que le J7 n'est pas fait) | Échec attendu, puis réussite |
+| 1 ✅ | Crate `sync` : connexion IMAP et SMTP (TLS rustls), exemple qui liste les dossiers du compte de test (`b06da4a`) | Exemple en ligne de commande |
+| 2 ✅ | Schéma v8, comptes, mot de passe dans le gestionnaire d'identifiants (`74bcc67`) | Tests synthétiques ; aucun secret en base (vérifié par requête) |
 | 3 | Relève initiale et incrémentale (dossiers, messages, drapeaux, suppressions) | Exemple sur le compte de test ; second passage sans changement |
 | 4 | Opérations locales rejouées sur le serveur (`pending_op`) | Lu/déplacer/supprimer dans ThunderLook, vérifiés côté serveur par `check_account.py` étendu |
 | 5 | Envoi : `outbox`, SMTP, APPEND Envoyés, bouton Envoyer | Message reçu par le compte de test |
