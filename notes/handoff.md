@@ -1,4 +1,4 @@
-# Passation — état au 2026-10-21, 21 h 40
+# Passation — état au 2026-10-22
 
 ## À reprendre en premier
 1. ~~Outlook n'affiche aucun sous-dossier IMAP~~ — **réglé le 21/10 à 21 h 35.**
@@ -8,7 +8,7 @@
    - Pendant le réglage, une frappe clavier est arrivée dans la boîte de dialogue au premier plan (« rrent a charger ? ») : relire chaque champ avant OK.
 2. ~~Bogue du point dans un nom de dossier~~ — corrigé (`50e825a`) : le séparateur est remplacé par U+2024 / U+2215 côté serveur. paul@ : `INBOX.[electromagnetisme.fr]` renommé `INBOX.[electromagnetisme&ICQ-fr]`, cibles des 2 règles mises à jour. electromagnetisme : 7 règles copiées du PST désactivées (dont « contact@electromagnetisme.fr (1) », qui aurait déplacé tout le courrier du compte) ; restent actives AR, Mail Delivery System ×2, « a été lu le », catégories. Les 6 dossiers vides d'electromagnetisme ont été supprimés du serveur le 21/10 avec l'accord de Paul (`folder_fix.rs … delete`) ; restent INBOX, Accusés, Trash, Sent, Junk, Drafts. Sauvegarde de la base avant ces changements : `data/store/thunderlook.db.bak-2026-10-21-regles`.
 3. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : Paul doit le supprimer (garde-fou : suppression refusée à l'agent).
-4. **J9 Calendrier, option A** : étapes 1 (lecture, 4 198/4 198) et 2 (expansion, identique à Outlook sur 2023-2025) faites. Suite : étape 3, les vues. Plan et avancement : `notes/j9-plan.md`.
+4. **J9 Calendrier, option A** : étapes 1, 2, 3 (vues), 5 (`.ics`/CSV) et le rechargement depuis le PST (`tl-import --calendars`) faites ; occurrences identiques à Outlook sur 2023-2026. Reste : étape 6 (réunions iTIP/iMIP), étape 7 (clôture, v0.9.0). Détail : `notes/j9-plan.md`. Plan et avancement : `notes/j9-plan.md`.
 
 Fait : construction à jour (`aa30da2`), `ui_check` 5/5 au vert, ThunderLook relancé. Une instance sans fenêtre (20 h 35) bloquait l'exécutable : `CloseMainWindow` ne suffit pas, il faut alors `Stop-Process`.
 
@@ -61,6 +61,9 @@ Fait : construction à jour (`aa30da2`), `ui_check` 5/5 au vert, ThunderLook rel
 - Notification Windows : pas d'action au clic.
 
 ## Méthode et pièges
+- Ne jamais réécrire un fichier source avec `Set-Content -Encoding Ascii` ni `utf8` sous PowerShell 5.1 (accents perdus, BOM) : passer par Python (`io.open(..., encoding="utf-8", newline="\n")`) ou l'outil d'édition. Heredocs bash avec apostrophes : écrire le script dans `target/tl-scripts/`.
+- Calendrier : `UI_ONLY=J9 node tools/ui_check.mjs` pour le seul cas J9 ; `tools/shot.mjs` fait une capture par CDP ; référence des occurrences : `target/tl-scripts/outlook_occ.ps1` (COM, lecture seule), à comparer avec `crates/calendar/examples/occurrences`.
+- Outlook se lance par `explorer.exe` (jamais `Start-Process` ni COM depuis la session : il reste figé sans fenêtre).
 - Vérification d'interface : `cargo tauri build --no-bundle` (faire `Remove-Item Env:NO_COLOR` avant), puis `node tools/ui_check.mjs` (cas J3b, J5, J6 ×2, J7).
   - Le script pilote l'application par CDP et nettoie derrière lui (fichiers de réglages, messages de test jusque sur le serveur, compte de test).
   - Premier lancement après un redémarrage (cache froid) : le cas J5 peut dépasser le délai d'ouverture de la rédaction ; relancer.

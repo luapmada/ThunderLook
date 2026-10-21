@@ -43,7 +43,33 @@ calendriers multiples et superposition ; import/export `.ics` et CSV ; catégori
   seule) sur le PST rattaché, comparées à `examples/occurrences` (source 1) :
   2023 507 = 507, 2024 148 = 148, 2025 158 = 158 (dont 524 occurrences de séries et 58 exceptions sur les quatre ans) ;
   2026 : 403 communes, 8 écarts, tous des rendez-vous créés ou déplacés après la copie du PST (15/10/2026).
-- Prochaine : étape 3 (vues Jour, Semaine de travail, Semaine, Mois ; navigateur de dates ; superposition).
+- Étape 3 faite le 21/10 (`f900cad`) : module Calendrier. Vue calculée par le cœur (`crates/calendar/src/view.rs` :
+  périodes, titres, bandeau « Journée », colonnes des chevauchements, navigateur à deux mois, jours chargés en gras),
+  affichée par `app/ui/src/calendar.rs` ; Ctrl+Alt+1 à 4, Pg.Préc/Pg.Suiv, détail en lecture seule ; calendriers
+  affichés dans `calendar.json` (défaut : « Calendrier »). `ui_check` J9 : bandeau et rendez-vous identiques aux
+  occurrences d'Outlook (6-12 février et 6 mars 2023, Calendar Annexe superposé).
+- Rechargement (option A) fait le 21/10 (`72577ac`) : `tl-import <pst> <données> --calendars <source>` remplace les
+  éléments des dossiers de rendez-vous (retrouvés par NID) depuis une copie plus récente du PST ; source 1 rechargée
+  depuis la sauvegarde du 21/10 16 h 38 → occurrences identiques à Outlook sur 2023-2026 (410/410 en 2026).
+- Étape 4 (création, modification, suppression) : sans objet tant qu'Outlook fait foi (option A).
+- Étape 5 faite le 22/10 : `src/ics.rs` (export comme Outlook : VTIMEZONE « Romance Standard Time », RRULE, EXDATE,
+  occurrences modifiées en RECURRENCE-ID, VALARM ; import : RRULE → périodicité [MS-OXOCAL], expansion réutilisée),
+  `src/csv.rs` (format d'export d'Outlook en français, 22 colonnes), `src/imported.rs` (calendriers importés en lecture
+  seule dans `calendars/` du dossier de données, superposables, retirables). Contrôles :
+  - `examples/ics_roundtrip` : export puis relecture des 4 calendriers de la source 1, 1 217 occurrences 2023-2026,
+    0 écart ; l'export `.ics` d'Outlook (10/2023) importé redonne les 414 occurrences de Calendar Annexe qu'Outlook
+    calcule aujourd'hui (7 de plus : éléments supprimés depuis).
+  - Série incohérente chez Outlook (« CONTRÔLE TECHNIQUE VOLVO V40 » : OccurrenceCount 3, EndDate à la 2e) : Outlook
+    affiche 2 occurrences mais exporte COUNT=3 ; ThunderLook écrit UNTIL pour donner ce qu'Outlook affiche.
+  - `examples/csv_check` contre l'export CSV d'Outlook du 19/12/2023 (Calendar Annexe, 01/06/2023-01/06/2024) :
+    en-tête identique ; sur 294 lignes communes, objet, dates, journée entière, lieu, confidentialité, participants
+    identiques ; écarts restants dus aux modifications faites depuis 2023 (vérifié par COM sur « Decla CAF » et « CFE ») ;
+    description : 289/294 (mise en forme du texte RTF par Outlook). Aller-retour de l'exemple : 468 lignes, 0 écart.
+  - Disponibilité CSV : libre → 3, occupé → 2 (établi sur l'exemple) ; provisoire 1, absent 4, ailleurs 5 non vérifiés.
+  - Interface : ruban « Partager » (Ouvrir un calendrier, Enregistrer le calendrier (.ics), Exporter en CSV — période
+    affichée) ; `ui_check` J9 dépose l'export `.ics` d'Outlook dans `calendars/`, vérifie section, superposition et
+    rendez-vous du 6 mars 2023, puis le retire par ×.
+- Reste du J9 : étape 6 (réunions iTIP/iMIP) et étape 7 (clôture, version 0.9.0).
 
 ## 3. Ordre proposé
 | # | Tâche | Vérification |

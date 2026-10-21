@@ -402,6 +402,12 @@ CHECKS.push(['J9 : calendrier (vues, navigateur, superposition, détail), compar
   // Le choix des calendriers affichés (calendar.json) et le type de vue sont remis tels quels à la fin.
   const file = path.join(process.env.APPDATA, 'fr.local.thunderlook', 'calendar.json');
   const saved = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  // Calendrier importé (étape 5) : l'export .ics d'Outlook, déposé comme le ferait « Ouvrir un calendrier ».
+  const config = JSON.parse(fs.readFileSync(path.join(process.env.APPDATA, 'fr.local.thunderlook', 'config.json'), 'utf8'));
+  const importedDir = path.join(config.dataDir, 'calendars');
+  const importedFile = path.join(importedDir, 'Vérification ThunderLook.ics');
+  fs.mkdirSync(importedDir, { recursive: true });
+  fs.copyFileSync(path.join(root, 'data', 'samples', '031023-Calendrier de Paul Adam  Adam- déclic.ics'), importedFile);
   const press = (k, mods = {}) => js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, ctrlKey: ${!!mods.ctrl}, altKey: ${!!mods.alt}, bubbles: true }))`);
   const title = () => js(`document.querySelector('.cal-title')?.textContent ?? ''`);
   const KINDS = ['Jour', 'Semaine de travail', 'Semaine', 'Mois'];
@@ -462,11 +468,29 @@ CHECKS.push(['J9 : calendrier (vues, navigateur, superposition, détail), compar
     log(`clic : détail « Gendarmerie », ${when}`);
     await key('Escape');
     if (!wasOn) await js(`${annexe}.click()`);
+    await until(`document.querySelectorAll('.cal-timed').length === 0`, 'Calendar Annexe masqué');
+
+    // Le même jour, depuis le calendrier importé (export .ics d'Outlook d'octobre 2023) : mêmes trois rendez-vous.
+    const imported = `[...document.querySelectorAll('.cal-item')].find(l => l.querySelector('.name')?.textContent === 'Paul Adam | Adam- déclic')`;
+    const section = await js(`[...document.querySelectorAll('.cal-section')].map(s => s.textContent).includes('Calendriers importés')`);
+    if (!section || !(await js(`!!${imported}`))) throw new Error('calendrier importé absent de la liste');
+    await js(`${imported}.querySelector('input').click()`);
+    await until(`document.querySelectorAll('.cal-timed').length >= 3`, 'rendez-vous du calendrier importé');
+    const fromIcs = await js(`[...document.querySelectorAll('.cal-timed')].map(t => ({ top: parseFloat(t.style.top), s: t.querySelector('.cal-subject').textContent }))`);
+    for (const [h, s] of want) {
+      if (!fromIcs.some((t) => t.s === s && Math.abs(t.top - h * 44) < 0.5)) throw new Error(`calendrier importé : « ${s} » absent ou mal placé (${JSON.stringify(fromIcs)})`);
+    }
+    log('calendrier importé (.ics d\'Outlook) : section « Calendriers importés », mêmes trois rendez-vous le 6 mars 2023');
+    await js(`${imported}.querySelector('button[aria-label^="Retirer"]').click()`);
+    await until(`!${imported}`, 'retrait du calendrier importé');
+    if (fs.existsSync(importedFile)) throw new Error('fichier du calendrier importé toujours présent');
+    log('× : calendrier importé retiré (fichier supprimé)');
 
     await kind('Mois');
     await until(`${kindIs('Mois')} && document.querySelectorAll('.cal-cell').length === 42`, 'vue Mois (Ctrl+Alt+4)');
     log(`Ctrl+Alt+4 : « ${await title()} », 42 cases`);
   } finally {
+    if (fs.existsSync(importedFile)) fs.unlinkSync(importedFile);
     if (initialKind) await kind(initialKind);
     await sleep(300);
     if (saved) fs.writeFileSync(file, saved);

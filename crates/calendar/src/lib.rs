@@ -2,7 +2,10 @@
 //! conservé dans `message.props`. Option A du plan (`notes/j9-plan.md`) : Outlook fait foi, lecture seule ici.
 
 pub mod bag;
+pub mod csv;
 pub mod expand;
+pub mod ics;
+pub mod imported;
 pub mod named;
 pub mod recur;
 pub mod tz;
@@ -14,7 +17,7 @@ use thunderlook_store::rusqlite::Connection;
 
 use crate::{
     bag::Bag,
-    named::{Named, PSETID_APPOINTMENT, PSETID_COMMON, PSETID_MEETING},
+    named::{Named, PSETID_APPOINTMENT, PSETID_COMMON, PSETID_MEETING, PS_PUBLIC_STRINGS},
     recur::Recurrence,
     tz::TimeZone,
 };
@@ -51,6 +54,8 @@ pub struct Appointment {
     pub time_zone_name: Option<String>,
     /// Rappel en minutes avant le début, s'il est actif.
     pub reminder_minutes: Option<i64>,
+    /// Délai du rappel même inactif (`PidLidReminderDelta`) : l'export CSV d'Outlook en déduit la date de rappel.
+    pub reminder_delta: Option<i64>,
     pub categories: Vec<String>,
     /// Réunion (`asfMeeting` de `PidLidAppointmentStateFlags`) ; l'organisateur est l'expéditeur.
     pub is_meeting: bool,
@@ -59,6 +64,14 @@ pub struct Appointment {
     /// `PidLidResponseStatus` : 0 aucune, 1 organisée, 2 provisoire, 3 acceptée, 4 refusée, 5 non répondu.
     pub response_status: i64,
     pub private: bool,
+    /// `PidTagSensitivity` : 0 normal, 1 personnel, 2 privé, 3 confidentiel.
+    pub sensitivity: i64,
+    /// 0 basse, 1 normale, 2 haute.
+    pub importance: i64,
+    /// `.eml` de l'élément (relatif au dossier de données), d'où se lit sa description.
+    pub eml_path: Option<String>,
+    /// Description déjà connue (calendrier importé) ; sinon lue dans le `.eml`.
+    pub description: Option<String>,
 }
 
 /// Identifiants locaux des propriétés nommées utiles, pour une source.
@@ -77,6 +90,7 @@ struct Ids {
     reminder_delta: Option<u16>,
     reminder_set: Option<u16>,
     clean_goid: Option<u16>,
+    keywords: Option<u16>,
 }
 
 impl Ids {
@@ -98,6 +112,7 @@ impl Ids {
             reminder_delta: c(0x8501),
             reminder_set: c(0x8503),
             clean_goid: n.id(PSETID_MEETING, 0x0023),
+            keywords: n.name(PS_PUBLIC_STRINGS, "Keywords"),
         }
     }
 }
@@ -155,12 +170,18 @@ fn read(bag: &Bag, ids: &Ids, row: &Row) -> Result<Appointment> {
         time_zone,
         time_zone_name: ids.tz_name.and_then(|i| bag.text(i)),
         reminder_minutes: if reminder_set { ids.reminder_delta.and_then(|i| bag.int(i)).or(Some(15)) } else { None },
-        categories: Vec::new(),
+        reminder_delta: ids.reminder_delta.and_then(|i| bag.int(i)),
+        // Ordre d'origine des catégories ; à défaut, la table `message_category` (triée par nom).
+        categories: ids.keywords.and_then(|i| bag.strings(i)).unwrap_or_default(),
         is_meeting: ids.state.and_then(|i| bag.int(i)).is_some_and(|s| s & 1 != 0),
         organizer: row.from_name.clone(),
         attendees: row.to_line.clone(),
         response_status: ids.response.and_then(|i| bag.int(i)).unwrap_or(0),
         private: row.sensitivity == 2,
+        sensitivity: row.sensitivity,
+        importance: row.importance,
+        eml_path: Some(row.eml_path.clone()).filter(|p| !p.is_empty()),
+        description: None,
     })
 }
 
@@ -172,6 +193,8 @@ struct Row {
     from_name: String,
     to_line: String,
     sensitivity: i64,
+    importance: i64,
+    eml_path: String,
 }
 
 /// Tous les rendez-vous de la base (`IPM.Appointment` et classes dérivées), avec les éléments illisibles.
@@ -198,7 +221,7 @@ pub fn load(conn: &Connection) -> Result<Calendar> {
     }
     let mut stmt = conn
         .prepare(
-            "SELECT m.id, f.source_id, m.folder_id, m.subject, m.from_name, m.to_line, m.sensitivity, m.props
+            "SELECT m.id, f.source_id, m.folder_id, m.subject, m.from_name, m.to_line, m.sensitivity, m.props, m.importance, m.eml_path
              FROM message m JOIN folder f ON f.id = m.folder_id
              WHERE m.message_class = 'IPM.Appointment' OR m.message_class LIKE 'IPM.Appointment.%'",
         )
@@ -215,16 +238,32 @@ pub fn load(conn: &Connection) -> Result<Calendar> {
             from_name: r.get(4).map_err(e)?,
             to_line: r.get(5).map_err(e)?,
             sensitivity: r.get(6).map_err(e)?,
+            importance: r.get(8).map_err(e)?,
+            eml_path: r.get(9).map_err(e)?,
         };
         let props: Vec<u8> = r.get(7).map_err(e)?;
         let result = Bag::parse(&props).and_then(|bag| read(&bag, named.get(&row.source_id).unwrap_or(&none), &row));
         match result {
             Ok(mut a) => {
-                a.categories = categories.remove(&a.id).unwrap_or_default();
+                let listed = categories.remove(&a.id).unwrap_or_default();
+                if a.categories.is_empty() {
+                    a.categories = listed;
+                }
                 appointments.push(a);
             }
             Err(detail) => issues.push(Issue { id: row.id, subject: row.subject, detail }),
         }
     }
     Ok(Calendar { appointments, issues })
+}
+
+/// Description (corps en texte) d'un rendez-vous : celle d'un calendrier importé, sinon le texte de son `.eml`.
+pub fn description(a: &Appointment, data_dir: &std::path::Path) -> Option<String> {
+    if a.description.is_some() {
+        return a.description.clone();
+    }
+    let bytes = std::fs::read(thunderlook_store::resolve(data_dir, a.eml_path.as_deref()?)).ok()?;
+    let msg = mail_parser::MessageParser::default().parse(&bytes)?;
+    let text = msg.body_text(0)?.into_owned();
+    (!text.trim().is_empty()).then_some(text)
 }

@@ -5161,6 +5161,7 @@ name = "thunderlook-calendar"
 version = "0.8.0"
 dependencies = [
  "chrono",
+ "mail-parser",
  "thunderlook-model",
  "thunderlook-store",
 ]

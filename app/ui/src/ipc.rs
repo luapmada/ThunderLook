@@ -149,6 +149,24 @@ pub async fn set_calendar_shown(id: &str, shown: bool) -> Result<(), String> {
     call("set_calendar_shown", &ShownArg { id, shown }).await
 }
 
+pub async fn calendar_import() -> Result<Option<String>, String> {
+    call("calendar_import", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct ExportArg<'a> {
+    format: &'a str,
+    query: &'a CalendarQuery,
+}
+
+pub async fn calendar_export(format: &str, query: &CalendarQuery) -> Result<Option<String>, String> {
+    call("calendar_export", &ExportArg { format, query }).await
+}
+
+pub async fn calendar_remove(id: &str) -> Result<(), String> {
+    call("calendar_remove", &IdArg { id }).await
+}
+
 pub async fn categories() -> Result<Vec<CategoryInfo>, String> {
     call("categories", &NoArgs {}).await
 }

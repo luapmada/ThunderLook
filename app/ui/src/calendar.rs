@@ -45,6 +45,32 @@ pub fn set_kind(ui: Ui, kind: CalendarViewKind) {
     ui.update_settings(|s| s.calendar_view = kind);
 }
 
+/// « Ouvrir un calendrier » (.ics, CSV d'Outlook) : ajouté aux calendriers importés, en lecture seule.
+pub fn import(ui: Ui) {
+    spawn_local(async move {
+        match ipc::calendar_import().await {
+            Ok(Some(msg)) => {
+                ui.status.set(Some(msg));
+                ui.cal_epoch.update(|e| *e += 1);
+            }
+            Ok(None) => {}
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
+/// Export des calendriers affichés : `.ics` (tous leurs éléments) ou CSV d'Outlook (période affichée).
+pub fn export(ui: Ui, csv: bool) {
+    let query = CalendarQuery { kind: ui.settings.with_untracked(|s| s.calendar_view), anchor: ui.cal_anchor.get_untracked() };
+    spawn_local(async move {
+        match ipc::calendar_export(if csv { "csv" } else { "ics" }, &query).await {
+            Ok(Some(msg)) => ui.status.set(Some(msg)),
+            Ok(None) => {}
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
 pub fn go_today(ui: Ui) {
     let today = ui.cal_view.with_untracked(|v| v.as_ref().map(|v| v.today.clone())).unwrap_or_default();
     ui.cal_anchor.set(today);
@@ -423,6 +449,8 @@ pub fn CalendarNav() -> impl IntoView {
                                         view! { <div class="cal-section">{c.section.clone()}</div> }
                                     });
                                     let (id, shown) = (c.id.clone(), c.shown);
+                                    let imported = c.id.starts_with("c-");
+                                    let (remove_id, remove_name) = (c.id.clone(), c.name.clone());
                                     view! {
                                         {head}
                                         <label class="cal-item">
@@ -430,6 +458,25 @@ pub fn CalendarNav() -> impl IntoView {
                                             <span class=format!("cal-swatch cal-c{}", c.color)></span>
                                             <span class="name">{c.name.clone()}</span>
                                             <span class="count">{c.count}</span>
+                                            {imported.then(|| view! {
+                                                <button
+                                                    class="icon-btn small"
+                                                    aria-label=format!("Retirer le calendrier importé « {remove_name} »")
+                                                    title="Retirer ce calendrier importé"
+                                                    on:click=move |ev| {
+                                                        ev.prevent_default();
+                                                        let id = remove_id.clone();
+                                                        spawn_local(async move {
+                                                            match ipc::calendar_remove(&id).await {
+                                                                Ok(()) => ui.cal_epoch.update(|e| *e += 1),
+                                                                Err(e) => ui.error.set(Some(e)),
+                                                            }
+                                                        });
+                                                    }
+                                                >
+                                                    <Svg icon=X size=12 />
+                                                </button>
+                                            })}
                                         </label>
                                     }
                                 })

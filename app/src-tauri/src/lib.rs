@@ -705,21 +705,144 @@ fn shown_calendars(app: &AppHandle) -> Option<Vec<String>> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
+/// Calendriers de la base, puis calendriers importés (couleurs à la suite).
+fn all_calendars(app: &AppHandle, conn: &thunderlook_store::rusqlite::Connection, dir: &Path) -> Result<Vec<thunderlook_model::calendar::CalendarInfo>, String> {
+    let mut calendars = thunderlook_calendar::view::calendars(conn)?;
+    let n = calendars.len();
+    let (imported, _) = thunderlook_calendar::imported::load(dir);
+    calendars.extend(imported.into_iter().enumerate().map(|(i, (mut c, _))| {
+        c.color = ((n + i) % 8) as u8;
+        c
+    }));
+    let shown = shown_calendars(app).unwrap_or_else(|| thunderlook_calendar::view::default_shown(&calendars));
+    calendars.iter_mut().for_each(|c| c.shown = shown.contains(&c.id));
+    Ok(calendars)
+}
+
+/// Rendez-vous de la base et des calendriers importés, lus une fois puis gardés (fichiers illisibles : `id` 0).
+fn with_calendar<T>(
+    cache: &CalendarCache,
+    conn: &thunderlook_store::rusqlite::Connection,
+    dir: &Path,
+    f: impl FnOnce(&thunderlook_calendar::Calendar) -> T,
+) -> Result<T, String> {
+    let mut guard = cache.0.lock().map_err(|_| "verrou du calendrier empoisonné".to_string())?;
+    if guard.is_none() {
+        let mut cal = thunderlook_calendar::load(conn)?;
+        let (imported, errors) = thunderlook_calendar::imported::load(dir);
+        cal.appointments.extend(imported.into_iter().flat_map(|(_, items)| items));
+        cal.issues.extend(errors.into_iter().map(|detail| thunderlook_calendar::Issue { id: 0, subject: String::new(), detail }));
+        *guard = Some(cal);
+    }
+    Ok(f(guard.as_ref().unwrap()))
+}
+
+fn clear_calendar(cache: &CalendarCache) -> Result<(), String> {
+    *cache.0.lock().map_err(|_| "verrou du calendrier empoisonné".to_string())? = None;
+    Ok(())
+}
+
 #[tauri::command(async)]
 fn calendar_view(app: AppHandle, cache: State<CalendarCache>, query: CalendarQuery) -> Result<CalendarView, String> {
     let dir = data_dir(&app)?;
     let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
-    let mut calendars = thunderlook_calendar::view::calendars(&conn)?;
-    let shown = shown_calendars(&app).unwrap_or_else(|| thunderlook_calendar::view::default_shown(&calendars));
-    calendars.iter_mut().for_each(|c| c.shown = shown.contains(&c.id));
-    let mut guard = cache.0.lock().map_err(|_| "verrou du calendrier empoisonné".to_string())?;
-    if guard.is_none() {
-        *guard = Some(thunderlook_calendar::load(&conn)?);
-    }
-    let cal = guard.as_ref().unwrap();
-    let mut view = thunderlook_calendar::view::build(cal, calendars, &query, thunderlook_calendar::view::local_now(now_ms()));
+    let calendars = all_calendars(&app, &conn, &dir)?;
+    let (mut view, unreadable) = with_calendar(&cache, &conn, &dir, |cal| {
+        let unreadable: Vec<String> = cal.issues.iter().filter(|i| i.id == 0).map(|i| i.detail.clone()).collect();
+        (thunderlook_calendar::view::build(cal, calendars, &query, thunderlook_calendar::view::local_now(now_ms())), unreadable)
+    })?;
     view.source_note = thunderlook_calendar::view::source_note(&conn, &view.calendars)?;
+    if !unreadable.is_empty() {
+        let note = format!("Calendrier importé illisible : {}", unreadable.join(" ; "));
+        view.source_note = Some(match view.source_note {
+            Some(n) => format!("{n} {note}"),
+            None => note,
+        });
+    }
     Ok(view)
+}
+
+/// « Ouvrir un calendrier » : `.ics` ou CSV d'Outlook, ajouté aux calendriers importés et affiché.
+#[tauri::command(async)]
+fn calendar_import(app: AppHandle, cache: State<CalendarCache>) -> Result<Option<String>, String> {
+    let Some(file) = app.dialog().file().add_filter("Calendrier (iCalendar, CSV d'Outlook)", &["ics", "csv"]).blocking_pick_file() else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    let dir = data_dir(&app)?;
+    let (name, n, target) = thunderlook_calendar::imported::import(&dir, &path)?;
+    clear_calendar(&cache)?;
+    if let Some(id) = thunderlook_calendar::imported::id_of(&dir, &target) {
+        set_calendar_shown(app.clone(), id, true)?;
+    }
+    Ok(Some(format!("Calendrier « {name} » importé : {n} élément(s), en lecture seule.")))
+}
+
+/// Retire un calendrier importé ; les identifiants suivants (ordre des fichiers) reculent d'un rang.
+#[tauri::command]
+fn calendar_remove(app: AppHandle, cache: State<CalendarCache>, id: String) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    let n: i64 = id.strip_prefix("c-").and_then(|s| s.parse().ok()).ok_or("identifiant de calendrier importé invalide")?;
+    thunderlook_calendar::imported::remove(&dir, &id)?;
+    let after: Vec<String> = shown_calendars(&app)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| *c != id)
+        .map(|c| match c.strip_prefix("c-").and_then(|s| s.parse::<i64>().ok()) {
+            Some(k) if k > n => format!("c-{}", k - 1),
+            _ => c,
+        })
+        .collect();
+    let path = settings_path(&app)?.with_file_name("calendar.json");
+    fs::write(&path, serde_json::to_string(&after).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    clear_calendar(&cache)
+}
+
+/// « Enregistrer le calendrier » (`.ics` : tous les éléments des calendriers affichés) ou export CSV d'Outlook
+/// (occurrences de la période affichée). Renvoie le message de résultat, `None` si l'utilisateur annule.
+#[tauri::command(async)]
+fn calendar_export(app: AppHandle, cache: State<CalendarCache>, format: String, query: CalendarQuery) -> Result<Option<String>, String> {
+    let dir = data_dir(&app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    let calendars = all_calendars(&app, &conn, &dir)?;
+    let shown: Vec<&thunderlook_model::calendar::CalendarInfo> = calendars.iter().filter(|c| c.shown).collect();
+    if shown.is_empty() {
+        return Err("aucun calendrier affiché à exporter".into());
+    }
+    let name = shown.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ");
+    let ids: Vec<i64> = shown.iter().filter_map(|c| c.id[1..].parse().ok()).collect();
+    let csv = format == "csv";
+    let (text, count, label) = with_calendar(&cache, &conn, &dir, |cal| {
+        let items: Vec<&thunderlook_calendar::Appointment> = cal.appointments.iter().filter(|a| ids.contains(&a.folder_id)).collect();
+        if csv {
+            let anchor = chrono::NaiveDate::parse_from_str(&query.anchor, "%Y-%m-%d").unwrap_or_else(|_| chrono::Local::now().date_naive());
+            let (first, last) = thunderlook_calendar::view::period(query.kind, anchor);
+            let ms = |d: chrono::NaiveDate| thunderlook_calendar::tz::TimeZone::PARIS.to_utc(d.and_hms_opt(0, 0, 0).unwrap()).and_utc().timestamp_millis();
+            let mut rows: Vec<_> = items
+                .iter()
+                .flat_map(|a| thunderlook_calendar::expand::occurrences(a, ms(first), ms(last + chrono::Duration::days(1))).into_iter().map(move |o| (*a, o)))
+                .collect();
+            rows.sort_by_key(|(_, o)| o.start_ms);
+            let n = rows.len();
+            let label = format!("occurrence(s) du {} au {}", first.format("%d/%m/%Y"), last.format("%d/%m/%Y"));
+            (thunderlook_calendar::csv::export(&rows, &|a| thunderlook_calendar::description(a, &dir)), n, label)
+        } else {
+            (thunderlook_calendar::ics::export(&items, &name, &|a| thunderlook_calendar::description(a, &dir)), items.len(), "élément(s)".to_string())
+        }
+    })?;
+    let ext = if csv { "csv" } else { "ics" };
+    let Some(target) = app
+        .dialog()
+        .file()
+        .add_filter(if csv { "CSV (Outlook)" } else { "iCalendar" }, &[ext])
+        .set_file_name(safe_file_name(&format!("{name}.{ext}")))
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = target.into_path().map_err(|e| e.to_string())?;
+    fs::write(&path, text).map_err(|e| format!("{} : {e}", path.display()))?;
+    Ok(Some(format!("{count} {label} exporté(s) dans {}", path.display())))
 }
 
 #[tauri::command]
@@ -829,7 +952,10 @@ pub fn run() {
             save_quick_steps,
             perf_mark,
             calendar_view,
-            set_calendar_shown
+            set_calendar_shown,
+            calendar_import,
+            calendar_export,
+            calendar_remove
         ])
         .run(tauri::generate_context!())
         .expect("échec du démarrage de ThunderLook");

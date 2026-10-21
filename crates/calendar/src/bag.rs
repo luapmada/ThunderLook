@@ -108,6 +108,27 @@ impl<'a> Bag<'a> {
         (!s.is_empty()).then(|| s.to_string())
     }
 
+    /// `PtypMultipleString` / `PtypMultipleString8` : éléments dans leur ordre.
+    pub fn strings(&self, id: u16) -> Option<Vec<String>> {
+        let (ty, v) = self.raw(id)?;
+        if ty != 0x101F && ty != 0x101E {
+            return None;
+        }
+        let n = u32::from_le_bytes(v.get(0..4)?.try_into().ok()?) as usize;
+        let (mut i, mut out) = (4, Vec::with_capacity(n));
+        for _ in 0..n {
+            let len = u32::from_le_bytes(v.get(i..i + 4)?.try_into().ok()?) as usize;
+            let s = v.get(i + 4..i + 4 + len)?;
+            out.push(if ty == 0x101F {
+                String::from_utf16_lossy(&s.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>())
+            } else {
+                s.iter().map(|&b| cp1252(b)).collect()
+            });
+            i += 4 + len;
+        }
+        Some(out)
+    }
+
     pub fn binary(&self, id: u16) -> Option<&'a [u8]> {
         match self.raw(id)? {
             (PT_BINARY, v) => Some(v),

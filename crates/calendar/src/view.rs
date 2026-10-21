@@ -182,7 +182,7 @@ fn lay_out(mut items: Vec<(u32, u32, CalendarEvent)>) -> Vec<TimedEvent> {
 }
 
 /// Période affichée : premier et dernier jour.
-fn period(kind: CalendarViewKind, anchor: NaiveDate) -> (NaiveDate, NaiveDate) {
+pub fn period(kind: CalendarViewKind, anchor: NaiveDate) -> (NaiveDate, NaiveDate) {
     match kind {
         CalendarViewKind::Day => (anchor, anchor),
         CalendarViewKind::WorkWeek => (monday(anchor), monday(anchor) + Duration::days(4)),

@@ -71,6 +71,9 @@ pub enum Action {
     // J9 : calendrier.
     CalView(thunderlook_model::calendar::CalendarViewKind),
     CalToday,
+    CalImport,
+    CalExportIcs,
+    CalExportCsv,
 }
 
 impl Action {
@@ -144,6 +147,9 @@ fn perform(ui: Ui, action: Action) {
         Action::ManageQuickSteps => ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false })),
         Action::CalView(kind) => crate::calendar::set_kind(ui, kind),
         Action::CalToday => crate::calendar::go_today(ui),
+        Action::CalImport => crate::calendar::import(ui),
+        Action::CalExportIcs => crate::calendar::export(ui, false),
+        Action::CalExportCsv => crate::calendar::export(ui, true),
         Action::CloseSearch => {
             if let Some(s) = ui.refs.search.get_untracked() {
                 s.set_value("");
@@ -459,6 +465,14 @@ const CALENDAR_HOME: &[Group] = &[
             wired("Semaine de travail", CALENDAR_DAYS, Some("Ctrl+Alt+2"), true, true, Action::CalView(CalendarViewKind::WorkWeek)),
             wired("Semaine", CALENDAR_DAYS, Some("Ctrl+Alt+3"), true, true, Action::CalView(CalendarViewKind::Week)),
             wired("Mois", CALENDAR, Some("Ctrl+Alt+4"), true, true, Action::CalView(CalendarViewKind::Month)),
+        ],
+    },
+    Group {
+        label: "Partager",
+        cmds: &[
+            wired("Ouvrir un calendrier", FOLDER_INPUT, None, false, true, Action::CalImport),
+            wired("Enregistrer le calendrier (.ics)", SAVE, None, false, true, Action::CalExportIcs),
+            wired("Exporter en CSV", DOWNLOAD, None, false, true, Action::CalExportCsv),
         ],
     },
 ];
