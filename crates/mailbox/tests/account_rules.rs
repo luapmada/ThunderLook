@@ -92,3 +92,26 @@ fn copied_rules_target_their_own_account() {
     drop((c, mb));
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// Un point dans le nom d'un dossier créé ne doit pas fabriquer une hiérarchie sur un serveur à séparateur « . ».
+#[test]
+fn delimiter_in_folder_name_stays_one_folder() {
+    let dir = std::env::temp_dir().join(format!("tl-account-delim-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let c = thunderlook_store::open(&dir).unwrap();
+    let (inbox, _) = account(&c, 3, "paul@example.org");
+    drop(c);
+    let mut mb = Mailbox::open(&dir).unwrap();
+    let op = thunderlook_model::FolderOp::Create { parent_id: format!("f{inbox}"), name: "[electromagnetisme.fr]".into() };
+    mb.folder_op(&op).unwrap();
+    assert!(mb.folder_op(&op).is_err(), "même nom, point ou substitut : doublon refusé");
+    let c = thunderlook_store::open(&dir).unwrap();
+    let (name, imap): (String, String) =
+        c.query_row("SELECT name, imap_name FROM folder WHERE imap_name LIKE 'INBOX.[%'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!(imap, "INBOX.[electromagnetisme&ICQ-fr]");
+    assert_eq!(name, "[electromagnetisme\u{2024}fr]");
+    let mkdir: String = c.query_row("SELECT mailbox FROM imap_pending WHERE kind = 'mkdir'", [], |r| r.get(0)).unwrap();
+    assert_eq!(mkdir, imap);
+    drop((c, mb));
+    let _ = fs::remove_dir_all(&dir);
+}

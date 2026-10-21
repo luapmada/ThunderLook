@@ -205,9 +205,22 @@ pub(crate) fn folder_created(conn: &Connection, folder: i64) -> Result<()> {
                 .flatten()
         })
         .unwrap_or_else(|| "/".into());
-    let imap_name = format!("{base}{delimiter}{}", crate::imap_utf7::encode(&name));
-    conn.execute("UPDATE folder SET imap_name = ?2 WHERE id = ?1", params![folder, imap_name]).map_err(err)?;
+    let leaf = server_leaf(&name, &delimiter);
+    let imap_name = format!("{base}{delimiter}{}", crate::imap_utf7::encode(&leaf));
+    conn.execute("UPDATE folder SET name = ?2, imap_name = ?3 WHERE id = ?1", params![folder, leaf, imap_name]).map_err(err)?;
     push(conn, account, "mkdir", &imap_name, None, None, "{}".into())
+}
+
+/// Nom d'un dossier tel qu'il est créé sur le serveur : le séparateur IMAP n'y peut pas figurer, sinon
+/// « [electromagnetisme.fr] » devient « [electromagnetisme » › « fr] ». Il est remplacé par un caractère d'aspect
+/// identique (U+2024 pour le point, U+2215 pour la barre oblique), que `fold` ramène au caractère d'origine.
+pub(crate) fn server_leaf(name: &str, delimiter: &str) -> String {
+    let substitute = match delimiter {
+        "." => "\u{2024}",
+        "/" => "\u{2215}",
+        _ => "_",
+    };
+    if delimiter.is_empty() { name.to_string() } else { name.replace(delimiter, substitute) }
 }
 
 /// Classe un message dans un dossier en dehors des opérations de l'interface (envoi : Boîte d'envoi vers Éléments

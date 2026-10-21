@@ -296,7 +296,7 @@ impl Mailbox {
                     list.into_iter()
                         .find(|(n, i)| {
                             fold(n) == fold(&wanted)
-                                || i.strip_prefix(inbox.1.as_str()).is_some_and(|rest| rest.len() > 1 && crate::imap_utf7::decode(&rest[1..]) == wanted)
+                                || i.strip_prefix(inbox.1.as_str()).is_some_and(|rest| rest.len() > 1 && fold(&crate::imap_utf7::decode(&rest[1..])) == fold(&wanted))
                         })
                         .map(|(_, i)| i)
                 };

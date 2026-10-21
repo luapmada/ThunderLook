@@ -145,6 +145,9 @@ pub fn fold(s: &str) -> String {
             'ù' | 'û' | 'ü' | 'ú' => 'u',
             'ÿ' | 'ý' => 'y',
             'ñ' => 'n',
+            // Substituts du séparateur IMAP dans un nom de dossier (`remote::server_leaf`).
+            '\u{2024}' => '.',
+            '\u{2215}' => '/',
             c => c,
         })
         .collect()
