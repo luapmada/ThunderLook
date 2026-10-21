@@ -72,6 +72,17 @@ impl TimeZone {
     pub fn to_utc(&self, local: NaiveDateTime) -> NaiveDateTime {
         local + Duration::minutes(i64::from(self.bias_at(local)))
     }
+
+    /// UTC → heure locale : le décalage retenu est celui qui, appliqué en sens inverse, redonne cet instant.
+    pub fn to_local(&self, utc: NaiveDateTime) -> NaiveDateTime {
+        for extra in [self.daylight_bias, self.standard_bias] {
+            let local = utc - Duration::minutes(i64::from(self.bias + extra));
+            if self.to_utc(local) == utc {
+                return local;
+            }
+        }
+        utc - Duration::minutes(i64::from(self.bias + self.standard_bias))
+    }
 }
 
 #[cfg(test)]
@@ -88,5 +99,8 @@ mod tests {
         assert_eq!(tz.to_utc(at("2023-03-26 01:59")), at("2023-03-26 00:59"));
         assert_eq!(tz.to_utc(at("2023-03-26 03:00")), at("2023-03-26 01:00"));
         assert_eq!(tz.to_utc(at("2023-10-29 03:00")), at("2023-10-29 02:00"));
+        for s in ["2023-01-15 10:00", "2023-07-15 10:00", "2023-03-26 03:00", "2023-10-29 03:00"] {
+            assert_eq!(tz.to_local(tz.to_utc(at(s))), at(s));
+        }
     }
 }

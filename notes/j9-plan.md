@@ -37,7 +37,13 @@ calendriers multiples et superposition ; import/export `.ics` et CSV ; catégori
   (`PidLidCleanGlobalObjectId`) sur 472, 466 concordants (début, journée entière, objet, fréquence) ; 50 occurrences
   modifiées sur 54 retrouvées dans leur série. Les 6 UID absents (et les 4 exceptions de leurs séries) sont des
   éléments supprimés ou recréés dans Outlook entre l'export (10/2023) et la copie du PST.
-- Prochaine : étape 2 (expansion des périodicités ; critère : mêmes occurrences que le `.ics` sur 2023).
+- Étape 2 faite le 21/10 : `src/expand.rs` (dates locales par motif, retrait des occurrences supprimées, exceptions
+  ajoutées, conversion UTC par le fuseau de la série) ; `TimeZone::to_local`. Référence plus sûre que le `.ics` : les
+  occurrences calculées par Outlook lui-même (`target/tl-scripts/outlook_occ.ps1`, COM, `IncludeRecurrences`, lecture
+  seule) sur le PST rattaché, comparées à `examples/occurrences` (source 1) :
+  2023 507 = 507, 2024 148 = 148, 2025 158 = 158 (dont 524 occurrences de séries et 58 exceptions sur les quatre ans) ;
+  2026 : 403 communes, 8 écarts, tous des rendez-vous créés ou déplacés après la copie du PST (15/10/2026).
+- Prochaine : étape 3 (vues Jour, Semaine de travail, Semaine, Mois ; navigateur de dates ; superposition).
 
 ## 3. Ordre proposé
 | # | Tâche | Vérification |

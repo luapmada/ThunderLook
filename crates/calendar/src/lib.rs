@@ -2,6 +2,7 @@
 //! conservé dans `message.props`. Option A du plan (`notes/j9-plan.md`) : Outlook fait foi, lecture seule ici.
 
 pub mod bag;
+pub mod expand;
 pub mod named;
 pub mod recur;
 pub mod tz;
