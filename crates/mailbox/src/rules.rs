@@ -60,24 +60,25 @@ impl FolderResolver {
         }
         let mut stmt = conn
             .prepare(
-                "SELECT f.id, f.parent_id, f.name, f.role, f.hidden, f.props, s.display_name, f.imap_name FROM folder f JOIN source s ON s.id = f.source_id",
+                "SELECT f.id, f.parent_id, f.name, f.role, f.hidden, f.props, s.display_name, f.imap_name, f.source_id
+                 FROM folder f JOIN source s ON s.id = f.source_id",
             )
             .map_err(err)?;
-        type Row = (i64, Option<i64>, String, String, bool, Option<Vec<u8>>, String, Option<String>);
+        type Row = (i64, Option<i64>, String, String, bool, Option<Vec<u8>>, String, Option<String>, i64);
         let rows: Vec<Row> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)))
             .map_err(err)?
             .collect::<std::result::Result<_, _>>()
             .map_err(err)?;
         let parents: HashMap<i64, (Option<i64>, &str, &str)> = rows.iter().map(|r| (r.0, (r.1, r.2.as_str(), r.3.as_str()))).collect();
         let (mut by_entry, mut by_name, mut paths) = (HashMap::new(), HashMap::<String, Vec<(i64, i64)>>::new(), HashMap::new());
-        for (id, _, name, _, hidden, props, source, imap_name) in &rows {
+        for (id, _, name, _, hidden, props, source, imap_name, source_id) in &rows {
             if let Some(entry) = props.as_deref().and_then(|p| bag_value(p, ENTRY_ID, 0x0102)) {
                 by_entry.insert(entry.to_vec(), *id);
             }
             // Règles copiées vers un compte : la cible est désignée par son nom IMAP (« imap:INBOX.Accusés »).
             if let Some(n) = imap_name {
-                by_entry.insert(imap_target(n), *id);
+                by_entry.insert(imap_target(*source_id, n), *id);
             }
             if !hidden {
                 by_name.entry(fold(name)).or_default().push((*id, counts.get(id).copied().unwrap_or(0)));
@@ -132,9 +133,10 @@ impl FolderResolver {
     }
 }
 
-/// Désignation d'un dossier de compte dans une règle copiée (à la place de l'EntryID d'un dossier de PST).
-pub(crate) fn imap_target(imap_name: &str) -> Vec<u8> {
-    format!("imap:{imap_name}").into_bytes()
+/// Désignation d'un dossier de compte dans une règle copiée (à la place de l'EntryID d'un dossier de PST) : la source
+/// du compte et le nom IMAP. La source est indispensable : deux comptes ont souvent des dossiers de même nom.
+pub(crate) fn imap_target(source: i64, imap_name: &str) -> Vec<u8> {
+    format!("imap:{source}:{imap_name}").into_bytes()
 }
 
 fn now_ms() -> i64 {
@@ -306,7 +308,7 @@ impl Mailbox {
                         tx.query_row("SELECT imap_name FROM folder WHERE id = ?1", [id], |r| r.get::<_, String>(0)).map_err(err)?
                     }
                 };
-                *folder_entry_id = imap_target(&imap_name);
+                *folder_entry_id = imap_target(account_source, &imap_name);
                 *store_entry_id = Vec::new();
                 *name = wanted;
             }

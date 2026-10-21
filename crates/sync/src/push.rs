@@ -98,7 +98,8 @@ async fn attach(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current
     Ok(())
 }
 
-async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &mut Option<String>, account: &Account, p: &Pending) -> Result<()> {
+/// Rejoue une opération ; `Ok(false)` : à différer sans compter de tentative (suppression qui attend un dépôt).
+async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &mut Option<String>, account: &Account, p: &Pending) -> Result<bool> {
     let target = p.arg.get("to").and_then(|v| v.as_str()).map(str::to_string);
     match p.kind.as_str() {
         "flags" => {
@@ -126,6 +127,15 @@ async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &
             }
         }
         "expunge" => {
+            // Déplacement vers un autre compte : rien n'est supprimé tant que le dépôt n'est pas fait.
+            if let Some(waiting) = p.arg.get("after_append").and_then(|v| v.as_i64()) {
+                let pending: bool = conn
+                    .query_row("SELECT EXISTS (SELECT 1 FROM imap_pending WHERE kind = 'append' AND message_id = ?1)", [waiting], |r| r.get(0))
+                    .map_err(e)?;
+                if pending {
+                    return Ok(false);
+                }
+            }
             let uid = p.uid.ok_or("UID manquant")?;
             select(s, current, &p.mailbox).await?;
             store(s, uid, r"+FLAGS (\Deleted)").await?;
@@ -134,14 +144,20 @@ async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &
         "append" => {
             let id = p.message.ok_or("message manquant")?;
             let to = target.unwrap_or_else(|| p.mailbox.clone());
-            let row: Option<(String, bool)> = conn
-                .query_row("SELECT eml_path, is_read FROM message WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            let row: Option<(String, bool, Option<i64>)> = conn
+                .query_row("SELECT eml_path, is_read, received_at FROM message WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
                 .optional()
                 .map_err(e)?;
-            let Some((eml, read)) = row else { return Ok(()) };
+            let Some((eml, read, received)) = row else { return Ok(true) };
             let bytes = std::fs::read(thunderlook_store::resolve(data_dir, &eml)).map_err(|x| format!("{eml} : {x}"))?;
             // Les brouillons de ThunderLook portent « X-Unsent » ; rien à retirer pour le serveur.
-            s.append(&to, Some(if read { r"(\Seen)" } else { "()" }), None, &bytes).await.map_err(e)?;
+            // Date de réception d'origine (INTERNALDATE), sinon le serveur daterait le message du dépôt.
+            let date = received.and_then(|t| {
+                use chrono::TimeZone;
+                // Entre guillemets (date-time de la RFC 3501) : async-imap insère la valeur telle quelle.
+                chrono::Local.timestamp_millis_opt(t).single().map(|d| d.format("\"%d-%b-%Y %H:%M:%S %z\"").to_string())
+            });
+            s.append(&to, Some(if read { r"(\Seen)" } else { "()" }), date.as_deref(), &bytes).await.map_err(e)?;
             *current = None;
             attach(s, conn, data_dir, current, account, id, &to).await?;
         }
@@ -150,7 +166,7 @@ async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &
         }
         other => return Err(format!("opération « {other} » non prise en charge")),
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Rejoue les opérations en attente du compte ; renvoie le nombre d'opérations faites et la dernière erreur.
@@ -175,10 +191,11 @@ pub async fn push(s: &mut ImapSession, conn: &Connection, data_dir: &Path, accou
     let mut current = None;
     for p in rows {
         match run(s, conn, data_dir, &mut current, account, &p).await {
-            Ok(()) => {
+            Ok(true) => {
                 conn.execute("DELETE FROM imap_pending WHERE id = ?1", [p.id]).map_err(e)?;
                 done += 1;
             }
+            Ok(false) => {}
             Err(err) => {
                 conn.execute("UPDATE imap_pending SET attempts = attempts + 1, last_error = ?2 WHERE id = ?1", params![p.id, err]).map_err(e)?;
                 last_error = Some(format!("{} ({}) : {err}", p.kind, p.mailbox));

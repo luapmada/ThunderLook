@@ -1,6 +1,6 @@
 //! Relève du compte de test dans un dossier de données de test (jamais `data/store`) : crée le compte s'il manque
 //! (`data/test-account.json`), relève deux fois et affiche les dossiers. Le second passage ne doit rien changer.
-//! Usage : `cargo run -p thunderlook-sync --example sync -- <dossier de données de test> [--remove]`
+//! Usage : `cargo run -p thunderlook-sync --example sync -- <dossier de données de test> [--account <fichier>] [--remove]`
 
 use std::path::Path;
 
@@ -10,7 +10,9 @@ fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dir = Path::new(args.first().ok_or("dossier de données de test attendu")?);
     let conn = thunderlook_store::open(dir).map_err(|e| e.to_string())?;
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/test-account.json");
+    // Fichier de compte : `data/test-account.json` par défaut, ou celui donné par `--account <fichier>`.
+    let default = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/test-account.json").to_string();
+    let path = args.iter().position(|a| a == "--account").and_then(|i| args.get(i + 1)).cloned().unwrap_or(default);
     let acc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let address = acc["address"].as_str().unwrap_or_default();
     let source = match account::accounts(&conn)?.into_iter().find(|a| a.address.eq_ignore_ascii_case(address)) {

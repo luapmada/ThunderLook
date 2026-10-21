@@ -95,6 +95,10 @@ pub(crate) fn queue(conn: &Connection, change: Change) -> Result<()> {
                     let a = src.account.expect("compte");
                     match dst.mailbox.as_deref().filter(|_| same_account) {
                         Some(target) => push(conn, a, "move", mb, Some(uid), Some(id), to_arg(target))?,
+                        // Vers un autre compte : la suppression attend que le dépôt dans l'autre compte ait réussi.
+                        None if dst.account.is_some() && dst.mailbox.is_some() => {
+                            push(conn, a, "expunge", mb, Some(uid), None, serde_json::json!({ "after_append": id }).to_string())?
+                        }
                         None => push(conn, a, "expunge", mb, Some(uid), Some(id), "{}".into())?,
                     }
                     conn.execute("UPDATE message SET imap_uid = NULL WHERE id = ?1", [id]).map_err(err)?;
