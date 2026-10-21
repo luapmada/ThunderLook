@@ -14,7 +14,10 @@
 - Outlook basculé sur son profil **« Outlook » (IMAP, déjà configuré)** à la place de « pop-original » (POP3, copie gardée 14 jours puis effacée) : plus rien n'est retiré du serveur. PST `A:\Fichiers Outlook\Outlook_300923.pst` rattaché comme fichier de données secondaire (historique visible ; règles inactives pendant la transition).
 - Sauvegardes avant bascule : `A:\Fichiers Outlook\Outlook_300923_BACKUP_2026-10-21_1638.pst` (SHA-256 identique) et `Outlook_profils_BACKUP_2026-10-21_1638.reg`. Retour arrière : `DefaultProfile` = `pop-original`.
 - `paul@adam-declic.fr` ajouté dans ThunderLook par Paul (source 3, règles à l'arrivée décochées) : 1 256 messages, identiques au serveur dossier par dossier (`crates/sync/examples/compare.rs`) ; Boîte de réception 942 dans Outlook, le serveur et ThunderLook.
-- Profil IMAP d'Outlook : comptes paul@, contact@electromagnetisme.fr, contact@angeliquemaillet.art ; contact@hypso-stephaniemilliot.fr n'est configuré dans aucun profil.
+- Profil IMAP d'Outlook : comptes paul@, contact@electromagnetisme.fr, contact@angeliquemaillet.art.
+- ThunderLook (21/10) : comptes paul@ (source 3, règles du PST copiées dans `account:3`, règles à l'arrivée actives), contact@electromagnetisme.fr (4 ; 94 messages = serveur), contact@angeliquemaillet.art (5 ; 5 = serveur). Mots de passe saisis par Paul (`target/tl-scripts/prefill_account.mjs` préremplit le formulaire par CDP, port 9336).
+- contact@hypso-stephaniemilliot.fr (boîte d'une cliente, réception seulement) : pas de compte ; redirection Hostinger vers paul@ avec copie gardée (FO8d8cf98a0366be8478d6796b31ff), confirmée le 21/10.
+- Dossiers créés sur le serveur de paul@ pour les règles : Accusés, LBC | FB, Allo Voisins, Ebay & Paypal, Hébergements WEB (noms IMAP en UTF-7 modifié).
 - Outlook se pilote en lecture par COM (`New-Object -ComObject Outlook.Application` ; `GetActiveObject` échoue quand Outlook a été lancé depuis la session). Écritures dans la messagerie (supprimer, déplacer) refusées par le garde-fou : à faire par Paul.
 
 ## Comptes de test (Hostinger, offre gratuite « Free Business Email » d'adam-declic.fr, créés via le MCP Hostinger)
