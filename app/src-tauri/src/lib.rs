@@ -456,10 +456,11 @@ fn add_account(
     imap_host: String,
     smtp_host: String,
 ) -> Result<Vec<AccountSummary>, String> {
-    let address = address.trim().to_string();
-    if !address.contains('@') {
-        return Err("Adresse de messagerie invalide.".into());
-    }
+    // Domaine en minuscules (l'adresse sert d'expéditeur) ; la partie locale est gardée telle quelle.
+    let address = match address.trim().rsplit_once('@') {
+        Some((local, domain)) if !local.is_empty() && domain.contains('.') => format!("{local}@{}", domain.to_ascii_lowercase()),
+        _ => return Err("Adresse de messagerie invalide.".into()),
+    };
     let mut ep = thunderlook_sync::Endpoints::hostinger(&address);
     if !imap_host.trim().is_empty() {
         ep.imap.host = imap_host.trim().to_string();
