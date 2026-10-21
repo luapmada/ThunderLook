@@ -227,20 +227,24 @@ pub fn open_at_element(ui: Ui, el: &web_sys::Element, target: ContextTarget) {
 pub fn ContextMenu() -> impl IntoView {
     let ui = use_ui();
     let menu: NodeRef<html::Div> = NodeRef::new();
-    // Sous-menu affiché à la place du menu principal.
-    let sub = RwSignal::new(None::<(String, Vec<MenuEntry>)>);
+    // Sous-menu affiché à la place du menu principal : seulement son libellé. Ses entrées sont reconstruites à chaque
+    // rendu ; gardées d'un rendu à l'autre, leurs rappels appartiendraient à une portée déjà détruite (sans effet).
+    let sub = RwSignal::new(None::<String>);
 
     let root = Memo::new(move |_| ui.context_menu.get());
     let entries = move || -> Vec<MenuEntry> {
-        match (sub.get(), root.get()) {
-            (Some((_, children)), _) => children,
-            (None, Some(at)) => match at.target {
+        let top = match root.get() {
+            Some(at) => match at.target {
                 ContextTarget::Messages => message_context(ui),
                 ContextTarget::Folder(id) => folder_context(ui, id),
                 ContextTarget::Flag => flag_entries(ui),
                 ContextTarget::Categories => category_entries(ui),
             },
-            (None, None) => Vec::new(),
+            None => Vec::new(),
+        };
+        match sub.get() {
+            Some(label) => top.into_iter().find(|e| e.label == label).map(|e| e.children).unwrap_or_default(),
+            None => top,
         }
     };
 
@@ -316,7 +320,7 @@ pub fn ContextMenu() -> impl IntoView {
         <Show when=move || root.get().is_some()>
             <div class="menu context-menu" role="menu" aria-label="Menu contextuel" style=style node_ref=menu on:keydown=on_key>
                 {move || {
-                    let back = sub.get().map(|(label, _)| {
+                    let back = sub.get().map(|label| {
                         view! {
                             <button role="menuitem" tabindex="-1" class="menu-back" on:click=move |_| sub.set(None)>
                                 <span class="check"></span>
@@ -332,7 +336,7 @@ pub fn ContextMenu() -> impl IntoView {
                             let role = if entry.checked.is_some() { "menuitemradio" } else { "menuitem" };
                             let body = entry_body(&entry);
                             let on_select = entry.on_select;
-                            let children = entry.children.clone();
+                            let has_children = !entry.children.is_empty();
                             let label = entry.label.clone();
                             view! {
                                 {entry.separator.then(|| view! { <div class="menu-sep" role="separator"></div> })}
@@ -341,13 +345,14 @@ pub fn ContextMenu() -> impl IntoView {
                                     tabindex="-1"
                                     aria-checked=entry.checked.map(|c| c.to_string())
                                     aria-disabled=disabled.then_some("true")
-                                    aria-haspopup=(!children.is_empty()).then_some("menu")
+                                    aria-haspopup=has_children.then_some("menu")
                                     on:click=move |_| {
-                                        if !children.is_empty() {
-                                            sub.set(Some((label.clone(), children.clone())));
+                                        if has_children {
+                                            sub.set(Some(label.clone()));
                                         } else if let Some(cb) = on_select {
-                                            close();
+                                            // L'action d'abord : fermer le menu détruit la portée qui possède le rappel.
                                             cb.run(());
+                                            close();
                                         }
                                     }
                                 >

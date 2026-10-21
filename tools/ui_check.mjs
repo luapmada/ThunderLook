@@ -530,6 +530,24 @@ CHECKS.push(['J9 : calendrier (vues, navigateur, superposition, détail), compar
   }
 }]);
 
+CHECKS.push(['Clic droit : les actions des sous-menus s\'exécutent (Règles › Gérer, Créer une règle)', async (log) => {
+  // Régression du 22/10 : les entrées d'un sous-menu du clic droit ne faisaient rien (rappels d'une portée détruite).
+  const ctx = `(() => { const e = document.querySelector('.msg[aria-posinset="1"]'); e.click(); const b = e.getBoundingClientRect(); e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: b.left + 80, clientY: b.top + 20 })); })()`;
+  const item = (t) => `[...document.querySelectorAll('[role=menuitem]')].find(e => e.textContent.trim().startsWith(${JSON.stringify(t)}))`;
+  const escape = () => js(`document.querySelector('.dialog')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  for (const [entry, check] of [['Gérer les règles', `!!document.querySelector('.dialog.wide .rules-item')`], ['Créer une règle', `document.querySelector('#create-rule-title')?.textContent === 'Créer une règle'`]]) {
+    await js(ctx);
+    await until(`!!${item('Règles')}`, 'menu contextuel');
+    await js(`${item('Règles')}.click()`);
+    await until(`!!${item(entry)}`, 'sous-menu Règles');
+    await js(`${item(entry)}.click()`);
+    await until(check, `boîte ouverte par « ${entry} »`);
+    log(`clic droit › Règles › ${entry}… : boîte ouverte`);
+    await escape();
+    await sleep(300);
+  }
+}]);
+
 // --- Exécution ------------------------------------------------------------------------------------
 const app = spawn(exe, [], {
   env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
