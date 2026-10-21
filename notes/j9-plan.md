@@ -26,6 +26,19 @@ calendriers multiples et superposition ; import/export `.ics` et CSV ; catégori
   3. **ThunderLook devient la référence** du calendrier dès le J9 ; Outlook ne sert plus pour le calendrier.
 - Décision à prendre par Paul avant de coder l'écriture ; la lecture et l'affichage (ci-dessous) ne dépendent pas du choix.
 
+## Décision
+- 21/10 : **option A** (Outlook fait foi, ThunderLook en lecture seule pendant la transition).
+
+## Avancement
+- Étape 1 faite le 21/10 : crate `crates/calendar` (sac MAPI, propriétés nommées, `PidLidTimeZoneStruct`,
+  `PidLidAppointmentRecur` avec exceptions et ExtendedException). `examples/read_all` : 4 198 rendez-vous lus, 0 échec,
+  392 séries (351 annuelles, 28 mensuelles, 9 hebdomadaires, 4 quotidiennes), 142 exceptions, 206 occurrences supprimées,
+  toutes en fuseau Paris. `examples/crosscheck_ics` contre l'export du 03/10/2023 : 466 événements trouvés par UID
+  (`PidLidCleanGlobalObjectId`) sur 472, 466 concordants (début, journée entière, objet, fréquence) ; 50 occurrences
+  modifiées sur 54 retrouvées dans leur série. Les 6 UID absents (et les 4 exceptions de leurs séries) sont des
+  éléments supprimés ou recréés dans Outlook entre l'export (10/2023) et la copie du PST.
+- Prochaine : étape 2 (expansion des périodicités ; critère : mêmes occurrences que le `.ics` sur 2023).
+
 ## 3. Ordre proposé
 | # | Tâche | Vérification |
 |---|---|---|

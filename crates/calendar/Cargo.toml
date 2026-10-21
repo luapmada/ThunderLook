@@ -1,0 +1,10 @@
+[package]
+name = "thunderlook-calendar"
+version = "0.8.0"
+edition = "2024"
+publish = false
+description = "Calendrier de ThunderLook (J9) : rendez-vous lus depuis les sacs MAPI importés, périodicités [MS-OXOCAL]"
+
+[dependencies]
+thunderlook-store = { path = "../store" }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }

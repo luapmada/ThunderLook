@@ -5156,6 +5156,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "thunderlook-calendar"
+version = "0.8.0"
+dependencies = [
+ "chrono",
+ "thunderlook-store",
+]
+
+[[package]]
 name = "thunderlook-import-pst"
 version = "0.8.0"
 dependencies = [
