@@ -64,7 +64,7 @@ fn truncate(mut s: String, max: usize) -> String {
 }
 
 /// Corps en texte brut : la partie texte, sinon la partie HTML convertie.
-pub(crate) fn body_text(m: &mail_parser::Message) -> String {
+pub fn body_text(m: &mail_parser::Message) -> String {
     let text_part = m.text_part(0).filter(|t| t.is_text() && !t.is_text_html());
     match (text_part.and_then(|t| t.text_contents()), m.html_part(0).filter(|h| h.is_text_html())) {
         (Some(t), _) => t.to_string(),

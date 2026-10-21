@@ -5,6 +5,7 @@
 //! d'erreur.
 
 pub mod account;
+pub mod fetch;
 
 use std::sync::Arc;
 
@@ -92,4 +93,21 @@ pub async fn smtp_check(server: &Server, username: &str, password: &str) -> Resu
         Ok(false) => Err(format!("{} : le serveur SMTP ne répond pas", server.host)),
         Err(e) => Err(format!("{} : SMTP : {e}", server.host)),
     }
+}
+
+/// Relève complète d'un compte, hors de tout runtime asynchrone (fil dédié) : ouvre sa propre connexion à la base,
+/// lit le mot de passe dans le gestionnaire d'identifiants, puis note le résultat dans `account`.
+pub fn sync_account_blocking(data_dir: &std::path::Path, source_id: i64) -> Result<fetch::SyncReport> {
+    let conn = thunderlook_store::open(data_dir).map_err(|e| e.to_string())?;
+    let account = account::account(&conn, source_id)?;
+    let password = account::password(&account.address)?;
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+    let result = rt.block_on(async {
+        let mut s = imap_login(&account.endpoints.imap, &account.endpoints.username, &password).await?;
+        let r = fetch::sync(&mut s, &conn, data_dir, &account).await;
+        let _ = s.logout().await;
+        r
+    });
+    account::set_status(&conn, source_id, result.as_ref().err().map(String::as_str))?;
+    result
 }
