@@ -1,6 +1,22 @@
-# Passation — après le J7 (état au 2026-10-21)
+# Passation — état au 2026-10-21, 21 h (fin de contexte)
 
-À lire en premier dans une nouvelle session, avec `PLAN.md` §4-5, `notes/j7-plan.md` et `git log`.
+## À reprendre en premier
+1. **Outlook n'affiche aucun sous-dossier IMAP de paul@** (ni Envoyés/Indésirables/Corbeille, ni les dossiers des règles) : seulement Boîte de réception (841) et Boîte d'envoi. Vérifié par COM (`New-Object -ComObject Outlook.Application`, parcours de `GetRootFolder()`), après envoi/réception et redémarrage d'Outlook.
+   - Fait : abonnement IMAP des dossiers créés par ThunderLook sur paul@ et electromagnetisme (`crates/sync/examples/subscriptions.rs`) ; la création de dossier abonne désormais (`push.rs`, mkdir).
+   - Pistes non vérifiées : rafraîchissement de la liste par Outlook (clic droit sur la Boîte de réception › Dossiers IMAP › Interroger / afficher seulement les abonnés), réglage « chemin du dossier racine » du compte IMAP (vide dans le registre), deux chemins d'OST dans le registre (`IMAP Store EID` dans %LOCALAPPDATA%, `IMAP Folder Path` = `A:\Fichiers Outlook\paul@adam-declic.Fr.ost`).
+   - Sur le serveur tout est correct (`compare.rs`) : paul@ 1 271, dont Allo Voisins 32, Accusés 33, LBC | FB 26, Ebay & Paypal 20.
+2. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : Paul doit le supprimer (garde-fou : suppression refusée à l'agent).
+3. **Construction de l'application** lancée en fin de session (sécurité des 20 déplacements, `aa30da2`) : vérifier `target/release/thunderlook.exe` à jour, `node tools/ui_check.mjs` (5 cas), relancer ThunderLook. Fermer **toutes** les instances avant de construire (`foreach ($p in @(Get-Process thunderlook)) { $p.CloseMainWindow() }`).
+4. **J9 Calendrier, option A** (Outlook fait foi, ThunderLook en lecture seule) : pas commencé. Plan : `notes/j9-plan.md`.
+
+## Fait le 21/10 après la v0.8.0 (non publié, pas d'étiquette)
+- Schéma v9 : `account.rules_on_arrival` ; J8 POP3 abandonné.
+- Outlook basculé sur le profil IMAP « Outlook », PST rattaché ; sauvegardes `A:\Fichiers Outlook\*_BACKUP_2026-10-21_1638.*`.
+- ThunderLook : comptes paul@ (source 3), contact@electromagnetisme.fr (4), contact@angeliquemaillet.art (5), identiques au serveur ; hypso redirigé vers paul@ (Hostinger, copie gardée).
+- Règles du PST copiées par compte (`account:3`, `account:4`), règles à l'arrivée actives sur 3 et 4 ; dossiers de règles créés sur les deux serveurs (noms IMAP en UTF-7 modifié).
+- Corrections : sortie de Courrier indésirable (UID avant changement de dossier), menu Indésirables ▾, cibles de règles par compte (`imap:<source>:<nom>`), déplacement entre comptes = dépôt puis suppression, INTERNALDATE au dépôt (entre guillemets), mkdir + abonnement, aperçu obligatoire au-delà de 20 déplacements.
+- Incident réparé : 111 messages de paul@ partis par erreur chez electromagnetisme, ramenés (`rehome.rs`), dates conservées.
+- Outils (`crates/sync/examples`) : compare, find, dates, subscriptions, copy_rules, rehome, cross_move, junk_roundtrip, mkdir, account_rules. Dossier de test : `$CLAUDE_JOB_DIR/tmp/j7store` (comptes test et test2).
 
 ## Où on en est
 - Livré : J0 à J7 et J3b. La version courante est **v0.8.0** (étiquette git). Prochaine mineure : 0.9.0 (`notes/dev.md` § Versions).
