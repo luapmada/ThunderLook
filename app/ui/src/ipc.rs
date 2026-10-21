@@ -3,7 +3,7 @@
 use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
-    AccountSummary, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
+    AccountSummary, AutoReply, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
     quicksteps::QuickStep,
     settings::Settings,
 };
@@ -254,6 +254,19 @@ pub async fn remove_account(id: &str) -> Result<Vec<AccountSummary>, String> {
 
 pub async fn send_draft(draft: &Draft) -> Result<String, String> {
     call("send_draft", &DraftArg { draft }).await
+}
+
+pub async fn get_auto_reply() -> Result<AutoReply, String> {
+    call("get_auto_reply", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct AutoReplyArg<'a> {
+    config: &'a AutoReply,
+}
+
+pub async fn set_auto_reply(config: &AutoReply) -> Result<(), String> {
+    call("set_auto_reply", &AutoReplyArg { config }).await
 }
 
 #[derive(Serialize)]

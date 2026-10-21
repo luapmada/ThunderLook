@@ -11,6 +11,7 @@ thunderlook-store = { path = "../store" }
 thunderlook-mailbox = { path = "../mailbox" }
 thunderlook-mime = { path = "../mime" }
 mail-parser = "0.11.9"
+mail-builder = "1.0.0"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 keyring = { version = "3.6.3", features = ["windows-native"] }
 serde_json = "1.0"

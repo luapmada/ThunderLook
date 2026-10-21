@@ -65,6 +65,7 @@ pub enum Action {
     SyncNow,
     Accounts,
     OfflineToggle,
+    AutoReply,
 }
 
 impl Action {
@@ -133,6 +134,7 @@ fn perform(ui: Ui, action: Action) {
         Action::RunRules => ui.dialog.set(Some(Dialog::Rules { run: true })),
         Action::SyncNow => actions::sync_now(ui),
         Action::OfflineToggle => actions::toggle_offline(ui),
+        Action::AutoReply => ui.dialog.set(Some(Dialog::AutoReply)),
         Action::Accounts => ui.dialog.set(Some(Dialog::Accounts)),
         Action::ManageQuickSteps => ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false })),
         Action::CloseSearch => {
@@ -316,7 +318,13 @@ const SEND_RECEIVE: &[Group] = &[
         label: "Préférences",
         cmds: &[wired("Travailler hors connexion", CLOUD_OFF, None, true, true, Action::OfflineToggle)],
     },
-    Group { label: "Comptes", cmds: &[wired("Paramètres du compte", SETTINGS, None, true, true, Action::Accounts)] },
+    Group {
+        label: "Comptes",
+        cmds: &[
+            wired("Paramètres du compte", SETTINGS, None, true, true, Action::Accounts),
+            wired("Réponses automatiques", MAIL_OPEN, None, true, false, Action::AutoReply),
+        ],
+    },
 ];
 
 const FOLDER: &[Group] = &[

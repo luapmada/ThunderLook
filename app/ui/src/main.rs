@@ -3,6 +3,7 @@
 mod accounts;
 mod actions;
 mod app;
+mod autoreply;
 mod commandbar;
 mod compose;
 mod dialogs;

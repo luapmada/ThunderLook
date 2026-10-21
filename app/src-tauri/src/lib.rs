@@ -18,7 +18,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use thunderlook_mailbox::Mailbox;
 use thunderlook_model::{
-    AccountSummary, CategoryInfo, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
+    AccountSummary, AutoReply, CategoryInfo, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
     MessageOp, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
     SortField, format,
     quicksteps::{QuickStep, default_quick_steps},
@@ -148,6 +148,12 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
                 sent += r.sent;
                 received += r.new_messages;
                 if !r.new_inbox_ids.is_empty() {
+                    // Réponses d'abord (sur les messages tels que reçus), puis règles (qui peuvent les déplacer).
+                    match auto_replies(app, a.source_id, &r.new_inbox_ids) {
+                        Ok(n) if n > 0 => app.state::<Syncer>().again.store(true, Ordering::SeqCst),
+                        Ok(_) => {}
+                        Err(e) => errors.push(format!("{} : réponse automatique : {e}", a.address)),
+                    }
                     if let Err(e) = rules_on_arrival(app, a.source_id, &r.new_inbox_ids) {
                         errors.push(format!("{} : règles : {e}", a.address));
                     }
@@ -177,6 +183,55 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
         (None, false) => parts.join(" · "),
     };
     SyncEvent { running: false, message, sent, received, error: errors.into_iter().next() }
+}
+
+fn auto_reply_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(settings_path(app)?.with_file_name("autoreply.json"))
+}
+
+fn load_auto_reply(app: &AppHandle) -> AutoReply {
+    auto_reply_path(app).ok().and_then(|p| fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+fn store_auto_reply(app: &AppHandle, cfg: &AutoReply) -> Result<(), String> {
+    let path = auto_reply_path(app)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+/// Réponses automatiques aux nouveaux messages d'un compte ; renvoie le nombre de réponses mises dans la Boîte d'envoi.
+fn auto_replies(app: &AppHandle, source: i64, ids: &[i64]) -> Result<usize, String> {
+    let mut cfg = load_auto_reply(app);
+    if !thunderlook_sync::autoreply::active(&cfg, &chrono::Local::now().format("%Y-%m-%d").to_string()) {
+        return Ok(0);
+    }
+    let dir = data_dir(app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    let account = thunderlook_sync::account::account(&conn, source)?;
+    let replied = thunderlook_sync::autoreply::queue_replies(&conn, &dir, &account, ids, &cfg)?;
+    if !replied.is_empty() {
+        cfg.replied.extend(replied.iter().cloned());
+        store_auto_reply(app, &cfg)?;
+    }
+    Ok(replied.len())
+}
+
+#[tauri::command]
+fn get_auto_reply(app: AppHandle) -> AutoReply {
+    load_auto_reply(&app)
+}
+
+/// Enregistre la réponse automatique ; une nouvelle activation repart d'une liste d'expéditeurs vide.
+#[tauri::command]
+fn set_auto_reply(app: AppHandle, config: AutoReply) -> Result<(), String> {
+    let previous = load_auto_reply(&app);
+    let mut cfg = config;
+    cfg.replied = if cfg.enabled && previous.enabled { previous.replied } else { Vec::new() };
+    store_auto_reply(&app, &cfg)
 }
 
 /// Règles actives appliquées aux nouveaux messages de la Boîte de réception d'un compte (comme Outlook à l'arrivée).
@@ -674,6 +729,8 @@ pub fn run() {
             send_draft,
             sync_now,
             set_offline,
+            get_auto_reply,
+            set_auto_reply,
             set_rule_active,
             import_rwz,
             run_rules,

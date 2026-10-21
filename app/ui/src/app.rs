@@ -14,6 +14,7 @@ use crate::{
     commandbar::CommandBar,
     compose::ComposePane,
     accounts::AccountsDialog,
+    autoreply::AutoReplyDialog,
     dialogs::Dialogs,
     quicksteps::QuickStepsDialog,
     rules::RulesDialog,
@@ -443,6 +444,7 @@ pub fn App() -> impl IntoView {
             <RulesDialog />
             <QuickStepsDialog />
             <AccountsDialog />
+            <AutoReplyDialog />
         </div>
     }
 }

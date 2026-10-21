@@ -1415,3 +1415,20 @@ input {
   gap: 0;
   min-height: 44px;
 }
+
+/* Réponses automatiques (J7). */
+.ar-text {
+  min-height: 120px;
+  padding: calc(var(--u) * 2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.ar-text:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}

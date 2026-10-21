@@ -5230,6 +5230,7 @@ dependencies = [
  "futures",
  "keyring",
  "lettre",
+ "mail-builder",
  "mail-parser",
  "serde",
  "serde_json",

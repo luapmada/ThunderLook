@@ -583,6 +583,19 @@ pub struct SyncEvent {
     pub error: Option<String>,
 }
 
+/// Réponse automatique locale (J7), enregistrée par le cœur dans `autoreply.json`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AutoReply {
+    pub enabled: bool,
+    /// Période (dates `AAAA-MM-JJ`, incluses) ; vide : sans limite.
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub text: String,
+    /// Expéditeurs qui ont déjà reçu une réponse pendant la période en cours (vidé à chaque activation).
+    pub replied: Vec<String>,
+}
+
 /// Initiales pour la pastille de l'expéditeur.
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphanumeric()));

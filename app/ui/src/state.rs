@@ -96,6 +96,8 @@ pub enum Dialog {
     QuickSteps { edit: Option<usize>, first_use: bool },
     /// « Paramètres du compte » (J7).
     Accounts,
+    /// « Réponses automatiques » (J7).
+    AutoReply,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

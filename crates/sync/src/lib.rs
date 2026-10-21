@@ -5,6 +5,7 @@
 //! d'erreur.
 
 pub mod account;
+pub mod autoreply;
 pub mod fetch;
 pub mod push;
 pub mod send;
