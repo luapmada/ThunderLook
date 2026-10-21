@@ -101,7 +101,7 @@ fn folder_targets_by_entry_id_then_name() {
     let (_f, dir) = setup("folders");
     let c = thunderlook_store::open(&dir).unwrap();
     let entry = |nid: u32| -> Vec<u8> { [0, 0, 0, 0].into_iter().chain([7u8; 16]).chain(nid.to_le_bytes()).collect() };
-    let mut add = |name: &str, props: Vec<u8>, messages: usize| -> i64 {
+    let add = |name: &str, props: Vec<u8>, messages: usize| -> i64 {
         c.execute(
             "INSERT INTO folder (source_id, parent_id, nid, name, role, container_class, hidden, position, props) VALUES (1, 1, 0, ?1, 'folder', NULL, 0, 0, ?2)",
             params![name, props],

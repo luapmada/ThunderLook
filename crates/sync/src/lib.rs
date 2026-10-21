@@ -4,6 +4,8 @@
 //! vérification. Les mots de passe ne passent que par les fonctions de connexion et n'apparaissent dans aucun message
 //! d'erreur.
 
+pub mod account;
+
 use std::sync::Arc;
 
 use async_imap::Session;

@@ -553,6 +553,21 @@ pub struct RuleRunReport {
     pub errors: Vec<String>,
 }
 
+/// Compte de messagerie (J7), pour la boîte « Paramètres du compte ».
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSummary {
+    /// `s<source>` : même identifiant que la section du volet des dossiers.
+    pub id: String,
+    pub address: String,
+    pub sender_name: String,
+    pub imap: String,
+    pub smtp: String,
+    /// Dernière relève réussie (libellé), et dernière erreur.
+    pub last_sync: Option<String>,
+    pub last_error: Option<String>,
+}
+
 /// Initiales pour la pastille de l'expéditeur.
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace().filter_map(|w| w.chars().find(|c| c.is_alphanumeric()));

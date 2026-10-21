@@ -13,7 +13,7 @@ pub use rusqlite;
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub const DB_FILE: &str = "thunderlook.db";
-const SCHEMA_VERSION: i32 = 7;
+const SCHEMA_VERSION: i32 = 8;
 
 /// Schéma v1. Les dates sont en millisecondes depuis l'époque Unix (UTC).
 /// `props` : sac de propriétés MAPI brut (format décrit dans `thunderlook-import-pst::propbag`),
@@ -21,7 +21,7 @@ const SCHEMA_VERSION: i32 = 7;
 const SCHEMA_V1: &str = r#"
 CREATE TABLE source (
     id          INTEGER PRIMARY KEY,
-    kind        TEXT NOT NULL,              -- 'pst'
+    kind        TEXT NOT NULL,              -- 'pst' ou 'imap' (J7)
     origin_path TEXT NOT NULL,              -- fichier choisi par l'utilisateur
     work_path   TEXT NOT NULL,              -- copie de travail réellement lue
     display_name TEXT NOT NULL,
@@ -210,6 +210,74 @@ CREATE TABLE IF NOT EXISTS rule (
 CREATE INDEX IF NOT EXISTS rule_origin ON rule(origin, position);
 "#;
 
+/// v8 (J7) : comptes IMAP + SMTP. Un compte est une source de type `imap` ; le mot de passe n'est jamais en
+/// base (Gestionnaire d'identification de Windows).
+/// - `folder.imap_name` : nom de la boîte aux lettres sur le serveur (NULL : dossier local, comme la boîte
+///   d'envoi) ; `imap_uidvalidity`, `imap_uidnext`, `imap_modseq` : état de la dernière synchronisation.
+/// - `message.imap_uid` : UID du message dans sa boîte (NULL : pas encore sur le serveur).
+/// - `imap_pending` : changements faits hors connexion ou pas encore reportés sur le serveur, dans l'ordre.
+/// - `outbox` : messages de la boîte d'envoi et état de leur envoi.
+const SCHEMA_V8: &str = r#"
+CREATE TABLE IF NOT EXISTS account (
+    id          INTEGER PRIMARY KEY,
+    source_id   INTEGER NOT NULL UNIQUE REFERENCES source(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,              -- nom de l'expéditeur
+    email       TEXT NOT NULL,
+    username    TEXT NOT NULL,
+    imap_host   TEXT NOT NULL,
+    imap_port   INTEGER NOT NULL,
+    imap_security TEXT NOT NULL,            -- 'tls', 'starttls' ou 'none' (machine locale seulement)
+    smtp_host   TEXT NOT NULL,
+    smtp_port   INTEGER NOT NULL,
+    smtp_security TEXT NOT NULL,
+    save_sent   INTEGER NOT NULL,           -- dépôt d'une copie dans « Éléments envoyés » du serveur
+    created_at  INTEGER NOT NULL,
+    last_sync   INTEGER,
+    last_error  TEXT                        -- dernière erreur de relève ou d'envoi (sans secret)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS message_imap_uid ON message(folder_id, imap_uid) WHERE imap_uid IS NOT NULL;
+CREATE TABLE IF NOT EXISTS imap_pending (
+    id          INTEGER PRIMARY KEY,
+    account_id  INTEGER NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,              -- 'flags', 'move', 'copy', 'expunge', 'append', 'mkdir', 'rename', 'rmdir'
+    mailbox     TEXT NOT NULL,              -- boîte concernée (nom IMAP)
+    uid         INTEGER,
+    message_id  INTEGER,                    -- message local concerné (append, move : reçoit le nouvel UID)
+    arg         TEXT NOT NULL,              -- JSON propre à chaque type
+    created_at  INTEGER NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT
+);
+CREATE TABLE IF NOT EXISTS outbox (
+    message_id  INTEGER PRIMARY KEY REFERENCES message(id) ON DELETE CASCADE,
+    account_id  INTEGER NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    queued_at   INTEGER NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT
+);
+"#;
+
+/// Colonnes du v8, ajoutées avant `SCHEMA_V8` et seulement si elles manquent : la migration peut être rejouée
+/// (bases de test ramenées à un schéma antérieur) sans « duplicate column ».
+const V8_COLUMNS: &[(&str, &str, &str)] = &[
+    ("folder", "imap_name", "TEXT"),
+    ("folder", "imap_uidvalidity", "INTEGER"),
+    ("folder", "imap_uidnext", "INTEGER"),
+    ("folder", "imap_modseq", "INTEGER"),
+    ("message", "imap_uid", "INTEGER"),
+];
+
+fn add_missing_columns(conn: &Connection, columns: &[(&str, &str, &str)]) -> rusqlite::Result<()> {
+    for (table, column, decl) in columns {
+        let exists: bool =
+            conn.query_row(&format!("SELECT EXISTS (SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1)"), [column], |r| r.get(0))?;
+        if !exists {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl};"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Objet sans le marqueur de préfixe que le PST place devant `PidTagSubject` ([MS-PST] §2.5.3.1.1.1) :
 /// un premier caractère de valeur 1, puis un caractère donnant la longueur du préfixe plus un.
 /// L'objet complet commence après ces deux caractères.
@@ -257,14 +325,16 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 10000;")?;
     let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version == 0 {
-        conn.execute_batch(&format!(
-            "BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} {SCHEMA_V4} {SCHEMA_V5} {SCHEMA_V6} {SCHEMA_V7} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
-        ))?;
+        conn.execute_batch(&format!("BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} {SCHEMA_V4} {SCHEMA_V5} {SCHEMA_V6} {SCHEMA_V7}"))?;
+        add_missing_columns(&conn, V8_COLUMNS)?;
+        conn.execute_batch(&format!("{SCHEMA_V8} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version < SCHEMA_VERSION {
         // Migrations par ajout uniquement : la base est lue par d'autres outils (ADI Facturation).
         let steps = [SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7];
         let pending = steps[(version as usize - 1).min(steps.len())..].concat();
-        conn.execute_batch(&format!("BEGIN; {pending} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
+        conn.execute_batch(&format!("BEGIN; {pending}"))?;
+        add_missing_columns(&conn, V8_COLUMNS)?;
+        conn.execute_batch(&format!("{SCHEMA_V8} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version > SCHEMA_VERSION {
         return Err(rusqlite::Error::InvalidParameterName(format!(
             "base créée par une version plus récente (schéma {version})"
