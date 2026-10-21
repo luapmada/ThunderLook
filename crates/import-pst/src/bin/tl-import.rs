@@ -1,18 +1,43 @@
 //! Import PST en ligne de commande (mesures du J1).
 //!
 //! Usage : tl-import <fichier.pst> <dossier-de-données> [--in-place] [--replace]
+//!         tl-import <fichier.pst> <dossier-de-données> --calendars <source>   (J9 : calendriers seulement)
 
 use std::{env, io::Write, path::PathBuf, process::ExitCode, time::Instant};
 
-use thunderlook_import_pst::{Options, Phase, import};
+use thunderlook_import_pst::{Options, Phase, import, refresh_calendars};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
-    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    let calendars: Option<i64> = args.iter().position(|a| a == "--calendars").and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok());
+    let positional: Vec<&String> = args
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| !a.starts_with("--") && !(*i > 0 && args[i - 1] == "--calendars"))
+        .map(|(_, a)| a)
+        .collect();
     let [src, data] = positional[..] else {
         eprintln!("Usage : tl-import <fichier.pst> <dossier-de-données> [--in-place] [--replace]");
         return ExitCode::from(2);
     };
+    if let Some(source) = calendars {
+        let result = refresh_calendars(&PathBuf::from(src), &PathBuf::from(data), source, &mut |p| {
+            if p.phase == Phase::Copy && p.done % (256 << 20) < (8 << 20) {
+                eprint!("\rcopie {} / {} Mo", p.done >> 20, p.total >> 20);
+            }
+        });
+        eprintln!();
+        return match result {
+            Ok(r) => {
+                println!("{}", serde_json::to_string_pretty(&r).unwrap_or_default());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("Échec : {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let options = Options { in_place: args.iter().any(|a| a == "--in-place"), replace: args.iter().any(|a| a == "--replace") };
     let t0 = Instant::now();
     let mut last = Instant::now();

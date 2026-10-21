@@ -292,6 +292,146 @@ pub fn import(src: &Path, data_dir: &Path, options: &Options, progress: &mut dyn
     Ok(report)
 }
 
+/// Bilan d'un rechargement des calendriers.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarRefresh {
+    /// Marque reconnue par `thunderlook-calendar` (mention « lu le … » de la vue).
+    pub calendar_refresh: bool,
+    pub origin_path: String,
+    pub work_path: String,
+    pub source_id: i64,
+    pub folders: Vec<String>,
+    pub removed: u64,
+    pub imported: u64,
+    pub lost: u64,
+    pub import_ms: u64,
+}
+
+/// J9, option A : relit seulement les calendriers d'un PST plus récent (même fichier d'origine, copie plus fraîche)
+/// dans une source déjà importée. Les dossiers de rendez-vous sont retrouvés par leur NID ; leurs éléments sont
+/// remplacés par ceux du PST, le reste de la source (courrier, contacts…) n'est pas touché. Une seule transaction ;
+/// les anciens `.eml` ne sont effacés qu'après sa validation.
+pub fn refresh_calendars(src: &Path, data_dir: &Path, source_id: i64, progress: &mut dyn FnMut(&Progress)) -> Result<CalendarRefresh, ImportError> {
+    let origin = PathBuf::from(plain_path(&fs::canonicalize(src).map_err(|e| fail!("{} : {e}", src.display()))?));
+    let data_dir = &PathBuf::from(plain_path(&fs::canonicalize(data_dir)?));
+    let work = working_copy(&origin, data_dir, progress)?;
+    let t0 = Instant::now();
+    let store = outlook_pst::open_store(&work).map_err(|e| fail!("ouverture du PST {} : {e}", work.display()))?;
+    let named = NamedProps::read(&store).map_err(|e| fail!("table des propriétés nommées : {e}"))?;
+
+    let mut conn = thunderlook_store::open(data_dir)?;
+    // Les sacs déjà importés pointent dans la table des propriétés nommées de la source : la nouvelle doit la prolonger.
+    let old_named: Vec<u8> = conn
+        .query_row("SELECT props FROM source WHERE id = ?1 AND kind = 'pst'", params![source_id], |r| r.get::<_, Option<Vec<u8>>>(0))
+        .map_err(|_| fail!("source {source_id} introuvable ou qui n'est pas un PST"))?
+        .unwrap_or_default();
+    if !named.raw.starts_with(&old_named) {
+        return Err(fail!(
+            "la table des propriétés nommées de {} ne prolonge pas celle de la source {source_id} : ce n'est pas une version du même fichier",
+            origin.display()
+        ));
+    }
+
+    let tx = conn.transaction()?;
+    tx.execute("UPDATE source SET props = ?2 WHERE id = ?1", params![source_id, named.raw])?;
+    let next_message_id: i64 = tx.query_row("SELECT COALESCE(MAX(id), 0) + 1 FROM message", [], |r| r.get(0))?;
+    let mut report = Report { source_id, ..Default::default() };
+    let (sender, receiver) = mpsc::sync_channel::<(PathBuf, Vec<u8>)>(256);
+    let writer = thread::spawn(move || -> std::io::Result<()> {
+        for (path, bytes) in receiver {
+            if let Some(dir) = path.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(&path, &bytes)?;
+        }
+        Ok(())
+    });
+    let mut out = CalendarRefresh {
+        calendar_refresh: true,
+        origin_path: plain_path(&origin),
+        work_path: work.to_string_lossy().into_owned(),
+        source_id,
+        ..Default::default()
+    };
+    let mut old_emls: Vec<String> = Vec::new();
+    let mut walker = Walker {
+        store: &store,
+        named: &named,
+        tx: &tx,
+        data_dir,
+        source_id,
+        next_message_id,
+        report: &mut report,
+        roles: Roles::default(),
+        sender,
+        progress,
+        total_hint: 0,
+        ipm_folder_id: None,
+    };
+    // Parcours de l'arborescence du PST : seuls les dossiers de rendez-vous déjà connus de la source sont rechargés.
+    let mut stack = vec![(NID_ROOT_FOLDER, String::new())];
+    while let Some((nid, path)) = stack.pop() {
+        let folder = walker.open_folder(nid).map_err(|e| fail!("dossier {nid:#x} : {e}"))?;
+        let fp = folder.properties();
+        let name = text(fp.get(PR_DISPLAY_NAME)).unwrap_or_default();
+        let here = if path.is_empty() { name.clone() } else { format!("{path}/{name}") };
+        if let Some(table) = folder.hierarchy_table() {
+            stack.extend(table.rows_matrix().map(|r| (u32::from(r.id()), here.clone())));
+        }
+        let class = text(fp.get(PR_CONTAINER_CLASS)).unwrap_or_default();
+        if !class.starts_with("IPF.Appointment") {
+            continue;
+        }
+        let Some(folder_id) = tx
+            .query_row("SELECT id FROM folder WHERE source_id = ?1 AND nid = ?2", params![source_id, nid], |r| r.get::<_, i64>(0))
+            .map(Some)
+            .or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?
+        else {
+            continue;
+        };
+        let old: Vec<(i64, String)> = tx
+            .prepare("SELECT id, eml_path FROM message WHERE folder_id = ?1")?
+            .query_map(params![folder_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (id, rel) in old {
+            tx.execute("DELETE FROM message_fts WHERE rowid = ?1", params![id])?;
+            tx.execute("DELETE FROM message WHERE id = ?1", params![id])?;
+            old_emls.push(rel);
+            out.removed += 1;
+        }
+        tx.execute(
+            "UPDATE folder SET name = ?2, pst_content_count = ?3, pst_unread_count = ?4, props = ?5 WHERE id = ?1",
+            params![folder_id, name, int(fp.get(PR_CONTENT_COUNT)), int(fp.get(PR_CONTENT_UNREAD)), props::propbag(fp.iter(), &[])],
+        )?;
+        if let Some(table) = folder.contents_table() {
+            let rows: Vec<u32> = table.rows_matrix().map(|r| u32::from(r.id())).collect();
+            for row_nid in rows {
+                walker.report.contents_rows += 1;
+                walker.message(folder_id, row_nid, &here)?;
+            }
+        }
+        out.folders.push(here);
+    }
+    let Walker { sender, .. } = walker;
+    drop(sender);
+    writer.join().map_err(|_| fail!("le fil d'écriture des .eml s'est arrêté"))??;
+    out.imported = report.messages_imported;
+    out.lost = report.messages_lost;
+    out.import_ms = t0.elapsed().as_millis() as u64;
+    let json = serde_json::to_string_pretty(&out).unwrap_or_default();
+    tx.execute(
+        "INSERT INTO import_run (source_id, started_at, duration_ms, report_json) VALUES (?1, ?2, ?3, ?4)",
+        params![source_id, now_ms() - out.import_ms as i64, out.import_ms as i64, json],
+    )?;
+    tx.commit()?;
+    // Les nouveaux `.eml` ont d'autres noms (identifiants nouveaux) : les anciens peuvent partir.
+    for rel in old_emls {
+        let _ = fs::remove_file(resolve(data_dir, &rel));
+    }
+    Ok(out)
+}
+
 /// Rôles des dossiers spéciaux, par NID.
 #[derive(Default)]
 struct Roles {

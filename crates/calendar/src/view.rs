@@ -327,8 +327,13 @@ pub fn source_note(conn: &Connection, calendars: &[CalendarInfo]) -> crate::Resu
     if ids.is_empty() {
         return Ok(None);
     }
+    // Date de lecture : dernier rechargement des calendriers (`tl-import --calendars`), sinon l'import de la source.
     let sql = format!(
-        "SELECT s.origin_path, MIN(s.imported_at) FROM source s JOIN folder f ON f.source_id = s.id WHERE f.id IN ({}) GROUP BY s.id ORDER BY 2",
+        "SELECT COALESCE((SELECT json_extract(r.report_json, '$.originPath') FROM import_run r
+                          WHERE r.source_id = s.id AND json_extract(r.report_json, '$.calendarRefresh') ORDER BY r.started_at DESC LIMIT 1), s.origin_path),
+                COALESCE((SELECT MAX(r.started_at + r.duration_ms) FROM import_run r
+                          WHERE r.source_id = s.id AND json_extract(r.report_json, '$.calendarRefresh')), s.imported_at)
+         FROM source s WHERE s.id IN (SELECT source_id FROM folder WHERE id IN ({})) ORDER BY 2",
         ids.join(",")
     );
     let e = |x: thunderlook_store::rusqlite::Error| x.to_string();
