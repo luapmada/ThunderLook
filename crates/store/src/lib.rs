@@ -13,7 +13,7 @@ pub use rusqlite;
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub const DB_FILE: &str = "thunderlook.db";
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 9;
 
 /// Schéma v1. Les dates sont en millisecondes depuis l'époque Unix (UTC).
 /// `props` : sac de propriétés MAPI brut (format décrit dans `thunderlook-import-pst::propbag`),
@@ -267,6 +267,10 @@ const V8_COLUMNS: &[(&str, &str, &str)] = &[
     ("message", "imap_uid", "INTEGER"),
 ];
 
+/// v9 : règles à l'arrivée par compte (désactivées par défaut : pendant la transition, Outlook et ThunderLook
+/// relèvent les mêmes boîtes IMAP et les règles ne doivent tourner que d'un côté).
+const V9_COLUMNS: &[(&str, &str, &str)] = &[("account", "rules_on_arrival", "INTEGER NOT NULL DEFAULT 0")];
+
 fn add_missing_columns(conn: &Connection, columns: &[(&str, &str, &str)]) -> rusqlite::Result<()> {
     for (table, column, decl) in columns {
         let exists: bool =
@@ -327,14 +331,18 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     if version == 0 {
         conn.execute_batch(&format!("BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} {SCHEMA_V4} {SCHEMA_V5} {SCHEMA_V6} {SCHEMA_V7}"))?;
         add_missing_columns(&conn, V8_COLUMNS)?;
-        conn.execute_batch(&format!("{SCHEMA_V8} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
+        conn.execute_batch(SCHEMA_V8)?;
+        add_missing_columns(&conn, V9_COLUMNS)?;
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version < SCHEMA_VERSION {
         // Migrations par ajout uniquement : la base est lue par d'autres outils (ADI Facturation).
         let steps = [SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7];
         let pending = steps[(version as usize - 1).min(steps.len())..].concat();
         conn.execute_batch(&format!("BEGIN; {pending}"))?;
         add_missing_columns(&conn, V8_COLUMNS)?;
-        conn.execute_batch(&format!("{SCHEMA_V8} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
+        conn.execute_batch(SCHEMA_V8)?;
+        add_missing_columns(&conn, V9_COLUMNS)?;
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version > SCHEMA_VERSION {
         return Err(rusqlite::Error::InvalidParameterName(format!(
             "base créée par une version plus récente (schéma {version})"

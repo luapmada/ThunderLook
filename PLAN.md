@@ -81,7 +81,7 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | J5 ✅ | Rédaction (brouillons) | Fenêtre de rédaction HTML, réponse et transfert avec citation, signatures (import HTM), modèles `.oft`, brouillons | Réponse à tous fidèle (en-têtes, citation) enregistrée en brouillon | M |
 | J6 ✅ | Règles et actions rapides | Import du flux de règles et des `.rwz`, assistant de règles, « Exécuter maintenant », actions rapides (défauts plus éditeur) | Tes 2 `.rwz` et le flux du PST importés, et rejoués sur une copie | L |
 | J7 ✅ | IMAP + SMTP (Hostinger) | Comptes, synchronisation, envoi, boîte d'envoi, F9, hors connexion, notifications, réponse automatique locale | Envoi et réception réels sur un compte de test | L |
-| J8 | POP3 | Si toujours utile (profil « pop-original ») | — | S |
+| J8 ✖ | POP3 | Abandonné le 2026-10-21 : pendant la transition, Outlook et ThunderLook relèvent les mêmes boîtes en IMAP (en POP3, ce qu'un client relève, l'autre ne le voit pas) | — | — |
 | J9+ | Calendrier, puis Contacts, puis Tâches | Ordre fixé par Q3. Import de 854 rendez-vous, 6 046 contacts, tâches, .ics/.vcf | Jalons détaillés plus tard | L |
 
 ## 5. Vérification

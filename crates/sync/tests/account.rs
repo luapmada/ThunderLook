@@ -19,6 +19,10 @@ fn account_lifecycle_keeps_password_out_of_the_database() {
     assert_eq!((a.address.as_str(), a.endpoints.imap.host.as_str()), (address.as_str(), "imap.hostinger.com"));
     let s = account::summaries(&conn).unwrap();
     assert_eq!((s[0].id.clone(), s[0].smtp.clone()), (format!("s{id}"), "smtp.hostinger.com:465".to_string()));
+    // Règles à l'arrivée : désactivées par défaut.
+    assert!(!a.rules_on_arrival && !s[0].rules_on_arrival);
+    account::set_rules_on_arrival(&conn, id, true).unwrap();
+    assert!(account::account(&conn, id).unwrap().rules_on_arrival);
     // Section du volet : un dossier « ipm » avec la Boîte d'envoi locale.
     let outbox: String = conn
         .query_row("SELECT f.name FROM folder f JOIN folder p ON p.id = f.parent_id WHERE p.role = 'ipm' AND f.role = 'outbox' AND f.source_id = ?1", [id], |r| r.get(0))

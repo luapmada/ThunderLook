@@ -39,6 +39,8 @@ pub struct Account {
     pub endpoints: Endpoints,
     /// Copie des messages envoyés dans « Éléments envoyés » du serveur.
     pub save_sent: bool,
+    /// Règles actives appliquées aux nouveaux messages de la Boîte de réception.
+    pub rules_on_arrival: bool,
 }
 
 fn now_ms() -> i64 {
@@ -61,7 +63,7 @@ fn security_of(s: &str) -> thunderlook_store::rusqlite::Result<Security> {
 }
 
 const SELECT: &str = "SELECT id, source_id, name, email, username, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security,
-    save_sent, last_sync, last_error FROM account";
+    save_sent, last_sync, last_error, rules_on_arrival FROM account";
 
 fn row(r: &Row) -> thunderlook_store::rusqlite::Result<(Account, Option<i64>, Option<String>)> {
     let endpoints = Endpoints {
@@ -69,7 +71,15 @@ fn row(r: &Row) -> thunderlook_store::rusqlite::Result<(Account, Option<i64>, Op
         imap: Server { host: r.get(5)?, port: r.get(6)?, security: security_of(&r.get::<_, String>(7)?)? },
         smtp: Server { host: r.get(8)?, port: r.get(9)?, security: security_of(&r.get::<_, String>(10)?)? },
     };
-    let a = Account { id: r.get(0)?, source_id: r.get(1)?, sender_name: r.get(2)?, address: r.get(3)?, endpoints, save_sent: r.get(11)? };
+    let a = Account {
+        id: r.get(0)?,
+        source_id: r.get(1)?,
+        sender_name: r.get(2)?,
+        address: r.get(3)?,
+        endpoints,
+        save_sent: r.get(11)?,
+        rules_on_arrival: r.get(14)?,
+    };
     Ok((a, r.get(12)?, r.get(13)?))
 }
 
@@ -103,6 +113,7 @@ pub fn summaries(conn: &Connection) -> Result<Vec<AccountSummary>> {
             sender_name: a.sender_name,
             last_sync: last_sync.and_then(|t| chrono::Local.timestamp_millis_opt(t).single()).map(|d| d.format("%d/%m/%Y %H:%M").to_string()),
             last_error,
+            rules_on_arrival: a.rules_on_arrival,
         })
     })
     .collect()
@@ -171,6 +182,12 @@ pub fn remove(conn: &Connection, data_dir: &Path, source_id: i64) -> Result<()> 
     let a = account(conn, source_id)?;
     thunderlook_store::delete_source(conn, data_dir, source_id).map_err(|e| e.to_string())?;
     forget_password(&a.address)
+}
+
+/// Active ou désactive les règles à l'arrivée pour un compte.
+pub fn set_rules_on_arrival(conn: &Connection, source_id: i64, on: bool) -> Result<()> {
+    let n = conn.execute("UPDATE account SET rules_on_arrival = ?2 WHERE source_id = ?1", params![source_id, on]).map_err(|e| e.to_string())?;
+    if n == 0 { Err(format!("compte introuvable (source {source_id})")) } else { Ok(()) }
 }
 
 /// Relève réussie (`error` : `None`) ou échouée.

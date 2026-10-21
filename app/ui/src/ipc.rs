@@ -248,6 +248,16 @@ pub async fn add_account(address: &str, name: &str, password: &str, imap_host: &
     call("add_account", &AddAccountArg { address, name, password, imap_host, smtp_host }).await
 }
 
+#[derive(Serialize)]
+struct AccountRulesArg<'a> {
+    id: &'a str,
+    on: bool,
+}
+
+pub async fn set_account_rules(id: &str, on: bool) -> Result<Vec<AccountSummary>, String> {
+    call("set_account_rules", &AccountRulesArg { id, on }).await
+}
+
 pub async fn remove_account(id: &str) -> Result<Vec<AccountSummary>, String> {
     call("remove_account", &IdArg { id }).await
 }

@@ -154,8 +154,10 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
                         Ok(_) => {}
                         Err(e) => errors.push(format!("{} : réponse automatique : {e}", a.address)),
                     }
-                    if let Err(e) = rules_on_arrival(app, a.source_id, &r.new_inbox_ids) {
-                        errors.push(format!("{} : règles : {e}", a.address));
+                    if a.rules_on_arrival {
+                        if let Err(e) = rules_on_arrival(app, a.source_id, &r.new_inbox_ids) {
+                            errors.push(format!("{} : règles : {e}", a.address));
+                        }
                     }
                 }
                 errors.extend(r.send_error.map(|e| format!("{} : envoi : {e}", a.address)));
@@ -493,6 +495,15 @@ fn remove_account(app: AppHandle, id: String) -> Result<Vec<AccountSummary>, Str
     thunderlook_sync::account::summaries(&conn)
 }
 
+/// Règles à l'arrivée pour un compte (case de « Paramètres du compte »).
+#[tauri::command(async)]
+fn set_account_rules(app: AppHandle, id: String, on: bool) -> Result<Vec<AccountSummary>, String> {
+    let source: i64 = id.strip_prefix('s').and_then(|n| n.parse().ok()).ok_or_else(|| format!("identifiant invalide : {id}"))?;
+    let conn = thunderlook_store::open(&data_dir(&app)?).map_err(|e| e.to_string())?;
+    thunderlook_sync::account::set_rules_on_arrival(&conn, source, on)?;
+    thunderlook_sync::account::summaries(&conn)
+}
+
 /// « Envoyer » : le message va dans la Boîte d'envoi et un passage d'envoi démarre aussitôt.
 #[tauri::command(async)]
 fn send_draft(app: AppHandle, store: State<Store>, draft: Draft) -> Result<String, String> {
@@ -726,6 +737,7 @@ pub fn run() {
             accounts,
             add_account,
             remove_account,
+            set_account_rules,
             send_draft,
             sync_now,
             set_offline,

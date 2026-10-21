@@ -569,6 +569,9 @@ pub struct AccountSummary {
     /// Dernière relève réussie (libellé), et dernière erreur.
     pub last_sync: Option<String>,
     pub last_error: Option<String>,
+    /// Règles actives appliquées aux nouveaux messages de la Boîte de réception (désactivé par défaut).
+    #[serde(default)]
+    pub rules_on_arrival: bool,
 }
 
 /// État de l'envoi et de la réception (J7), émis par le cœur (événement « sync ») à chaque début et fin de passage.

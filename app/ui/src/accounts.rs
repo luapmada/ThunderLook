@@ -205,6 +205,25 @@ pub fn AccountsDialog() -> impl IntoView {
                                     }
                                 }).collect_view()}
                             </div>
+                            <label class="check">
+                                <input
+                                    type="checkbox"
+                                    aria-label="Appliquer les règles à l'arrivée"
+                                    prop:checked=move || list.with(|v| v.get(current.get()).is_some_and(|a| a.rules_on_arrival))
+                                    on:change=move |ev| {
+                                        let on = event_target_checked(&ev);
+                                        let Some(acc) = list.with_untracked(|v| v.get(current.get_untracked()).cloned()) else { return };
+                                        spawn_local(async move {
+                                            match ipc::set_account_rules(&acc.id, on).await {
+                                                Ok(v) => list.set(v),
+                                                Err(e) => note.set(Some(e)),
+                                            }
+                                        });
+                                    }
+                                />
+                                <span>"Appliquer les règles à l'arrivée des messages de ce compte"</span>
+                            </label>
+                            <p class="dialog-note">"Décoché par défaut : tant qu'Outlook relève aussi ce compte, laissez les règles tourner d'un seul côté."</p>
                             <div class="rules-toolbar">
                                 <button class="btn" on:click=move |_| start_add()>"Ajouter…"</button>
                                 <button class="btn" on:click=move |_| remove()>"Supprimer"</button>
