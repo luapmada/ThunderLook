@@ -19,7 +19,12 @@ fn main() -> Result<(), String> {
             println!("compte retiré du dossier de test (rien n'est effacé sur le serveur)");
             return Ok(());
         }
-        Some(a) => a.source_id,
+        Some(a) => {
+            // Outil de test : le mot de passe de test est remis dans le gestionnaire d'identifiants (un retrait du
+            // compte ailleurs, par ui_check par exemple, l'en a ôté : l'entrée est propre à l'adresse).
+            account::store_password(address, acc["password"].as_str().unwrap_or_default())?;
+            a.source_id
+        }
         None => {
             let password = acc["password"].as_str().unwrap_or_default();
             let ep = Endpoints::hostinger(address);

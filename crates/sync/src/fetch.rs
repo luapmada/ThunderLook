@@ -28,6 +28,8 @@ pub struct SyncReport {
     /// Messages envoyés depuis la Boîte d'envoi, et dernière erreur d'envoi.
     pub sent: u32,
     pub send_error: Option<String>,
+    /// Nouveaux messages de la Boîte de réception (identifiants locaux), pour les règles à l'arrivée.
+    pub new_inbox_ids: Vec<i64>,
 }
 
 fn now_ms() -> i64 {
@@ -183,7 +185,7 @@ struct Incoming {
 }
 
 /// Enregistre un message relevé : ligne `message`, `.eml`, pièces jointes.
-fn store_message(conn: &Connection, data_dir: &Path, source: i64, folder: i64, m: &Incoming) -> Result<()> {
+fn store_message(conn: &Connection, data_dir: &Path, source: i64, folder: i64, m: &Incoming) -> Result<i64> {
     let parsed = MessageParser::default().parse(&m.bytes);
     let (subject, from, to, cc, sent, mid, irt, imp, body, kind, atts) = match &parsed {
         Some(p) => {
@@ -270,7 +272,7 @@ fn store_message(conn: &Connection, data_dir: &Path, source: i64, folder: i64, m
         )
         .map_err(e)?;
     }
-    Ok(())
+    Ok(id)
 }
 
 /// Relève un dossier : nouveaux messages, drapeaux, suppressions faites ailleurs.
@@ -354,7 +356,10 @@ async fn sync_folder(s: &mut ImapSession, conn: &Connection, data_dir: &Path, so
                 internal_ms: f.internal_date().map(|d| d.timestamp_millis()),
                 bytes: body.to_vec(),
             };
-            store_message(&tx, data_dir, source, folder, &m)?;
+            let id = store_message(&tx, data_dir, source, folder, &m)?;
+            if name.eq_ignore_ascii_case("INBOX") {
+                report.new_inbox_ids.push(id);
+            }
             report.new_messages += 1;
         }
         tx.commit().map_err(e)?;

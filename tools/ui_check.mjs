@@ -341,10 +341,15 @@ CHECKS.push(['J7 : envoi réel puis réception sur le compte de test', async (lo
     await js(`(() => { const f = [...document.querySelectorAll('.compose-field input')]; const set = (i, v) => { i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); };
       set(f[0], ${JSON.stringify(acc.address)}); set(f[2], ${JSON.stringify(subject)}); })()`);
     await js(`(() => { const d = document.querySelector('.pane.compose iframe').contentDocument; d.body.focus(); d.execCommand('insertText', false, 'Envoi réel de vérification du J7.'); })()`);
+    // Les passages d'envoi/réception se suivent vite (IDLE) : on écoute l'événement « sync » du cœur plutôt que la
+    // barre d'état, qui ne montre que le dernier.
+    await js(`(() => { window.__tlSync = []; window.__TAURI__.event.listen('sync', e => window.__tlSync.push(e.payload)); })()`);
+    await sleep(300);
     const t0 = Date.now();
     await click('.compose-bar button', 'Envoyer');
-    for (let i = 0; i < 60 && !(await js(`(document.querySelector('.statusbar')?.textContent ?? '').includes('Message envoyé')`)); i++) await sleep(1000);
-    if (!(await js(`(document.querySelector('.statusbar')?.textContent ?? '').includes('Message envoyé')`))) throw new Error('pas de « Message envoyé » en 60 s');
+    const sentEvent = `(window.__tlSync ?? []).some(e => !e.running && e.sent > 0)`;
+    for (let i = 0; i < 60 && !(await js(sentEvent)); i++) await sleep(1000);
+    if (!(await js(sentEvent))) throw new Error(`aucun passage avec envoi en 60 s ; événements : ${await js(`JSON.stringify((window.__tlSync ?? []).map(e => e.message))`)}`);
     log(`envoyé en ${((Date.now() - t0) / 1000).toFixed(1)} s : « ${subject} »`);
     // Réception : F9, puis le message apparaît dans la Boîte de réception du compte.
     await js(`document.querySelector('[role=listbox]').focus()`);

@@ -599,10 +599,16 @@ impl Mailbox {
         }
 
         let marks = vec!["?"; scope.len()].join(",");
+        let only: Vec<i64> = req.only.iter().map(|id| parse_id(id, 'm')).collect::<Result<_>>()?;
+        let only_filter = if only.is_empty() {
+            String::new()
+        } else {
+            format!(" AND m.id IN ({})", only.iter().map(i64::to_string).collect::<Vec<_>>().join(","))
+        };
         let read_filter = match req.filter {
-            RunFilter::All => "",
-            RunFilter::Read => " AND m.is_read = 1",
-            RunFilter::Unread => " AND m.is_read = 0",
+            RunFilter::All => format!("{only_filter}"),
+            RunFilter::Read => format!(" AND m.is_read = 1{only_filter}"),
+            RunFilter::Unread => format!(" AND m.is_read = 0{only_filter}"),
         };
         let mut categories: HashMap<i64, Vec<String>> = HashMap::new();
         {

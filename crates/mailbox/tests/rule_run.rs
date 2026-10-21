@@ -197,6 +197,7 @@ fn run_now_simulates_then_applies() {
         subfolders: false,
         filter: RunFilter::All,
         apply: false,
+        only: Vec::new(),
     };
 
     // Simulation : m1 s'arrête à « Factures » (pas compté dans « Relances ») ; m2 est exclu par l'exception.
@@ -207,6 +208,12 @@ fn run_now_simulates_then_applies() {
     assert!(sim.rules[3].not_run[0].contains("pas avant le J7"), "{:?}", sim.rules[3]);
     let c = Connection::open(dir.join(thunderlook_store::DB_FILE)).unwrap();
     assert_eq!(where_is(&c, m1), (inbox, false, vec![]));
+
+    // Restriction à un message (règles à l'arrivée) : seul m5 est parcouru, aucune règle ne le concerne.
+    req.only = vec![format!("m{m5}")];
+    let one = mb.run_rules(&req).unwrap();
+    assert_eq!((one.scanned, one.changed), (1, 0));
+    req.only.clear();
 
     // Application.
     req.apply = true;

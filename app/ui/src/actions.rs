@@ -103,6 +103,17 @@ pub fn sync_now(ui: Ui) {
     });
 }
 
+/// Bascule « Travailler hors connexion ».
+pub fn toggle_offline(ui: Ui) {
+    let next = !ui.offline.get_untracked();
+    spawn_local(async move {
+        match ipc::set_offline(next).await {
+            Ok(v) => ui.offline.set(v),
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
 /// Nouveau message d'après un modèle `.oft`.
 pub fn compose_from_template(ui: Ui) {
     if ui.compose.with_untracked(Option::is_some) && ui.compose_dirty.get_untracked() {

@@ -124,6 +124,7 @@ pub fn RulesDialog() -> impl IntoView {
             subfolders: subfolders.get_untracked(),
             filter: filter.get_untracked(),
             apply,
+    only: Vec::new(),
         };
         busy.set(true);
         spawn_local(async move {

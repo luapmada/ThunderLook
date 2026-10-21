@@ -121,3 +121,53 @@ pub fn sync_account_blocking(data_dir: &std::path::Path, source_id: i64) -> Resu
     account::set_status(&conn, source_id, result.as_ref().err().map(String::as_str))?;
     result
 }
+
+/// Surveille la Boîte de réception du compte (IMAP IDLE) et appelle `on_new` à chaque changement signalé par le
+/// serveur, et `on_error` à chaque coupure (sans secret). Rend la main quand `stop` passe à vrai, ou quand le compte n'existe plus. Les coupures sont reprises
+/// après une minute ; l'attente est relancée toutes les 10 min (le serveur peut couper un IDLE trop long).
+pub fn watch_inbox_blocking(
+    data_dir: &std::path::Path,
+    source_id: i64,
+    stop: &std::sync::atomic::AtomicBool,
+    on_new: impl Fn(),
+    on_error: impl Fn(&str),
+) {
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
+    while !stop.load(Ordering::SeqCst) {
+        let account = match thunderlook_store::open(data_dir).map_err(|e| e.to_string()).and_then(|c| account::account(&c, source_id)) {
+            Ok(a) => a,
+            Err(_) => return,
+        };
+        let session: Result<()> = rt.block_on(async {
+            let password = account::password(&account.address)?;
+            let mut s = imap_login(&account.endpoints.imap, &account.endpoints.username, &password).await?;
+            s.select("INBOX").await.map_err(|e| e.to_string())?;
+            loop {
+                if stop.load(Ordering::SeqCst) {
+                    let _ = s.logout().await;
+                    return Ok(());
+                }
+                let mut idle = s.idle();
+                idle.init().await.map_err(|e| e.to_string())?;
+                let (wait, _interrupt) = idle.wait_with_timeout(Duration::from_secs(10 * 60));
+                let response = wait.await.map_err(|e| e.to_string())?;
+                s = idle.done().await.map_err(|e| e.to_string())?;
+                if matches!(response, async_imap::extensions::idle::IdleResponse::NewData(_)) {
+                    on_new();
+                }
+            }
+        });
+        match session {
+            Ok(()) => return,
+            Err(e) => on_error(&e),
+        }
+        for _ in 0..60 {
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
+}

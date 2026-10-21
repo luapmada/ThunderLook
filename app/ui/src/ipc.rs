@@ -256,6 +256,15 @@ pub async fn send_draft(draft: &Draft) -> Result<String, String> {
     call("send_draft", &DraftArg { draft }).await
 }
 
+#[derive(Serialize)]
+struct OfflineArg {
+    offline: bool,
+}
+
+pub async fn set_offline(offline: bool) -> Result<bool, String> {
+    call("set_offline", &OfflineArg { offline }).await
+}
+
 pub async fn sync_now() -> Result<(), String> {
     call("sync_now", &NoArgs {}).await
 }

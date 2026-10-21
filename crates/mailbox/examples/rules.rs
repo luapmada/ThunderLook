@@ -46,6 +46,7 @@ fn main() {
         subfolders: args.iter().any(|a| a == "--subfolders"),
         filter: RunFilter::All,
         apply: args.iter().any(|a| a == "--apply"),
+        only: Vec::new(),
     };
     let report = mb.run_rules(&req).expect("exécution");
     println!(

@@ -64,6 +64,7 @@ pub enum Action {
     // J7 : comptes, envoi et réception.
     SyncNow,
     Accounts,
+    OfflineToggle,
 }
 
 impl Action {
@@ -131,6 +132,7 @@ fn perform(ui: Ui, action: Action) {
         Action::SaveSearch => ui.dialog.set(Some(Dialog::SaveSearch)),
         Action::RunRules => ui.dialog.set(Some(Dialog::Rules { run: true })),
         Action::SyncNow => actions::sync_now(ui),
+        Action::OfflineToggle => actions::toggle_offline(ui),
         Action::Accounts => ui.dialog.set(Some(Dialog::Accounts)),
         Action::ManageQuickSteps => ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false })),
         Action::CloseSearch => {
@@ -312,7 +314,7 @@ const SEND_RECEIVE: &[Group] = &[
     },
     Group {
         label: "Préférences",
-        cmds: &[cmd("Travailler hors connexion", CLOUD_OFF, None, false, true, true)],
+        cmds: &[wired("Travailler hors connexion", CLOUD_OFF, None, true, true, Action::OfflineToggle)],
     },
     Group { label: "Comptes", cmds: &[wired("Paramètres du compte", SETTINGS, None, true, true, Action::Accounts)] },
 ];
@@ -534,6 +536,19 @@ fn command_view(c: &'static Cmd, full: bool) -> AnyView {
                 aria-pressed=move || (ui.settings.get().density == Density::Compact).to_string()
                 title=tooltip(c)
                 on:click=move |_| perform(ui, Action::DensityToggle)
+            >
+                <Svg icon=c.icon />
+                <span>{c.label}</span>
+            </button>
+        }
+        .into_any(),
+        Action::OfflineToggle => view! {
+            <button
+                class=class
+                aria-label=c.label
+                aria-pressed=move || ui.offline.get().to_string()
+                title=tooltip(c)
+                on:click=move |_| perform(ui, Action::OfflineToggle)
             >
                 <Svg icon=c.icon />
                 <span>{c.label}</span>

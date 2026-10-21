@@ -521,6 +521,9 @@ pub struct RuleRunRequest {
     pub filter: RunFilter,
     /// Faux : simulation seulement, rien n'est modifié.
     pub apply: bool,
+    /// Non vide : seulement ces messages (`m<id>`) du dossier (règles à l'arrivée, J7).
+    #[serde(default)]
+    pub only: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -30,11 +30,84 @@ use thunderlook_model::{
 struct Syncer {
     running: Arc<AtomicBool>,
     again: Arc<AtomicBool>,
+    /// « Travailler hors connexion » : ni relève, ni envoi, ni surveillance.
+    offline: Arc<AtomicBool>,
+    /// Comptes dont la Boîte de réception est surveillée (IDLE).
+    watched: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// Début du dernier passage (millisecondes), pour la relève périodique.
+    last_run: Arc<std::sync::atomic::AtomicI64>,
+}
+
+/// Minutes entre deux relèves périodiques (la Boîte de réception est en plus surveillée en continu).
+const POLL_MINUTES: i64 = 10;
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+}
+
+/// Surveille la Boîte de réception de chaque compte qui ne l'est pas encore ; un changement lance un passage.
+fn start_watchers(app: &AppHandle) {
+    let syncer = app.state::<Syncer>();
+    if syncer.offline.load(Ordering::SeqCst) {
+        return;
+    }
+    let Ok(dir) = data_dir(app) else { return };
+    let Ok(accounts) = thunderlook_store::open(&dir).map_err(|e| e.to_string()).and_then(|c| thunderlook_sync::account::accounts(&c)) else {
+        return;
+    };
+    for a in accounts {
+        let fresh = syncer.watched.lock().map(|mut w| w.insert(a.source_id)).unwrap_or(false);
+        if !fresh {
+            continue;
+        }
+        let (app, dir, offline, watched) = (app.clone(), dir.clone(), syncer.offline.clone(), syncer.watched.clone());
+        std::thread::spawn(move || {
+            let notify = app.clone();
+            thunderlook_sync::watch_inbox_blocking(&dir, a.source_id, &offline, move || start_sync(&notify), |e| log::warn!("surveillance IDLE : {e}"));
+            if let Ok(mut w) = watched.lock() {
+                w.remove(&a.source_id);
+            }
+        });
+    }
+}
+
+fn has_accounts(app: &AppHandle) -> bool {
+    data_dir(app)
+        .ok()
+        .and_then(|d| thunderlook_store::open(&d).ok())
+        .and_then(|c| c.query_row("SELECT EXISTS (SELECT 1 FROM account)", [], |r| r.get::<_, bool>(0)).ok())
+        .unwrap_or(false)
+}
+
+/// Relève au démarrage, puis toutes les `POLL_MINUTES` minutes (seulement s'il existe un compte : sans compte, la
+/// barre d'état reste muette ; F9 dit alors « Aucun compte de messagerie »).
+fn start_scheduler(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        if has_accounts(&app) {
+            start_sync(&app);
+            start_watchers(&app);
+        }
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let last = app.state::<Syncer>().last_run.load(Ordering::SeqCst);
+            if now_ms() - last >= POLL_MINUTES * 60_000 && has_accounts(&app) {
+                start_sync(&app);
+                start_watchers(&app);
+            }
+        }
+    });
 }
 
 /// Lance un passage d'envoi et de réception sur tous les comptes ; l'interface suit l'événement « sync ».
 fn start_sync(app: &AppHandle) {
     let syncer = app.state::<Syncer>();
+    if syncer.offline.load(Ordering::SeqCst) {
+        let _ = app.emit("sync", SyncEvent { message: "Hors connexion".into(), ..Default::default() });
+        return;
+    }
+    syncer.last_run.store(now_ms(), Ordering::SeqCst);
     if syncer.running.swap(true, Ordering::SeqCst) {
         syncer.again.store(true, Ordering::SeqCst);
         return;
@@ -74,6 +147,11 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
             Ok(r) => {
                 sent += r.sent;
                 received += r.new_messages;
+                if !r.new_inbox_ids.is_empty() {
+                    if let Err(e) = rules_on_arrival(app, a.source_id, &r.new_inbox_ids) {
+                        errors.push(format!("{} : règles : {e}", a.address));
+                    }
+                }
                 errors.extend(r.send_error.map(|e| format!("{} : envoi : {e}", a.address)));
                 errors.extend(r.push_error.map(|e| format!("{} : {e}", a.address)));
             }
@@ -82,6 +160,9 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
     }
     if received > 0 {
         app.state::<Indexer>().ensure(&dir);
+        use tauri_plugin_notification::NotificationExt;
+        let body = if received == 1 { "1 nouveau message".to_string() } else { format!("{received} nouveaux messages") };
+        let _ = app.notification().builder().title("ThunderLook").body(body).show();
     }
     let mut parts = Vec::new();
     if sent > 0 {
@@ -96,6 +177,32 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
         (None, false) => parts.join(" · "),
     };
     SyncEvent { running: false, message, sent, received, error: errors.into_iter().next() }
+}
+
+/// Règles actives appliquées aux nouveaux messages de la Boîte de réception d'un compte (comme Outlook à l'arrivée).
+fn rules_on_arrival(app: &AppHandle, source: i64, ids: &[i64]) -> Result<(), String> {
+    let dir = data_dir(app)?;
+    let inbox: i64 = thunderlook_store::open(&dir)
+        .map_err(|e| e.to_string())?
+        .query_row("SELECT id FROM folder WHERE source_id = ?1 AND role = 'inbox' AND imap_name IS NOT NULL", [source], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let store = app.state::<Store>();
+    with_mailbox(app, &store, |mb| {
+        let rule_ids: Vec<String> = mb.rules()?.into_iter().filter(|r| r.active && r.error.is_none()).map(|r| r.id).collect();
+        if rule_ids.is_empty() {
+            return Ok(());
+        }
+        let req = thunderlook_model::RuleRunRequest {
+            rule_ids,
+            folder_id: format!("f{inbox}"),
+            subfolders: false,
+            filter: thunderlook_model::RunFilter::All,
+            apply: true,
+            only: ids.iter().map(|id| format!("m{id}")).collect(),
+        };
+        let report = mb.run_rules(&req)?;
+        report.errors.into_iter().next().map_or(Ok(()), Err)
+    })
 }
 
 /// Boîte aux lettres ouverte à la première demande ; `Err` mémorise l'échec d'ouverture.
@@ -317,6 +424,7 @@ fn add_account(
     let conn = thunderlook_store::open(&data_dir(&app)?).map_err(|e| e.to_string())?;
     thunderlook_sync::account::create(&conn, &address, &name, &ep, &password)?;
     start_sync(&app);
+    start_watchers(&app);
     thunderlook_sync::account::summaries(&conn)
 }
 
@@ -342,6 +450,20 @@ fn send_draft(app: AppHandle, store: State<Store>, draft: Draft) -> Result<Strin
 #[tauri::command]
 fn sync_now(app: AppHandle) {
     start_sync(&app);
+    start_watchers(&app);
+}
+
+/// « Travailler hors connexion » ; renvoie le nouvel état. En repassant en ligne, un passage démarre.
+#[tauri::command]
+fn set_offline(app: AppHandle, offline: bool) -> bool {
+    app.state::<Syncer>().offline.store(offline, Ordering::SeqCst);
+    if offline {
+        let _ = app.emit("sync", SyncEvent { message: "Hors connexion".into(), ..Default::default() });
+    } else {
+        start_sync(&app);
+        start_watchers(&app);
+    }
+    offline
 }
 
 /// Prépare un nouveau message, une réponse, une réponse à tous ou un transfert (J5).
@@ -500,6 +622,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(Store(Mutex::new(None)))
         .manage(Indexer::default())
         .manage(Syncer::default())
@@ -523,6 +646,7 @@ pub fn run() {
                     NewWindowResponse::Deny
                 })
                 .build()?;
+            start_scheduler(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -549,6 +673,7 @@ pub fn run() {
             remove_account,
             send_draft,
             sync_now,
+            set_offline,
             set_rule_active,
             import_rwz,
             run_rules,

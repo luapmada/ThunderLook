@@ -190,6 +190,8 @@ pub struct Ui {
     pub compose_epoch: RwSignal<u64>,
     /// Actions rapides (J6), dans l'ordre de la galerie.
     pub quick_steps: RwSignal<Vec<QuickStep>>,
+    /// « Travailler hors connexion » (J7).
+    pub offline: RwSignal<bool>,
     pub refs: Refs,
 }
 
@@ -232,6 +234,7 @@ impl Ui {
             compose_dirty: RwSignal::new(false),
             compose_epoch: RwSignal::new(0),
             quick_steps: RwSignal::new(Vec::new()),
+            offline: RwSignal::new(false),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),
