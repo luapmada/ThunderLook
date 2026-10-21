@@ -1,13 +1,15 @@
-# Passation — état au 2026-10-21, 21 h (fin de contexte)
+# Passation — état au 2026-10-21, 21 h 30
 
 ## À reprendre en premier
-1. **Outlook n'affiche aucun sous-dossier IMAP de paul@** (ni Envoyés/Indésirables/Corbeille, ni les dossiers des règles) : seulement Boîte de réception (841) et Boîte d'envoi. Vérifié par COM (`New-Object -ComObject Outlook.Application`, parcours de `GetRootFolder()`), après envoi/réception et redémarrage d'Outlook.
-   - Fait : abonnement IMAP des dossiers créés par ThunderLook sur paul@ et electromagnetisme (`crates/sync/examples/subscriptions.rs`) ; la création de dossier abonne désormais (`push.rs`, mkdir).
-   - Pistes non vérifiées : rafraîchissement de la liste par Outlook (clic droit sur la Boîte de réception › Dossiers IMAP › Interroger / afficher seulement les abonnés), réglage « chemin du dossier racine » du compte IMAP (vide dans le registre), deux chemins d'OST dans le registre (`IMAP Store EID` dans %LOCALAPPDATA%, `IMAP Folder Path` = `A:\Fichiers Outlook\paul@adam-declic.Fr.ost`).
-   - Sur le serveur tout est correct (`compare.rs`) : paul@ 1 271, dont Allo Voisins 32, Accusés 33, LBC | FB 26, Ebay & Paypal 20.
-2. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : Paul doit le supprimer (garde-fou : suppression refusée à l'agent).
-3. **Construction de l'application** lancée en fin de session (sécurité des 20 déplacements, `aa30da2`) : vérifier `target/release/thunderlook.exe` à jour, `node tools/ui_check.mjs` (5 cas), relancer ThunderLook. Fermer **toutes** les instances avant de construire (`foreach ($p in @(Get-Process thunderlook)) { $p.CloseMainWindow() }`).
+1. **Outlook n'affiche aucun sous-dossier IMAP** — diagnostic du 21/10, 21 h 30 : les trois comptes IMAP sont touchés, pas seulement paul@ (electromagnetisme : Boîte de réception et Boîte d'envoi seulement).
+   - Cause : chez Hostinger tous les dossiers sont sous `INBOX.` (séparateur `.`) et `INBOX` n'est pas abonné (`subscriptions.rs`), alors que le « chemin du dossier racine » des comptes Outlook est vide.
+   - Correctif (Plesk, greatmail, msoutlook.info) : Fichier › Paramètres du compte › Modifier › Paramètres supplémentaires › Options avancées › Chemin du dossier racine = `INBOX`, pour chacun des trois comptes. À faire par Paul, dans Outlook. Ce réglage n'est pas une valeur de registre du compte : absent d'OLMAPI32.DLL, qui ne connaît que `IMAP Folder Path`, `IMAP Use LSUB`, `IMAP Full List`… (vérifié).
+   - Puis vérifier par COM que Envoyés, Indésirables, Corbeille et les dossiers des règles apparaissent.
+2. **Bogue ThunderLook — point dans un nom de dossier** : `[electromagnetisme.fr]` a créé sur le serveur `INBOX.[electromagnetisme` (non abonné) avec `fr]` dessous, sur paul@ et electromagnetisme. Le nom local doit être converti (remplacer ou refuser le séparateur IMAP) avant le mkdir. À corriger, puis faire le ménage sur le serveur.
+3. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : Paul doit le supprimer (garde-fou : suppression refusée à l'agent).
 4. **J9 Calendrier, option A** (Outlook fait foi, ThunderLook en lecture seule) : pas commencé. Plan : `notes/j9-plan.md`.
+
+Fait : construction à jour (`aa30da2`), `ui_check` 5/5 au vert, ThunderLook relancé. Une instance sans fenêtre (20 h 35) bloquait l'exécutable : `CloseMainWindow` ne suffit pas, il faut alors `Stop-Process`.
 
 ## Fait le 21/10 après la v0.8.0 (non publié, pas d'étiquette)
 - Schéma v9 : `account.rules_on_arrival` ; J8 POP3 abandonné.
