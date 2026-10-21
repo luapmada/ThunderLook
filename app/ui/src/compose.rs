@@ -182,20 +182,11 @@ pub fn ComposePane() -> impl IntoView {
     let (cc, set_cc) = field(|d| d.cc.clone(), |d, v| d.cc = v);
     let (bcc, set_bcc) = field(|d| d.bcc.clone(), |d, v| d.bcc = v);
     let (subject, set_subject) = field(|d| d.subject.clone(), |d, v| d.subject = v);
-    // Champ « De » : comptes de messagerie ; sans choix, le premier compte.
+    // Champ « De » : comptes de messagerie. Sans compte choisi, le brouillon reste dans son fichier de données et
+    // l'envoi passe par le compte par défaut (premier compte), comme avant le champ.
     let accounts = RwSignal::new(Vec::<thunderlook_model::AccountSummary>::new());
     spawn_local(async move {
         if let Ok(list) = ipc::accounts().await {
-            if ui.compose.with_untracked(|d| d.as_ref().is_some_and(|d| d.from_account.is_none())) {
-                if let Some(first) = list.first() {
-                    let id = first.id.clone();
-                    ui.compose.update(|d| {
-                        if let Some(d) = d {
-                            d.from_account = Some(id);
-                        }
-                    });
-                }
-            }
             accounts.set(list);
         }
     });
@@ -204,7 +195,7 @@ pub fn ComposePane() -> impl IntoView {
         let v = event_target_value(&ev);
         ui.compose.update(|d| {
             if let Some(d) = d {
-                d.from_account = Some(v);
+                d.from_account = (!v.is_empty()).then_some(v);
             }
         });
         ui.compose_dirty.set(true);
@@ -300,6 +291,9 @@ pub fn ComposePane() -> impl IntoView {
                     <label class="compose-field">
                         <span>"De"</span>
                         <select aria-label="De" prop:value=from on:change=set_from>
+                            <option value="" selected=move || from().is_empty()>
+                                {move || accounts.with(|a| a.first().map(|f| format!("{} (par défaut)", f.address)).unwrap_or_default())}
+                            </option>
                             {move || accounts.get().into_iter().map(|a| {
                                 let label = if a.sender_name.is_empty() { a.address.clone() } else { format!("{} <{}>", a.sender_name, a.address) };
                                 let id = a.id.clone();
