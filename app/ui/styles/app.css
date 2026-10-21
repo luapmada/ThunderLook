@@ -669,6 +669,24 @@ input {
   color: var(--cat-red);
 }
 
+/* Emplacement de l'indicateur d'une ligne sans suivi : drapeau estompé au survol (cible du clic droit). */
+.flag-empty {
+  display: inline-flex;
+  color: var(--text-2);
+  opacity: 0;
+}
+
+.msg:hover .flag-empty {
+  opacity: 0.45;
+}
+
+/* Pastilles de catégorie d'une ligne : une seule cible pour le clic droit (menu « Catégoriser »). */
+.cats {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u);
+}
+
 .cat {
   display: inline-block;
   width: 10px;

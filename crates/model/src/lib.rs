@@ -490,7 +490,8 @@ pub struct Signature {
 pub struct RuleSummary {
     /// `r<id>`.
     pub id: String,
-    /// Jeu de règles : `pst:<fai>` (flux d'un PST) ou chemin du `.rwz` importé.
+    /// Jeu de règles : `pst:<fai>` (flux d'un PST ; `pst:s<source>` pour un PST qui n'en avait pas et où une règle a
+    /// été créée), `account:<source>` (compte) ou chemin du `.rwz` importé.
     pub origin: String,
     /// Libellé du jeu (nom du fichier de données ou du `.rwz`).
     pub origin_label: String,
@@ -503,6 +504,44 @@ pub struct RuleSummary {
     pub error: Option<String>,
     /// Points à vérifier avant d'exécuter : dossier cible introuvable, ou choisi par le nom parmi des homonymes.
     pub warnings: Vec<String>,
+}
+
+/// « Créer une règle » (clic droit sur un message) : valeurs proposées d'après le message.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleDraft {
+    /// `m<id>`.
+    pub message_id: String,
+    pub from_name: String,
+    pub from_addr: String,
+    pub subject: String,
+    /// Premier destinataire de la zone À.
+    pub to_name: String,
+    pub to_addr: String,
+    /// Dossier du message (`f<id>`), pour « Exécuter cette règle maintenant ».
+    pub folder_id: String,
+    pub folder_name: String,
+    /// Jeu de règles qui recevra la règle (nom du compte ou du fichier de données).
+    pub rule_set: String,
+    /// Remarque affichée dans la boîte (règles à l'arrivée désactivées, fichier de données sans compte).
+    pub note: Option<String>,
+}
+
+/// Règle créée depuis un message : conditions cochées et dossier de destination.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRule {
+    /// `m<id>` : le message d'où viennent l'expéditeur et le destinataire, et dont le compte reçoit la règle.
+    pub message_id: String,
+    pub name: String,
+    /// « De <expéditeur> ».
+    pub from: bool,
+    /// « L'objet contient » : texte, `None` si la case n'est pas cochée.
+    pub subject: Option<String>,
+    /// « Envoyé à <destinataire> ».
+    pub sent_to: bool,
+    /// Dossier de destination (`f<id>`).
+    pub folder_id: String,
 }
 
 /// Messages concernés par « Exécuter maintenant » (« Appliquer les règles à »).

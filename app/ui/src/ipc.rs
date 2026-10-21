@@ -3,7 +3,7 @@
 use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
-    AccountSummary, AutoReply, JunkLists, JunkMark, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
+    AccountSummary, AutoReply, JunkLists, JunkMark, MessageSummary, MessageView, NewRule, OpResult, RuleDraft, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
     quicksteps::QuickStep,
     calendar::{CalendarQuery, CalendarView},
     settings::Settings,
@@ -264,6 +264,20 @@ struct RuleActiveArg<'a> {
 
 pub async fn set_rule_active(id: &str, active: bool) -> Result<(), String> {
     call("set_rule_active", &RuleActiveArg { id, active }).await
+}
+
+pub async fn rule_draft(id: &str) -> Result<RuleDraft, String> {
+    call("rule_draft", &IdArg { id }).await
+}
+
+#[derive(Serialize)]
+struct NewRuleArg<'a> {
+    rule: &'a NewRule,
+}
+
+/// Renvoie l'identifiant (`r<id>`) de la règle créée.
+pub async fn create_rule(rule: &NewRule) -> Result<String, String> {
+    call("create_rule", &NewRuleArg { rule }).await
 }
 
 pub async fn import_rwz() -> Result<Option<usize>, String> {

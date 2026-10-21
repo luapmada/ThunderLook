@@ -7,6 +7,7 @@ mod autoreply;
 mod calendar;
 mod commandbar;
 mod compose;
+mod create_rule;
 mod dialogs;
 mod folders;
 mod icons;

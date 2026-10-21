@@ -500,12 +500,15 @@ fn drag_start(ui: Ui, pos: u32, ev: &web_sys::DragEvent) {
     }
 }
 
-fn context(ui: Ui, pos: u32, ev: &web_sys::MouseEvent) {
+/// Clic droit sur une ligne (`Messages`), ou sur son indicateur ou ses catégories (menu correspondant directement,
+/// comme Outlook) : la ligne rejoint la sélection si elle n'en faisait pas partie.
+fn context(ui: Ui, pos: u32, ev: &web_sys::MouseEvent, target: ContextTarget) {
     ev.prevent_default();
+    ev.stop_propagation();
     if !ui.sel_ranges.with_untracked(|r| ranges::contains(r, pos)) {
         select_single(ui, pos);
     }
-    ui.context_menu.set(Some(ContextMenuAt { x: ev.client_x() as f64, y: ev.client_y() as f64, target: ContextTarget::Messages }));
+    ui.context_menu.set(Some(ContextMenuAt { x: ev.client_x() as f64, y: ev.client_y() as f64, target }));
 }
 
 #[component]
@@ -597,7 +600,7 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
             on:click=pick
             on:dblclick=move |_| actions::open_if_draft(ui)
             on:dragstart=move |ev| drag_start(ui, pos, &ev)
-            on:contextmenu=move |ev| context(ui, pos, &ev)
+            on:contextmenu=move |ev| context(ui, pos, &ev, ContextTarget::Messages)
         >
             {chevron}
             <span class="from">{m.from.clone()}</span>
@@ -607,19 +610,28 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
                     Importance::Low => Some(view! { <span class="imp-low" title="Importance faible"><Svg icon=ARROW_DOWN size=14 /></span> }.into_any()),
                     Importance::Normal => None,
                 }}
-                {m.categories
-                    .iter()
-                    .map(|c| {
-                        let style = c.color.as_ref().map(|col| format!("background:{col}")).unwrap_or_default();
-                        view! { <span class="cat" class:nocolor=c.color.is_none() style=style title=c.name.clone()></span> }
-                    })
-                    .collect_view()}
+                {(!m.categories.is_empty()).then(|| {
+                    let chips = m
+                        .categories
+                        .iter()
+                        .map(|c| {
+                            let style = c.color.as_ref().map(|col| format!("background:{col}")).unwrap_or_default();
+                            view! { <span class="cat" class:nocolor=c.color.is_none() style=style title=c.name.clone()></span> }
+                        })
+                        .collect_view();
+                    view! { <span class="cats" on:contextmenu=move |ev| context(ui, pos, &ev, ContextTarget::Categories)>{chips}</span> }
+                })}
                 {m.has_attachments.then(|| view! { <Svg icon=PAPERCLIP size=14 /> })}
-                {match m.flag {
-                    FlagState::Flagged => Some(view! { <span class="flag" title="Avec suivi"><Svg icon=FLAG size=14 /></span> }.into_any()),
-                    FlagState::Done => Some(view! { <span class="flag-done" title="Suivi terminé"><Svg icon=CHECK size=14 /></span> }.into_any()),
-                    FlagState::None => None,
-                }}
+                // Indicateur, ou son emplacement (drapeau visible au survol de la ligne, comme Outlook) : clic droit,
+                // menu « Assurer un suivi ».
+                {
+                    let flag_menu = move |ev: leptos::ev::MouseEvent| context(ui, pos, &ev, ContextTarget::Flag);
+                    match m.flag {
+                        FlagState::Flagged => view! { <span class="flag" title="Avec suivi" on:contextmenu=flag_menu><Svg icon=FLAG size=14 /></span> }.into_any(),
+                        FlagState::Done => view! { <span class="flag-done" title="Suivi terminé" on:contextmenu=flag_menu><Svg icon=CHECK size=14 /></span> }.into_any(),
+                        FlagState::None => view! { <span class="flag-empty" title="Assurer un suivi" on:contextmenu=flag_menu><Svg icon=FLAG size=14 /></span> }.into_any(),
+                    }
+                }
                 {m.folder.clone().map(|f| view! { <span class="folder-tag" title="Dossier">{f}</span> })}
                 <span class="time">{m.time_label.clone()}</span>
             </span>

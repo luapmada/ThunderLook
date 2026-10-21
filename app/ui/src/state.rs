@@ -100,6 +100,8 @@ pub enum Dialog {
     AutoReply,
     /// Expéditeurs bloqués et approuvés.
     JunkOptions,
+    /// « Créer une règle » d'après le message sélectionné (clic droit › Règles).
+    CreateRule,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,6 +130,10 @@ pub struct ContextMenuAt {
 pub enum ContextTarget {
     Messages,
     Folder(String),
+    /// Clic droit sur l'indicateur d'une ligne : menu « Assurer un suivi » directement.
+    Flag,
+    /// Clic droit sur les catégories d'une ligne : menu « Catégoriser » directement.
+    Categories,
 }
 
 /// Points d'arrêt du cycle F6 / Maj+F6.

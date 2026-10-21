@@ -19,7 +19,7 @@ use tauri_plugin_opener::OpenerExt;
 use thunderlook_mailbox::Mailbox;
 use thunderlook_model::{
     AccountSummary, AutoReply, CategoryInfo, JunkLists, JunkMark, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
-    MessageOp, MessageSummary, MessageView, OpResult, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
+    MessageOp, MessageSummary, MessageView, OpResult, SyncEvent, NewRule, RuleDraft, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
     SortField, format,
     quicksteps::{QuickStep, default_quick_steps},
     calendar::{CalendarQuery, CalendarView},
@@ -511,6 +511,18 @@ fn rules(app: AppHandle, store: State<Store>) -> Result<Vec<RuleSummary>, String
 #[tauri::command(async)]
 fn set_rule_active(app: AppHandle, store: State<Store>, id: String, active: bool) -> Result<(), String> {
     with_mailbox(&app, &store, |mb| mb.set_rule_active(&id, active))
+}
+
+/// « Créer une règle » : valeurs proposées d'après le message `m<id>`.
+#[tauri::command(async)]
+fn rule_draft(app: AppHandle, store: State<Store>, id: String) -> Result<RuleDraft, String> {
+    with_mailbox(&app, &store, |mb| mb.rule_draft(&id))
+}
+
+/// Enregistre une règle créée depuis un message, dans le jeu de règles de son compte ; renvoie `r<id>`.
+#[tauri::command(async)]
+fn create_rule(app: AppHandle, store: State<Store>, rule: NewRule) -> Result<String, String> {
+    with_mailbox(&app, &store, |mb| mb.create_rule(&rule))
 }
 
 /// Importe un `.rwz` choisi par l'utilisateur ; renvoie le nombre de règles (`None` s'il annule).
@@ -1041,6 +1053,8 @@ pub fn run() {
             get_auto_reply,
             set_auto_reply,
             set_rule_active,
+            rule_draft,
+            create_rule,
             import_rwz,
             run_rules,
             open_attachment,
