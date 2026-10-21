@@ -146,7 +146,7 @@ fn next_position(conn: &Connection, parent: i64) -> Result<i64> {
     conn.query_row("SELECT IFNULL(MAX(position), -1) + 1 FROM folder WHERE parent_id = ?1", [parent], |r| r.get(0)).map_err(err)
 }
 
-fn create_folder(tx: &Transaction, parent: i64, name: &str, role: &str) -> Result<i64> {
+pub(crate) fn create_folder(tx: &Transaction, parent: i64, name: &str, role: &str) -> Result<i64> {
     let p = folder_info(tx, parent)?;
     let position = next_position(tx, parent)?;
     tx.execute(

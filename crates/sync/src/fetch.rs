@@ -76,7 +76,7 @@ fn remote_folders(list: &[(String, Option<String>, Vec<NameAttribute<'static>>)]
                 Some((p, l)) => (Some(p.to_string()), l.to_string()),
                 None => (None, name.clone()),
             };
-            Remote { name: name.clone(), role: "folder", display: leaf, parent, selectable }
+            Remote { name: name.clone(), role: "folder", display: thunderlook_mailbox::imap_utf7::decode(&leaf), parent, selectable }
         })
         .collect()
 }

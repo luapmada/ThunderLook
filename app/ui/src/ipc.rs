@@ -258,6 +258,16 @@ pub async fn set_account_rules(id: &str, on: bool) -> Result<Vec<AccountSummary>
     call("set_account_rules", &AccountRulesArg { id, on }).await
 }
 
+#[derive(Serialize)]
+struct CopyRulesArg<'a> {
+    origin: &'a str,
+    account: &'a str,
+}
+
+pub async fn copy_rules(origin: &str, account: &str) -> Result<String, String> {
+    call("copy_rules", &CopyRulesArg { origin, account }).await
+}
+
 pub async fn remove_account(id: &str) -> Result<Vec<AccountSummary>, String> {
     call("remove_account", &IdArg { id }).await
 }

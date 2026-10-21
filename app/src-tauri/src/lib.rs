@@ -245,7 +245,9 @@ fn rules_on_arrival(app: &AppHandle, source: i64, ids: &[i64]) -> Result<(), Str
         .map_err(|e| e.to_string())?;
     let store = app.state::<Store>();
     with_mailbox(app, &store, |mb| {
-        let rule_ids: Vec<String> = mb.rules()?.into_iter().filter(|r| r.active && r.error.is_none()).map(|r| r.id).collect();
+        // Seulement le jeu de règles du compte (copié depuis « Règles et alertes »), dont les cibles sont ses dossiers.
+        let set = format!("account:{source}");
+        let rule_ids: Vec<String> = mb.rules()?.into_iter().filter(|r| r.origin == set && r.active && r.error.is_none()).map(|r| r.id).collect();
         if rule_ids.is_empty() {
             return Ok(());
         }
@@ -505,6 +507,21 @@ fn set_account_rules(app: AppHandle, id: String, on: bool) -> Result<Vec<Account
     thunderlook_sync::account::summaries(&conn)
 }
 
+/// Copie les règles actives d'un jeu vers un compte (dossiers manquants créés, aussi sur le serveur).
+#[tauri::command(async)]
+fn copy_rules(app: AppHandle, store: State<Store>, origin: String, account: String) -> Result<String, String> {
+    let source: i64 = account.strip_prefix('s').and_then(|n| n.parse().ok()).ok_or_else(|| format!("identifiant invalide : {account}"))?;
+    let (n, created) = with_mailbox(&app, &store, |mb| mb.copy_rules_to_account(&origin, source))?;
+    if !created.is_empty() {
+        start_sync(&app);
+    }
+    Ok(if created.is_empty() {
+        format!("{n} règle(s) copiée(s)")
+    } else {
+        format!("{n} règle(s) copiée(s) ; dossiers créés : {}", created.join(", "))
+    })
+}
+
 /// « Envoyer » : le message va dans la Boîte d'envoi et un passage d'envoi démarre aussitôt.
 #[tauri::command(async)]
 fn send_draft(app: AppHandle, store: State<Store>, draft: Draft) -> Result<String, String> {
@@ -739,6 +756,7 @@ pub fn run() {
             add_account,
             remove_account,
             set_account_rules,
+            copy_rules,
             send_draft,
             sync_now,
             set_offline,

@@ -59,19 +59,25 @@ impl FolderResolver {
             }
         }
         let mut stmt = conn
-            .prepare("SELECT f.id, f.parent_id, f.name, f.role, f.hidden, f.props, s.display_name FROM folder f JOIN source s ON s.id = f.source_id")
+            .prepare(
+                "SELECT f.id, f.parent_id, f.name, f.role, f.hidden, f.props, s.display_name, f.imap_name FROM folder f JOIN source s ON s.id = f.source_id",
+            )
             .map_err(err)?;
-        type Row = (i64, Option<i64>, String, String, bool, Option<Vec<u8>>, String);
+        type Row = (i64, Option<i64>, String, String, bool, Option<Vec<u8>>, String, Option<String>);
         let rows: Vec<Row> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))
             .map_err(err)?
             .collect::<std::result::Result<_, _>>()
             .map_err(err)?;
         let parents: HashMap<i64, (Option<i64>, &str, &str)> = rows.iter().map(|r| (r.0, (r.1, r.2.as_str(), r.3.as_str()))).collect();
         let (mut by_entry, mut by_name, mut paths) = (HashMap::new(), HashMap::<String, Vec<(i64, i64)>>::new(), HashMap::new());
-        for (id, _, name, _, hidden, props, source) in &rows {
+        for (id, _, name, _, hidden, props, source, imap_name) in &rows {
             if let Some(entry) = props.as_deref().and_then(|p| bag_value(p, ENTRY_ID, 0x0102)) {
                 by_entry.insert(entry.to_vec(), *id);
+            }
+            // Règles copiées vers un compte : la cible est désignée par son nom IMAP (« imap:INBOX.Accusés »).
+            if let Some(n) = imap_name {
+                by_entry.insert(imap_target(n), *id);
             }
             if !hidden {
                 by_name.entry(fold(name)).or_default().push((*id, counts.get(id).copied().unwrap_or(0)));
@@ -124,6 +130,11 @@ impl FolderResolver {
         }
         out
     }
+}
+
+/// Désignation d'un dossier de compte dans une règle copiée (à la place de l'EntryID d'un dossier de PST).
+pub(crate) fn imap_target(imap_name: &str) -> Vec<u8> {
+    format!("imap:{imap_name}").into_bytes()
 }
 
 fn now_ms() -> i64 {
@@ -183,7 +194,7 @@ fn origin_label(conn: &Connection, origin: &str, source_id: Option<i64>) -> Stri
         let id = source_id?;
         conn.query_row("SELECT display_name FROM source WHERE id = ?1", params![id], |r| r.get::<_, String>(0)).optional().ok().flatten()
     };
-    match origin.starts_with("pst:").then(source_name).flatten() {
+    match (origin.starts_with("pst:") || origin.starts_with("account:")).then(source_name).flatten() {
         Some(name) => name,
         None => Path::new(origin).file_name().map_or_else(|| origin.to_string(), |n| n.to_string_lossy().into_owned()),
     }
@@ -238,6 +249,82 @@ impl Mailbox {
         let stream = thunderlook_rules::parse(&bytes).map_err(|e| format!("{} : {e}", path.display()))?;
         let origin = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()).to_string_lossy().into_owned();
         store_stream(&self.conn, "rwz", None, &origin, &stream)
+    }
+
+    /// Copie les règles actives du jeu `origin` vers le compte de la source `account_source` (jeu `account:<source>`,
+    /// remplacé s'il existe). Chaque dossier cible est cherché dans le compte par son nom ; s'il manque, il est créé
+    /// sous la Boîte de réception (et sur le serveur). Renvoie le nombre de règles copiées et les dossiers créés.
+    pub fn copy_rules_to_account(&mut self, origin: &str, account_source: i64) -> Result<(usize, Vec<String>)> {
+        let rows: Vec<(String, Vec<u8>, i64)> = self
+            .conn
+            .prepare("SELECT rule_json, raw, version FROM rule WHERE origin = ?1 AND active = 1 ORDER BY position")
+            .map_err(err)?
+            .query_map([origin], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(err)?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(err)?;
+        if rows.is_empty() {
+            return Err(format!("aucune règle active dans « {origin} »"));
+        }
+        let inbox: (i64, String) = self
+            .conn
+            .query_row(
+                "SELECT id, imap_name FROM folder WHERE source_id = ?1 AND role = 'inbox' AND imap_name IS NOT NULL",
+                [account_source],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(err)?
+            .ok_or("ce compte n'a pas encore été relevé (pas de Boîte de réception)")?;
+        let tx = self.conn.unchecked_transaction().map_err(err)?;
+        let mut created = Vec::new();
+        let mut rules = Vec::new();
+        for (json, raw, version) in rows {
+            let mut rule: Rule = serde_json::from_str(&json).map_err(err)?;
+            for value in rule.elements.iter_mut().flat_map(|e| e.values.iter_mut()) {
+                let Value::Folder { folder_entry_id, store_entry_id, name, .. } = value else { continue };
+                let wanted = name.trim().to_string();
+                // Un dossier du compte de ce nom, ou de ce nom IMAP directement sous la Boîte de réception.
+                let existing: Option<String> = {
+                    let mut stmt = tx
+                        .prepare("SELECT name, imap_name FROM folder WHERE source_id = ?1 AND imap_name IS NOT NULL")
+                        .map_err(err)?;
+                    let list: Vec<(String, String)> =
+                        stmt.query_map([account_source], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?.collect::<std::result::Result<_, _>>().map_err(err)?;
+                    list.into_iter()
+                        .find(|(n, i)| {
+                            fold(n) == fold(&wanted)
+                                || i.strip_prefix(inbox.1.as_str()).is_some_and(|rest| rest.len() > 1 && crate::imap_utf7::decode(&rest[1..]) == wanted)
+                        })
+                        .map(|(_, i)| i)
+                };
+                let imap_name = match existing {
+                    Some(i) => i,
+                    None => {
+                        let id = crate::ops::create_folder(&tx, inbox.0, &wanted, "folder")?;
+                        created.push(wanted.clone());
+                        tx.query_row("SELECT imap_name FROM folder WHERE id = ?1", [id], |r| r.get::<_, String>(0)).map_err(err)?
+                    }
+                };
+                *folder_entry_id = imap_target(&imap_name);
+                *store_entry_id = Vec::new();
+                *name = wanted;
+            }
+            rules.push((rule, raw, version));
+        }
+        let origin_new = format!("account:{account_source}");
+        tx.execute("DELETE FROM rule WHERE origin = ?1", [&origin_new]).map_err(err)?;
+        let at = now_ms();
+        for (k, (rule, raw, version)) in rules.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO rule (kind, source_id, origin, position, name, active, version, rule_json, raw, imported_at)
+                 VALUES ('account', ?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8)",
+                params![account_source, origin_new, k as i64, rule.name, version, serde_json::to_string(rule).map_err(err)?, raw, at],
+            )
+            .map_err(err)?;
+        }
+        tx.commit().map_err(err)?;
+        Ok((rules.len(), created))
     }
 
     pub fn set_rule_active(&mut self, id: &str, active: bool) -> Result<()> {

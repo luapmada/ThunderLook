@@ -28,6 +28,9 @@ pub fn RulesDialog() -> impl IntoView {
     let subfolders = RwSignal::new(false);
     let filter = RwSignal::new(RunFilter::All);
     let report = RwSignal::new(None::<RuleRunReport>);
+    // Copie vers un compte : comptes proposés, et message de résultat.
+    let accounts = RwSignal::new(Vec::<thunderlook_model::AccountSummary>::new());
+    let copy_note = RwSignal::new(None::<String>);
     let busy = RwSignal::new(false);
 
     let load = move |select_active: bool| {
@@ -53,6 +56,12 @@ pub fn RulesDialog() -> impl IntoView {
         subfolders.set(false);
         filter.set(RunFilter::All);
         load(true);
+        copy_note.set(None);
+        spawn_local(async move {
+            if let Ok(a) = ipc::accounts().await {
+                accounts.set(a);
+            }
+        });
         request_animation_frame(move || {
             if let Some(r) = root.get_untracked() {
                 if let Ok(Some(el)) = r.query_selector("[data-autofocus]") {
@@ -300,6 +309,26 @@ pub fn RulesDialog() -> impl IntoView {
                     <Show when=move || !run_mode.get()>
                         <div class="rules-toolbar">
                             <button class="btn" on:click=move |_| import()>"Importer des règles (.rwz)…"</button>
+                            {move || accounts.get().into_iter().map(|a| {
+                                let label = format!("Copier ce jeu vers {}", a.address);
+                                let id = a.id.clone();
+                                view! {
+                                    <button class="btn" on:click=move |_| {
+                                        let Some(origin) = rules.with_untracked(|v| v.get(current.get_untracked()).map(|r| r.origin.clone())) else { return };
+                                        let id = id.clone();
+                                        spawn_local(async move {
+                                            match ipc::copy_rules(&origin, &id).await {
+                                                Ok(m) => {
+                                                    copy_note.set(Some(m));
+                                                    load(false);
+                                                    actions::refresh_tree(ui);
+                                                }
+                                                Err(e) => copy_note.set(Some(e)),
+                                            }
+                                        });
+                                    }>{label}</button>
+                                }
+                            }).collect_view()}
                             <button class="btn" on:click=move |_| {
                                 // Règles à exécuter : celles qui sont actives maintenant (cases modifiées comprises).
                                 to_run.set(rules.with_untracked(|v| v.iter().filter(|r| r.active && r.error.is_none()).map(|r| r.id.clone()).collect()));
@@ -322,6 +351,7 @@ pub fn RulesDialog() -> impl IntoView {
                     >
                         {list}
                     </div>
+                    {move || copy_note.get().map(|n| view! { <p class="dialog-note" role="status">{n}</p> })}
                     <p class="dialog-note">"Description de la règle :"</p>
                     {description}
                     <Show when=move || run_mode.get()>

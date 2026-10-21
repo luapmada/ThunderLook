@@ -200,7 +200,7 @@ pub(crate) fn folder_created(conn: &Connection, folder: i64) -> Result<()> {
                 .flatten()
         })
         .unwrap_or_else(|| "/".into());
-    let imap_name = format!("{base}{delimiter}{name}");
+    let imap_name = format!("{base}{delimiter}{}", crate::imap_utf7::encode(&name));
     conn.execute("UPDATE folder SET imap_name = ?2 WHERE id = ?1", params![folder, imap_name]).map_err(err)?;
     push(conn, account, "mkdir", &imap_name, None, None, "{}".into())
 }

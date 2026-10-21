@@ -3,6 +3,7 @@
 //! opérations d'organisation (J3), recherche et indexation plein texte (J4), conversations (J3b), règles (J6).
 
 mod compose;
+pub mod imap_utf7;
 mod conv;
 mod index;
 mod message;
