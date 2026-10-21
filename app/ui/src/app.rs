@@ -13,6 +13,7 @@ use crate::{
     actions::{self, real_folder, select_single},
     commandbar::CommandBar,
     compose::ComposePane,
+    create_rule::CreateRuleDialog,
     accounts::AccountsDialog,
     autoreply::AutoReplyDialog,
     junk::JunkOptionsDialog,
@@ -449,6 +450,7 @@ pub fn App() -> impl IntoView {
             <ContextMenu />
             <Dialogs />
             <RulesDialog />
+            <CreateRuleDialog />
             <QuickStepsDialog />
             <AccountsDialog />
             <AutoReplyDialog />

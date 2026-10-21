@@ -3,8 +3,8 @@
 
 use std::{collections::HashMap, path::Path};
 
-use thunderlook_model::RuleSummary;
-use thunderlook_rules::{Rule, RuleStream, Value};
+use thunderlook_model::{NewRule, RuleDraft, RuleSummary};
+use thunderlook_rules::{Element, Recipient, Rule, RuleStream, Value};
 use thunderlook_store::rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{Mailbox, Result, conv::bag_value, err, fold, parse_id};
@@ -202,7 +202,187 @@ fn origin_label(conn: &Connection, origin: &str, source_id: Option<i64>) -> Stri
     }
 }
 
+/// Premier u32 des règles importées des PST et `.rwz` d'Outlook 2021 : version OL2002 (24 bits bas), « locator » 6.
+const NEW_RULE_XR: u32 = 0x060F_4240;
+
+/// Jeu de règles qui reçoit une règle créée depuis un message de la source `source` : (`kind`, `origin`).
+///
+/// Compte : `account:<source>`, le jeu exécuté à l'arrivée. Fichier de données sans compte : son flux importé
+/// (`pst:<fai>`, un seul par PST, celui de la Boîte de réception), pour qu'il n'apparaisse qu'un jeu par fichier dans
+/// « Règles et alertes » et que « Copier ce jeu vers » emporte aussi la nouvelle règle ; `pst:s<source>` si le PST
+/// n'avait pas de règles (jamais pris pour l'identifiant d'un contenu associé, toujours numérique).
+fn rule_set(conn: &Connection, source: i64) -> Result<(&'static str, String)> {
+    let kind: String = conn.query_row("SELECT kind FROM source WHERE id = ?1", [source], |r| r.get(0)).map_err(err)?;
+    if kind == "imap" {
+        return Ok(("account", format!("account:{source}")));
+    }
+    let existing: Option<String> = conn
+        .query_row("SELECT origin FROM rule WHERE kind = 'pst' AND source_id = ?1 ORDER BY origin LIMIT 1", [source], |r| r.get(0))
+        .optional()
+        .map_err(err)?;
+    Ok(("pst", existing.unwrap_or_else(|| format!("pst:s{source}"))))
+}
+
+/// Message d'origine d'une règle : expéditeur, objet, premier destinataire de la zone À, dossier et source.
+struct RuleSourceMessage {
+    from_name: String,
+    from_addr: String,
+    subject: String,
+    to: (String, String),
+    folder: i64,
+    folder_name: String,
+    source: i64,
+}
+
+fn rule_source_message(conn: &Connection, data_dir: &Path, message_id: &str) -> Result<RuleSourceMessage> {
+    let id = parse_id(message_id, 'm')?;
+    let (from_name, from_addr, subject, to_line, eml, folder, folder_name, source): (String, String, String, String, String, i64, String, i64) = conn
+        .query_row(
+            "SELECT m.from_name, m.from_addr, m.subject, m.to_line, m.eml_path, f.id, f.name, f.source_id
+             FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
+        )
+        .optional()
+        .map_err(err)?
+        .ok_or_else(|| format!("message introuvable : {message_id}"))?;
+    // Destinataire : l'en-tête To du `.eml` (adresse), sinon la ligne À de la base.
+    let from_eml = std::fs::read(thunderlook_store::resolve(data_dir, &eml)).ok().and_then(|bytes| {
+        let m = mail_parser::MessageParser::default().parse(&bytes)?;
+        let a = m.to()?.first()?;
+        Some((a.name().unwrap_or_default().to_string(), a.address().unwrap_or_default().to_string()))
+    });
+    let to = from_eml.filter(|(_, a)| !a.is_empty()).unwrap_or_else(|| {
+        match crate::parse_addresses(&to_line).into_iter().next() {
+            Some(a) => (a.name.unwrap_or_default(), a.addr),
+            None => (to_line.split(';').next().unwrap_or_default().trim().to_string(), String::new()),
+        }
+    });
+    Ok(RuleSourceMessage { from_name, from_addr, subject, to, folder, folder_name, source })
+}
+
+/// Valeur « dossier » d'une action : `imap:<source>:<nom IMAP>` pour un dossier de compte, l'EntryID du dossier pour
+/// un dossier de PST (comme les règles importées) ; sans l'un ni l'autre, le dossier sera retrouvé par son nom.
+fn folder_value(conn: &Connection, folder: i64) -> Result<Value> {
+    let (name, imap_name, source, props): (String, Option<String>, i64, Option<Vec<u8>>) = conn
+        .query_row("SELECT name, imap_name, source_id, props FROM folder WHERE id = ?1", [folder], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .optional()
+        .map_err(err)?
+        .ok_or_else(|| format!("dossier introuvable : f{folder}"))?;
+    let folder_entry_id = match imap_name {
+        Some(i) => imap_target(source, &i),
+        None => props.as_deref().and_then(|p| bag_value(p, ENTRY_ID, 0x0102)).map(<[u8]>::to_vec).unwrap_or_default(),
+    };
+    Ok(Value::Folder { a: 0, folder_entry_id, store_entry_id: Vec::new(), name, tail: 0 })
+}
+
+fn person(name: &str, addr: &str) -> Value {
+    let non_empty = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_string());
+    Value::Recipients { a: 0, recipients: vec![Recipient { name: non_empty(name), address: non_empty(addr) }], tail: (1, 0) }
+}
+
 impl Mailbox {
+    /// « Créer une règle » : expéditeur, objet et destinataire du message, et le jeu de règles qui recevra la règle.
+    pub fn rule_draft(&self, message_id: &str) -> Result<RuleDraft> {
+        let m = rule_source_message(&self.conn, &self.data_dir, message_id)?;
+        let (kind, origin) = rule_set(&self.conn, m.source)?;
+        let note = if kind == "account" {
+            let on: bool = self
+                .conn
+                .query_row("SELECT rules_on_arrival FROM account WHERE source_id = ?1", [m.source], |r| r.get(0))
+                .optional()
+                .map_err(err)?
+                .unwrap_or(false);
+            (!on).then(|| "Les règles à l'arrivée sont désactivées pour ce compte (Paramètres du compte).".to_string())
+        } else {
+            Some("Fichier de données sans compte : la règle s'applique avec « Exécuter les règles maintenant ».".to_string())
+        };
+        Ok(RuleDraft {
+            message_id: message_id.to_string(),
+            from_name: m.from_name,
+            from_addr: m.from_addr,
+            subject: m.subject,
+            to_name: m.to.0,
+            to_addr: m.to.1,
+            folder_id: format!("f{}", m.folder),
+            folder_name: m.folder_name,
+            rule_set: origin_label(&self.conn, &origin, Some(m.source)),
+            note,
+        })
+    }
+
+    /// Crée une règle « à l'arrivée » depuis un message, à la fin du jeu de règles de sa source ([`rule_set`]).
+    /// Renvoie son identifiant (`r<id>`).
+    pub fn create_rule(&mut self, req: &NewRule) -> Result<String> {
+        let name = req.name.trim();
+        if name.is_empty() {
+            return Err("Nommez la règle.".into());
+        }
+        let m = rule_source_message(&self.conn, &self.data_dir, &req.message_id)?;
+        // En-têtes vus dans toutes les règles d'Outlook 2021 : « appliquer à l'arrivée » (0x190), puis 0x64.
+        let mut elements =
+            vec![Element { id: 0x190, values: vec![Value::Flags { a: 0, flags: 1 }] }, Element { id: 0x64, values: vec![Value::Flags { a: 0, flags: 1 }] }];
+        if req.from {
+            if m.from_addr.trim().is_empty() && m.from_name.trim().is_empty() {
+                return Err("Ce message n'a pas d'expéditeur.".into());
+            }
+            elements.push(Element { id: 0xCB, values: vec![person(&m.from_name, &m.from_addr)] });
+        }
+        if req.sent_to {
+            if m.to.0.trim().is_empty() && m.to.1.trim().is_empty() {
+                return Err("Ce message n'a pas de destinataire.".into());
+            }
+            elements.push(Element { id: 0xCC, values: vec![person(&m.to.0, &m.to.1)] });
+        }
+        if let Some(text) = &req.subject {
+            if text.trim().is_empty() {
+                return Err("Indiquez le texte que l'objet doit contenir.".into());
+            }
+            elements.push(Element { id: 0xCD, values: vec![Value::Words { flags: 0, text: text.trim().to_string() }] });
+        }
+        if elements.len() == 2 {
+            return Err("Cochez au moins une condition.".into());
+        }
+        let folder = crate::folder_db_id(&req.folder_id)?;
+        elements.push(Element { id: 0x12C, values: vec![folder_value(&self.conn, folder)?] });
+        let rule = Rule {
+            name: name.to_string(),
+            active: true,
+            xr: NEW_RULE_XR,
+            unknown: 0,
+            magic: [0; 3],
+            elements,
+            error: None,
+            // Pas de flux d'origine : rien n'exige ces octets (exécution et description lisent les éléments).
+            raw: Vec::new(),
+        };
+        let (kind, origin) = rule_set(&self.conn, m.source)?;
+        let (position, version): (i64, Option<i64>) = self
+            .conn
+            .query_row("SELECT COALESCE(MAX(position) + 1, 0), MAX(version) FROM rule WHERE origin = ?1", [&origin], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(err)?;
+        self.conn
+            .execute(
+                "INSERT INTO rule (kind, source_id, origin, position, name, active, version, rule_json, raw, imported_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9)",
+                params![
+                    kind,
+                    m.source,
+                    origin,
+                    position,
+                    rule.name,
+                    version.unwrap_or(i64::from(thunderlook_rules::OL2016)),
+                    serde_json::to_string(&rule).map_err(err)?,
+                    rule.raw,
+                    now_ms()
+                ],
+            )
+            .map_err(err)?;
+        Ok(format!("r{}", self.conn.last_insert_rowid()))
+    }
+
     /// Règles de tous les jeux : ceux des PST d'abord, puis les `.rwz`, chacun dans son ordre.
     pub fn rules(&self) -> Result<Vec<RuleSummary>> {
         let mut stmt = self

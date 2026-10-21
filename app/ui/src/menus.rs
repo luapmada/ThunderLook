@@ -111,11 +111,20 @@ pub fn message_context(ui: Ui) -> Vec<MenuEntry> {
         MenuEntry::submenu("Catégoriser", category_entries(ui)).separated(),
         MenuEntry::submenu("Assurer un suivi", flag_entries(ui)),
         MenuEntry::submenu("Actions rapides", quick_step_entries(ui)),
+        MenuEntry::submenu("Règles", rule_entries(ui)),
         MenuEntry::submenu("Déplacer", move_entries(ui)).separated(),
         MenuEntry::submenu("Courrier indésirable", junk_entries(ui)),
         MenuEntry::action("Archiver", move || actions::run(ui, MessageOp::Archive)),
         MenuEntry::action("Supprimer", move || actions::delete(ui, false)).separated(),
         MenuEntry::action("Supprimer définitivement", move || actions::delete(ui, true)),
+    ]
+}
+
+/// Sous-menu « Règles » d'Outlook : créer une règle d'après le message, ou gérer les règles.
+fn rule_entries(ui: Ui) -> Vec<MenuEntry> {
+    vec![
+        MenuEntry::action("Créer une règle…", move || ui.dialog.set(Some(Dialog::CreateRule))),
+        MenuEntry::action("Gérer les règles et alertes…", move || ui.dialog.set(Some(Dialog::Rules { run: false }))),
     ]
 }
 
@@ -228,6 +237,8 @@ pub fn ContextMenu() -> impl IntoView {
             (None, Some(at)) => match at.target {
                 ContextTarget::Messages => message_context(ui),
                 ContextTarget::Folder(id) => folder_context(ui, id),
+                ContextTarget::Flag => flag_entries(ui),
+                ContextTarget::Categories => category_entries(ui),
             },
             (None, None) => Vec::new(),
         }
