@@ -9,7 +9,12 @@
 
 ## Prochain jalon : J7, IMAP + SMTP (Hostinger)
 - Comptes, synchronisation, envoi, boîte d'envoi, F9, hors connexion, notifications, réponse automatique locale.
-- Critère : envoi et réception réels sur un compte de test (à demander à Paul).
+- Critère : envoi et réception réels sur un compte de test.
+- **Compte de test** (créé le 2026-10-21 via le MCP Hostinger, offre « Free Business Email » d'adam-declic.fr) : `thunderlook-test@adam-declic.fr`.
+  - Identifiants dans `data/test-account.json` (non versionné) ; vérification : `python -I target/tl-scripts/check_account.py`.
+  - IMAP `imap.hostinger.com:993` (TLS), SMTP `smtp.hostinger.com:465` (TLS) : connexion, envoi à soi-même et réception vérifiés.
+  - Capacités IMAP : IMAP4rev1, IDLE, ENABLE, LITERAL+, AUTH=PLAIN/LOGIN. Dossiers : INBOX, INBOX.Drafts, INBOX.Junk, INBOX.Sent, INBOX.Trash (séparateur « . »).
+- MCP Hostinger : `claude mcp add -s user --transport http hostinger https://mcp.hostinger.com`, OAuth fait, `mcp__hostinger__execute` autorisé par Paul.
 - Branchements déjà prêts :
   - règles : les actions d'envoi (transférer, répondre, copie à…) sont signalées « pas avant le J7 » dans `crates/mailbox/src/rule_run.rs` ; les règles devront aussi s'appliquer à l'arrivée des messages ;
   - actions rapides : « Au responsable », « E-mail de l'équipe », « Répondre et supprimer » ouvrent la rédaction, l'envoi reste à faire.
