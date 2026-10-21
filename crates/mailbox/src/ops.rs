@@ -463,8 +463,10 @@ impl Mailbox {
             let mut set = tx.prepare_cached("UPDATE message SET folder_id = ?2 WHERE id = ?1").map_err(err)?;
             for (id, f) in moves {
                 let from: i64 = get.query_row([id], |r| r.get(0)).map_err(err)?;
-                set.execute([id, f]).map_err(err)?;
+                // Report d'abord : l'UID (propre au dossier d'origine) est retiré avant le changement de dossier, sinon
+                // il peut entrer en collision avec un message du dossier d'arrivée (index unique dossier + UID).
                 remote::queue(&tx, Change::Moved { id: *id, from, to: *f })?;
+                set.execute([id, f]).map_err(err)?;
             }
         }
         tx.commit().map_err(err)

@@ -103,7 +103,8 @@ pub(crate) fn queue(conn: &Connection, change: Change) -> Result<()> {
                     // Retour au dossier d'origine avant report : rien à faire sur le serveur.
                     Some(target) if kind == "move" && target == mailbox && same_account => {
                         conn.execute("DELETE FROM imap_pending WHERE id = ?1", [row]).map_err(err)?;
-                        conn.execute("UPDATE message SET imap_uid = ?2 WHERE id = ?1", params![id, uid]).map_err(err)?;
+                        // Dossier et UID d'origine ensemble : l'UID ne vaut que dans son dossier.
+                        conn.execute("UPDATE message SET folder_id = ?2, imap_uid = ?3 WHERE id = ?1", params![id, to, uid]).map_err(err)?;
                     }
                     Some(target) if dst.account.is_some() && (same_account || kind == "append") => {
                         conn.execute("UPDATE imap_pending SET arg = ?2 WHERE id = ?1", params![row, to_arg(target)]).map_err(err)?;
@@ -210,7 +211,7 @@ pub(crate) fn folder_created(conn: &Connection, folder: i64) -> Result<()> {
 pub fn file_message(conn: &Connection, id: i64, folder: i64) -> Result<()> {
     let tx = conn.unchecked_transaction().map_err(err)?;
     let from: i64 = tx.query_row("SELECT folder_id FROM message WHERE id = ?1", [id], |r| r.get(0)).map_err(err)?;
-    tx.execute("UPDATE message SET folder_id = ?2 WHERE id = ?1", params![id, folder]).map_err(err)?;
     queue(&tx, Change::Moved { id, from, to: folder })?;
+    tx.execute("UPDATE message SET folder_id = ?2 WHERE id = ?1", params![id, folder]).map_err(err)?;
     tx.commit().map_err(err)
 }

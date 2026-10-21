@@ -344,6 +344,23 @@ pub fn folder_name(ui: Ui, id: &str) -> String {
     ui.tree.with_untracked(|t| t.as_ref().and_then(|t| t.find_folder(id)).map(|f| f.name.clone()).unwrap_or_default())
 }
 
+/// Dossier de rôle `role` (Boîte de réception, Courrier indésirable…) dans la section (fichier de données ou compte)
+/// du dossier affiché.
+pub fn section_folder(ui: Ui, role: thunderlook_model::FolderRole) -> Option<String> {
+    fn contains(folders: &[thunderlook_model::Folder], id: &str) -> bool {
+        folders.iter().any(|f| f.id == id || contains(&f.children, id))
+    }
+    fn find(folders: &[thunderlook_model::Folder], role: thunderlook_model::FolderRole) -> Option<String> {
+        folders.iter().find_map(|f| if f.role == role { Some(f.id.clone()) } else { find(&f.children, role) })
+    }
+    let current = real_folder(&ui.folder.get_untracked());
+    ui.tree.with_untracked(|t| {
+        let t = t.as_ref()?;
+        let section = t.sections.iter().filter(|s| s.id != "favorites").find(|s| contains(&s.folders, &current))?;
+        find(&section.folders, role)
+    })
+}
+
 pub fn real_folder(id: &str) -> String {
     id.trim_start_matches("fav-").to_string()
 }

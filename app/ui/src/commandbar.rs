@@ -66,13 +66,14 @@ pub enum Action {
     Accounts,
     OfflineToggle,
     AutoReply,
+    JunkMenu,
 }
 
 impl Action {
     fn is_menu(self) -> bool {
         matches!(
             self,
-            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu | Self::QuickStepsMenu
+            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu | Self::QuickStepsMenu | Self::JunkMenu
         )
     }
 }
@@ -152,6 +153,17 @@ fn menu_entries(ui: Ui, action: Action) -> Vec<MenuEntry> {
         Action::MoveMenu => menus::move_entries(ui),
         Action::CategoriesMenu => menus::category_entries(ui),
         Action::FlagMenu => menus::flag_entries(ui),
+        Action::JunkMenu => {
+            use thunderlook_model::FolderRole;
+            let target = |role: FolderRole, label: &'static str| match actions::section_folder(ui, role) {
+                Some(f) => MenuEntry::action(label, move || actions::run(ui, MessageOp::Move { folder_id: f.clone() })),
+                None => MenuEntry::pending(label),
+            };
+            vec![
+                target(FolderRole::Inbox, "Courrier légitime (vers la Boîte de réception)"),
+                target(FolderRole::Junk, "Courrier indésirable (vers Courrier indésirable)"),
+            ]
+        }
         Action::RulesMenu => vec![
             MenuEntry::action("Gérer les règles et les alertes…", move || ui.dialog.set(Some(Dialog::Rules { run: false }))),
             MenuEntry::action("Exécuter les règles…", move || ui.dialog.set(Some(Dialog::Rules { run: true }))),
@@ -217,7 +229,7 @@ impl Action {
     const fn is_menu_const(self) -> bool {
         matches!(
             self,
-            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu | Self::QuickStepsMenu
+            Self::ReadingPaneMenu | Self::FolderPaneMenu | Self::MoveMenu | Self::CategoriesMenu | Self::FlagMenu | Self::NewItemsMenu | Self::RulesMenu | Self::QuickStepsMenu | Self::JunkMenu
         )
     }
 }
@@ -240,7 +252,7 @@ const MAIL_HOME: &[Group] = &[
         cmds: &[
             cmd("Ignorer la conversation", MESSAGE_OFF, Some("Ctrl+Suppr"), false, false, false),
             cmd("Élaguer la conversation", SCISSORS, None, true, false, false),
-            cmd("Indésirables", BAN, None, true, false, false),
+            wired("Indésirables", BAN, None, true, false, Action::JunkMenu),
             wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::Delete),
             wired("Archiver", ARCHIVE, None, true, true, Action::Archive),
         ],
