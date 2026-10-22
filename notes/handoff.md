@@ -8,7 +8,19 @@
    « répondu », `open-item` sélectionne le message, champs Port/Chiffrement d'« Ajouter un compte »). Correctif de la
    fusion : un compte retiré pendant que son dossier est affiché laissait une liste vide (`77bcc14`).
    Script de vérification : `target/tl-scripts/verify_v092.mjs` (coupe puis rétablit « marquer comme lu »).
-2. **22/10 soir** :
+2. **22/10 nuit — demande de Paul en cours** : couleurs du calendrier comme Outlook (catégories, disponibilité,
+   drapeaux, indicateurs), menus clic droit d'Outlook (Paul choisit lesquels intégrer), défilement à la roulette.
+   - Relevés faits : `notes/outlook-couleurs-menus.md` (palette des 25 couleurs, menus exacts). **Faits sans REA** :
+     Paul le reproche (« tu réinventes la roue ») ; reprendre avec les outils REA (observe_native_ui,
+     capture_native_ui_scenario, trace_native_ui_action) et consigner dans REA-LIMITES.md.
+   - Roulette : code **non validé** dans l'arbre de travail (vue Mois par semaine via `CalendarQuery.start`, navigateur
+     par mois ; `app/ui/src/calendar.rs`, `crates/calendar/src/view.rs`) : compile, pas encore testé.
+   - Reste : poser la question des menus à Paul ; appliquer la palette (remplacer `CATEGORY_COLORS` de
+     `crates/mailbox/src/lib.rs`, teintes « propres au projet ») ; reprendre `Store.Categories` à la synchro ;
+     drapeaux et indicateurs non relevés.
+   - Incident : une capture d'écran a pris une fenêtre Notepad++ (`TOKENS.txt`, clés d'API) ; fichier effacé ;
+     Paul prévenu. Ne capturer que des fenêtres d'Outlook (PrintWindow) ou le rectangle d'un menu.
+3. **22/10 soir** :
    - J10 Contacts (lecture) fait (`notes/j10-plan.md`). Paul : les contacts manquants arriveront par MPE — en fait
      ils sont déjà dans Outlook ; ThunderLook lit une copie du 15/10. Suite logique : contacts lus en direct par
      Outlook, comme le calendrier (même crate `crates/outlook`).
