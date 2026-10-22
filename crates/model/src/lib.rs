@@ -683,6 +683,15 @@ pub struct SyncEvent {
     pub error: Option<String>,
 }
 
+/// Clic sur une notification de nouveaux messages (événement « open-item ») : dossier à afficher, et message à
+/// sélectionner s'il n'y en avait qu'un.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenItem {
+    pub folder_id: String,
+    pub message_id: Option<String>,
+}
+
 /// Réponse automatique locale (J7), enregistrée par le cœur dans `autoreply.json`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

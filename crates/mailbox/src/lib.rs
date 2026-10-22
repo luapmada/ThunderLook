@@ -914,6 +914,13 @@ impl Mailbox {
     }
 
     /// Messages visés par les lignes `[a, b[` d'une vue (ceux du dossier pour un en-tête de conversation).
+    /// Position dans la vue `token` de la ligne qui montre ou contient le message `id` (« m123 »).
+    pub fn position_in_view(&self, token: u64, id: &str) -> Result<Option<u32>> {
+        let id = message_db_id(id)?;
+        let rows = &self.views.get(&token).ok_or("vue expirée : rouvrir le dossier")?.rows;
+        Ok(rows.iter().position(|r| r.item.targets().contains(&id)).map(|p| p as u32))
+    }
+
     pub fn view_targets(&self, token: u64, a: u32, b: u32) -> Option<Vec<i64>> {
         let rows = &self.views.get(&token)?.rows;
         let (a, b) = ((a as usize).min(rows.len()), (b as usize).min(rows.len()));

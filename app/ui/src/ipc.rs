@@ -3,7 +3,7 @@
 use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
-    AccountSummary, AutoReply, JunkLists, JunkMark, MessageSummary, MessageView, NewRule, OpResult, RuleDraft, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
+    AccountSummary, AutoReply, JunkLists, JunkMark, MessageSummary, MessageView, NewRule, OpResult, OpenItem, RuleDraft, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
     quicksteps::QuickStep,
     calendar::{CalendarQuery, CalendarView},
     settings::Settings,
@@ -37,6 +37,17 @@ struct SettingsArg {
 #[derive(Serialize)]
 struct QueryArg<'a> {
     query: &'a ListQuery,
+}
+
+#[derive(Serialize)]
+struct PositionArg<'a> {
+    token: u64,
+    id: &'a str,
+}
+
+/// Position d'un message dans une vue ouverte.
+pub async fn message_position(token: u64, id: &str) -> Result<Option<u32>, String> {
+    call("message_position", &PositionArg { token, id }).await
 }
 
 #[derive(Serialize)]
@@ -398,6 +409,24 @@ pub fn on_sync(f: impl Fn(SyncEvent) + 'static) {
     });
     wasm_bindgen_futures::spawn_local(async move {
         let _ = tauri_listen("sync", &handler).await;
+        handler.forget();
+    });
+}
+
+#[derive(serde::Deserialize)]
+struct OpenItemEnvelope {
+    payload: OpenItem,
+}
+
+/// Suit l'événement « open-item » du cœur (clic sur une notification de nouveaux messages).
+pub fn on_open_item(f: impl Fn(OpenItem) + 'static) {
+    let handler = Closure::<dyn FnMut(JsValue)>::new(move |v: JsValue| {
+        if let Ok(e) = serde_wasm_bindgen::from_value::<OpenItemEnvelope>(v) {
+            f(e.payload);
+        }
+    });
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = tauri_listen("open-item", &handler).await;
         handler.forget();
     });
 }

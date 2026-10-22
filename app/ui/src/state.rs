@@ -181,6 +181,8 @@ pub struct Ui {
     pub view_epoch: RwSignal<u64>,
     /// Position à sélectionner à la prochaine ouverture de vue (au lieu de la première).
     pub pending_select: RwSignal<Option<u32>>,
+    /// Message à sélectionner à la prochaine ouverture de vue (clic sur une notification), s'il y figure.
+    pub pending_message: RwSignal<Option<String>>,
     /// Dernier résultat d'opération (barre d'état) et ce que Ctrl+Z annulera.
     pub status: RwSignal<Option<String>>,
     pub undo_label: RwSignal<Option<String>>,
@@ -236,6 +238,7 @@ impl Ui {
             anchor: RwSignal::new(None),
             view_epoch: RwSignal::new(0),
             pending_select: RwSignal::new(None),
+            pending_message: RwSignal::new(None),
             status: RwSignal::new(None),
             undo_label: RwSignal::new(None),
             categories: RwSignal::new(Vec::new()),

@@ -90,6 +90,9 @@ fn reply_then_forward_mark_the_original() {
         .open_list(&ListQuery { folder_id: format!("f{inbox}"), unread_only: false, sort: SortField::Date, descending: true, conversations: false })
         .unwrap();
     assert_eq!(mb.rows(list.token, 0, 1).unwrap()[0].last_verb, Some(LastVerb::Replied));
+    // Clic sur une notification : la ligne du message est retrouvée dans la vue.
+    assert_eq!(mb.position_in_view(list.token, &format!("m{original}")).unwrap(), Some(0));
+    assert_eq!(mb.position_in_view(list.token, "m999999").unwrap(), None);
 
     // Transfert enregistré, rouvert (la rédaction perd alors sa nature et son original), puis envoyé.
     let mut f = mb.compose(ComposeKind::Forward, Some(&format!("m{original}"))).unwrap();

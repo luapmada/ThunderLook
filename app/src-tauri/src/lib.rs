@@ -19,7 +19,7 @@ use tauri_plugin_opener::OpenerExt;
 use thunderlook_mailbox::Mailbox;
 use thunderlook_model::{
     AccountSummary, AutoReply, CategoryInfo, JunkLists, JunkMark, ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, FolderOp, FolderTree, IndexStatus, ListQuery, ListView,
-    MessageOp, MessageSummary, MessageView, OpResult, SyncEvent, NewRule, RuleDraft, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
+    MessageOp, MessageSummary, MessageView, OpResult, OpenItem, SyncEvent, NewRule, RuleDraft, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature,
     SortField, format,
     quicksteps::{QuickStep, default_quick_steps},
     calendar::{CalendarQuery, CalendarView},
@@ -143,6 +143,8 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
         return SyncEvent { message: "Aucun compte de messagerie".into(), ..Default::default() };
     }
     let (mut sent, mut received, mut errors) = (0, 0, Vec::new());
+    // Nouveaux messages de la Boîte de réception, par compte, pour les notifications.
+    let mut arrived: Vec<(i64, String, Vec<i64>)> = Vec::new();
     for a in &accounts {
         match thunderlook_sync::sync_account_blocking(&dir, a.source_id) {
             Ok(r) => {
@@ -157,6 +159,7 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
                     }
                 };
                 if !new_ids.is_empty() {
+                    arrived.push((a.source_id, a.address.clone(), new_ids.clone()));
                     // Réponses d'abord (sur les messages tels que reçus), puis règles (qui peuvent les déplacer).
                     match auto_replies(app, a.source_id, &new_ids) {
                         Ok(n) if n > 0 => app.state::<Syncer>().again.store(true, Ordering::SeqCst),
@@ -177,10 +180,8 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
     }
     if received > 0 {
         app.state::<Indexer>().ensure(&dir);
-        use tauri_plugin_notification::NotificationExt;
-        let body = if received == 1 { "1 nouveau message".to_string() } else { format!("{received} nouveaux messages") };
-        let _ = app.notification().builder().title("ThunderLook").body(body).show();
     }
+    notify_arrivals(app, &dir, &arrived);
     let mut parts = Vec::new();
     if sent > 0 {
         parts.push(if sent == 1 { "Message envoyé".to_string() } else { format!("{sent} messages envoyés") });
@@ -194,6 +195,61 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
         (None, false) => parts.join(" · "),
     };
     SyncEvent { running: false, message, sent, received, error: errors.into_iter().next() }
+}
+
+/// Notification Windows des nouveaux messages, une par compte : expéditeur et objet s'il n'y en a qu'un, sinon leur
+/// nombre. Le clic ([`open_from_notification`]) ouvre la Boîte de réception du compte, ou ce message.
+fn notify_arrivals(app: &AppHandle, dir: &Path, arrived: &[(i64, String, Vec<i64>)]) {
+    use tauri_plugin_notification::NotificationExt;
+    let conn = thunderlook_store::open(dir).ok();
+    for (source, address, ids) in arrived {
+        let single = match ids.as_slice() {
+            [id] => conn.as_ref().and_then(|c| {
+                c.query_row("SELECT from_name, from_addr, subject FROM message WHERE id = ?1", [id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+                })
+                .ok()
+            }),
+            _ => None,
+        };
+        let body = match &single {
+            Some((name, addr, subject)) => {
+                let who = if name.trim().is_empty() { addr } else { name };
+                let subject = if subject.trim().is_empty() { "(aucun objet)" } else { subject.as_str() };
+                format!("{who}
+{subject}")
+            }
+            None => format!("{} nouveaux messages pour {address}", ids.len()),
+        };
+        let mut builder = app.notification().builder().id(*source as i32).title("ThunderLook").body(body).extra("source", *source);
+        if let [id] = ids.as_slice() {
+            builder = builder.extra("message", *id);
+        }
+        let _ = builder.show();
+    }
+}
+
+/// Clic sur une notification : ThunderLook passe au premier plan et affiche la Boîte de réception du compte, ou le
+/// message s'il était seul (dans son dossier actuel : une règle a pu le déplacer).
+fn open_from_notification(app: &AppHandle, source: i64, message: Option<i64>) {
+    if let Some(w) = app.webview_windows().into_values().next() {
+        let _ = w.unminimize();
+        let _ = w.show();
+        // Windows ne laisse passer au premier plan qu'une fenêtre « au-dessus » : on l'y met le temps du focus.
+        let _ = w.set_always_on_top(true);
+        let _ = w.set_focus();
+        let _ = w.set_always_on_top(false);
+    }
+    let Ok(conn) = data_dir(app).and_then(|d| thunderlook_store::open(&d).map_err(|e| e.to_string())) else { return };
+    let current = message.and_then(|m| conn.query_row("SELECT folder_id FROM message WHERE id = ?1", [m], |r| r.get::<_, i64>(0)).ok());
+    let item = match current {
+        Some(folder) => OpenItem { folder_id: format!("f{folder}"), message_id: message.map(|m| format!("m{m}")) },
+        None => {
+            let Ok(inbox) = conn.query_row("SELECT id FROM folder WHERE source_id = ?1 AND role = 'inbox'", [source], |r| r.get::<_, i64>(0)) else { return };
+            OpenItem { folder_id: format!("f{inbox}"), message_id: None }
+        }
+    };
+    let _ = app.emit("open-item", item);
 }
 
 fn junk_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -484,6 +540,12 @@ fn search(app: AppHandle, store: State<Store>, query: SearchQuery, sort: SortFie
 #[tauri::command]
 fn index_status(indexer: State<Indexer>) -> IndexStatus {
     indexer.status.lock().map(|s| *s).unwrap_or_default()
+}
+
+/// Position d'un message dans une vue ouverte (clic sur une notification).
+#[tauri::command(async)]
+fn message_position(app: AppHandle, store: State<Store>, token: u64, id: String) -> Result<Option<u32>, String> {
+    with_mailbox(&app, &store, |mb| mb.position_in_view(token, &id))
 }
 
 #[tauri::command(async)]
@@ -1020,6 +1082,23 @@ pub fn run() {
                     NewWindowResponse::Deny
                 })
                 .build()?;
+            // Clic sur une notification de nouveaux messages (le greffon le signale tant que la notification est à
+            // l'écran, pas depuis le Centre de notifications) : voir `open_from_notification`.
+            {
+                use tauri_plugin_notification::NotificationExt;
+                let handle = app.handle().clone();
+                app.notification().on_action(move |a| {
+                    if a.action_id() != "tap" {
+                        return;
+                    }
+                    let extra = a.notification().map(|n| n.extra().clone()).unwrap_or_default();
+                    let Some(source) = extra.get("source").and_then(|v| v.as_i64()) else { return };
+                    let message = extra.get("message").and_then(|v| v.as_i64());
+                    // Le gestionnaire tourne sur un fil d'arrière-plan : la fenêtre se manipule depuis le fil principal.
+                    let h = handle.clone();
+                    let _ = handle.run_on_main_thread(move || open_from_notification(&h, source, message));
+                })?;
+            }
             start_scheduler(app.handle());
             Ok(())
         })
@@ -1029,6 +1108,7 @@ pub fn run() {
             list_rows,
             toggle_conversation,
             message_view,
+            message_position,
             compose,
             save_draft,
             open_draft,
