@@ -42,6 +42,45 @@ fn account_lifecycle_keeps_password_out_of_the_database() {
     account::remove(&conn, &dir, id).unwrap();
     assert!(account::accounts(&conn).unwrap().is_empty());
     assert!(account::password(&address).is_err(), "mot de passe retiré du gestionnaire d'identifiants");
+    assert_eq!(account::password_users(&address).unwrap(), None, "liste des utilisateurs retirée aussi");
     drop(conn);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Point ouvert du J7 : le même compte dans deux dossiers de données ; le retirer de l'un garde le mot de passe pour
+/// l'autre. Un mot de passe enregistré avant la liste des utilisateurs n'est jamais effacé.
+#[test]
+fn password_is_shared_between_data_dirs() {
+    let base = std::env::temp_dir().join(format!("tl-account-shared-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (a, b) = (base.join("Données"), base.join("Essai"));
+    let (ca, cb) = (thunderlook_store::open(&a).unwrap(), thunderlook_store::open(&b).unwrap());
+    let address = format!("partage-{}@thunderlook.invalid", std::process::id());
+    let ep = Endpoints::hostinger(&address);
+    let ia = account::create(&ca, &address, "A", &ep, "secret-a").unwrap();
+    let ib = account::create(&cb, &address, "B", &ep, "secret-a").unwrap();
+    let users = account::password_users(&address).unwrap().unwrap();
+    assert_eq!(users, vec![account::data_dir_key(&a), account::data_dir_key(&b)]);
+    // Même dossier écrit autrement (casse) : même clé.
+    assert_eq!(account::data_dir_key(&base.join("DONNÉES")), account::data_dir_key(&a));
+
+    account::remove(&ca, &a, ia).unwrap();
+    assert_eq!(account::password(&address).unwrap(), "secret-a", "encore utilisé par l'autre dossier");
+    assert_eq!(account::password_users(&address).unwrap().unwrap(), vec![account::data_dir_key(&b)]);
+    account::remove(&cb, &b, ib).unwrap();
+    assert!(account::password(&address).is_err());
+    assert_eq!(account::password_users(&address).unwrap(), None);
+
+    // Mot de passe antérieur (v0.9.0 : entrée par adresse, sans liste) : ses utilisateurs sont inconnus.
+    let legacy = keyring::Entry::new("ThunderLook", &address.to_lowercase()).unwrap();
+    legacy.set_password("ancien").unwrap();
+    let ia = account::create(&ca, &address, "A", &ep, "ancien").unwrap();
+    assert_eq!(account::password_users(&address).unwrap().unwrap(), vec![account::LEGACY_USER.to_string(), account::data_dir_key(&a)]);
+    account::remove(&ca, &a, ia).unwrap();
+    assert_eq!(account::password(&address).unwrap(), "ancien", "jamais effacé sans savoir qui s'en sert");
+    // Nettoyage du gestionnaire d'identifiants.
+    let _ = legacy.delete_credential();
+    let _ = keyring::Entry::new("ThunderLook", &format!("{}#dossiers", address.to_lowercase())).unwrap().delete_credential();
+    drop((ca, cb));
+    let _ = std::fs::remove_dir_all(&base);
 }
