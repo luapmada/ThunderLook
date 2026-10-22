@@ -13,6 +13,8 @@ use crate::{Result, err};
 pub(crate) enum Change {
     Seen { id: i64, on: bool },
     Flagged { id: i64, on: bool },
+    /// Réponse ou transfert envoyé : `\Answered` ou `$Forwarded` ajouté à l'original.
+    Verb { id: i64, forwarded: bool },
     /// `from` : dossier avant le déplacement (la ligne `message` peut déjà porter le nouveau).
     Moved { id: i64, from: i64, to: i64 },
     Copied { source: i64, copy: i64, to: i64 },
@@ -75,8 +77,13 @@ fn to_arg(mailbox: &str) -> String {
 
 pub(crate) fn queue(conn: &Connection, change: Change) -> Result<()> {
     match change {
-        Change::Seen { id, on } | Change::Flagged { id, on } => {
-            let flag = if matches!(change, Change::Seen { .. }) { r"\Seen" } else { r"\Flagged" };
+        Change::Seen { .. } | Change::Flagged { .. } | Change::Verb { .. } => {
+            let (id, on, flag) = match change {
+                Change::Seen { id, on } => (id, on, r"\Seen"),
+                Change::Flagged { id, on } => (id, on, r"\Flagged"),
+                Change::Verb { id, forwarded } => (id, true, if forwarded { "$Forwarded" } else { r"\Answered" }),
+                _ => unreachable!(),
+            };
             let folder: i64 = conn.query_row("SELECT folder_id FROM message WHERE id = ?1", [id], |r| r.get(0)).map_err(err)?;
             let p = place(conn, folder)?;
             // Sans UID (déplacement en attente), l'état local est reporté après le déplacement.

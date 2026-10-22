@@ -62,15 +62,15 @@ async fn find_uid(s: &mut ImapSession, conn: &Connection, folder: i64, message_i
 
 /// Rattache le message local `id` à son nouvel UID dans `mailbox`, et y reporte son état lu / indicateur.
 async fn attach(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &mut Option<String>, account: &Account, id: i64, mailbox: &str) -> Result<()> {
-    let row: Option<(i64, Option<String>, bool, i64, String)> = conn
+    let row: Option<(i64, Option<String>, bool, i64, String, Option<i64>)> = conn
         .query_row(
-            "SELECT folder_id, internet_message_id, is_read, flag_status, eml_path FROM message WHERE id = ?1",
+            "SELECT folder_id, internet_message_id, is_read, flag_status, eml_path, last_verb FROM message WHERE id = ?1",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
         )
         .optional()
         .map_err(e)?;
-    let Some((folder, message_id, read, flag, eml)) = row else { return Ok(()) };
+    let Some((folder, message_id, read, flag, eml, verb)) = row else { return Ok(()) };
     // Le message a pu changer de dossier local depuis : on ne rattache que s'il est bien dans `mailbox`.
     let local_mailbox: Option<String> = conn.query_row("SELECT imap_name FROM folder WHERE id = ?1", [folder], |r| r.get(0)).map_err(e)?;
     if local_mailbox.as_deref() != Some(mailbox) {
@@ -86,6 +86,12 @@ async fn attach(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current
             conn.execute("UPDATE message SET imap_uid = ?2 WHERE id = ?1", params![id, uid]).map_err(e)?;
             store(s, uid, if read { r"+FLAGS (\Seen)" } else { r"-FLAGS (\Seen)" }).await?;
             store(s, uid, if flag == 2 { r"+FLAGS (\Flagged)" } else { r"-FLAGS (\Flagged)" }).await?;
+            // Répondu ou transféré (`PidTagLastVerbExecuted`) : 104 transféré, sinon répondu.
+            match verb {
+                Some(104) => store(s, uid, "+FLAGS ($Forwarded)").await?,
+                Some(_) => store(s, uid, r"+FLAGS (\Answered)").await?,
+                None => {}
+            }
         }
         None => {
             // Sans Message-ID retrouvable : la relève reprendra le message du serveur.

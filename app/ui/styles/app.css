@@ -890,8 +890,13 @@ input {
   color: var(--text-2);
 }
 
+.verb {
+  color: var(--accent);
+}
+
 .imp-high,
 .imp-low,
+.verb,
 .flag,
 .flag-done {
   display: inline-flex;

@@ -136,6 +136,15 @@ pub fn ReadingPane() -> impl IntoView {
                             {m.item_kind.clone().map(|k| view! {
                                 <p class="infobar" role="note"><Svg icon=INFO size=14 />{format!("Élément de type « {k} » : affichage complet prévu avec le module correspondant.")}</p>
                             })}
+                            {m.last_verb_label.clone().map(|t| {
+                                let forward = m.last_verb.is_some_and(|v| v.is_forward());
+                                view! {
+                                    <p class="infobar" role="note">
+                                        {if forward { view! { <Svg icon=FORWARD size=14 /> } } else { view! { <Svg icon=REPLY size=14 /> } }}
+                                        {t}
+                                    </p>
+                                }
+                            })}
                             {(m.importance == Importance::High).then(|| view! {
                                 <p class="infobar" role="note"><Svg icon=CIRCLE_ALERT size=14 />"Ce message a une importance haute."</p>
                             })}

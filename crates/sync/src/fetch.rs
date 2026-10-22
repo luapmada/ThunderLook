@@ -206,10 +206,23 @@ fn importance(m: &mail_parser::Message) -> i64 {
     }
 }
 
+/// Dernière action d'après les drapeaux IMAP (`PidTagLastVerbExecuted`) : `\Answered` répondu (102), `$Forwarded`
+/// transféré (104).
+fn verb_of(flags: &[Flag]) -> Option<i64> {
+    if flags.iter().any(|f| matches!(f, Flag::Answered)) {
+        Some(102)
+    } else if flags.iter().any(|f| matches!(f, Flag::Custom(k) if k.eq_ignore_ascii_case("$Forwarded"))) {
+        Some(104)
+    } else {
+        None
+    }
+}
+
 struct Incoming {
     uid: u32,
     seen: bool,
     flagged: bool,
+    verb: Option<i64>,
     internal_ms: Option<i64>,
     bytes: Vec<u8>,
 }
@@ -287,6 +300,9 @@ fn store_message(conn: &Connection, data_dir: &Path, source: i64, folder: i64, m
     )
     .map_err(e)?;
     let id = conn.last_insert_rowid();
+    if m.verb.is_some() {
+        conn.execute("UPDATE message SET last_verb = ?2 WHERE id = ?1", params![id, m.verb]).map_err(e)?;
+    }
     let rel = thunderlook_store::eml_relative_path(source, id);
     let path = thunderlook_store::resolve(data_dir, &rel);
     if let Some(dir) = path.parent() {
@@ -360,6 +376,14 @@ async fn sync_folder(s: &mut ImapSession, conn: &Connection, data_dir: &Path, so
                     params![folder, uid, seen, flagged],
                 )
                 .map_err(e)? as u32;
+            // Répondu ou transféré ailleurs (Outlook, webmail) : l'état local suit, sans effacer celui de ThunderLook.
+            if let Some(verb) = verb_of(&flags) {
+                conn.execute(
+                    "UPDATE message SET last_verb = ?3 WHERE folder_id = ?1 AND imap_uid = ?2 AND last_verb IS NULL",
+                    params![folder, uid, verb],
+                )
+                .map_err(e)?;
+            }
         }
     }
 
@@ -383,6 +407,7 @@ async fn sync_folder(s: &mut ImapSession, conn: &Connection, data_dir: &Path, so
                 uid,
                 seen: flags.iter().any(|x| matches!(x, Flag::Seen)),
                 flagged: flags.iter().any(|x| matches!(x, Flag::Flagged)),
+                verb: verb_of(&flags),
                 internal_ms: f.internal_date().map(|d| d.timestamp_millis()),
                 bytes: body.to_vec(),
             };
