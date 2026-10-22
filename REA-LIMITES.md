@@ -159,4 +159,5 @@ Chaque entrée : action → résultat → cause → contournement → source.
 - Résultats dans `notes/rea/regles-outlook.md` : versions du flux, `XR_Magic`, `bytecount`, étiquettes d'objet MFC et codage des longueurs.
 
 ## Interface native d'Outlook (23/10)
-- `observe_native_ui`, `capture_native_ui_scenario` et `trace_native_ui_action` sont liés à une cible **Mach-O** et à l'accessibilité macOS (`AXValue`, PID + identifiant de fenêtre) : inutilisables sur `OUTLOOK.EXE` (Windows). Les relevés de couleurs et de menus d'Outlook restent donc faits par UI Automation (`tools/uia_*.ps1`), pas par REA.
+- `observe_native_ui`, `capture_native_ui_scenario` et `trace_native_ui_action` sont décrits comme liés à une cible **Mach-O** (accessibilité macOS, `AXValue`). **Non testés sur `OUTLOOK.EXE`** : déduit de leur description seulement.
+- Pistes REA non macOS à essayer pour les menus et les couleurs : `inspect_pe_resources` (menus et dialogues dans les ressources PE), `search_strings` / `xrefs` (palette des catégories), `observe_native_calls`.
