@@ -890,8 +890,13 @@ input {
   color: var(--text-2);
 }
 
+.verb {
+  color: var(--accent);
+}
+
 .imp-high,
 .imp-low,
+.verb,
 .flag,
 .flag-done {
   display: inline-flex;
@@ -1069,6 +1074,15 @@ input {
   gap: var(--u);
   font-size: var(--fs-sm);
   color: var(--text-2);
+}
+
+.field-row {
+  display: flex;
+  gap: calc(var(--u) * 2);
+}
+
+.field-row .field {
+  flex: 1;
 }
 
 .field input,

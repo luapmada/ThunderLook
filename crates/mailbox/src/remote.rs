@@ -13,6 +13,8 @@ use crate::{Result, err};
 pub(crate) enum Change {
     Seen { id: i64, on: bool },
     Flagged { id: i64, on: bool },
+    /// Réponse ou transfert envoyé : `\Answered` ou `$Forwarded` ajouté à l'original.
+    Verb { id: i64, forwarded: bool },
     /// `from` : dossier avant le déplacement (la ligne `message` peut déjà porter le nouveau).
     Moved { id: i64, from: i64, to: i64 },
     Copied { source: i64, copy: i64, to: i64 },
@@ -75,8 +77,13 @@ fn to_arg(mailbox: &str) -> String {
 
 pub(crate) fn queue(conn: &Connection, change: Change) -> Result<()> {
     match change {
-        Change::Seen { id, on } | Change::Flagged { id, on } => {
-            let flag = if matches!(change, Change::Seen { .. }) { r"\Seen" } else { r"\Flagged" };
+        Change::Seen { .. } | Change::Flagged { .. } | Change::Verb { .. } => {
+            let (id, on, flag) = match change {
+                Change::Seen { id, on } => (id, on, r"\Seen"),
+                Change::Flagged { id, on } => (id, on, r"\Flagged"),
+                Change::Verb { id, forwarded } => (id, true, if forwarded { "$Forwarded" } else { r"\Answered" }),
+                _ => unreachable!(),
+            };
             let folder: i64 = conn.query_row("SELECT folder_id FROM message WHERE id = ?1", [id], |r| r.get(0)).map_err(err)?;
             let p = place(conn, folder)?;
             // Sans UID (déplacement en attente), l'état local est reporté après le déplacement.
@@ -171,26 +178,14 @@ pub(crate) fn queue(conn: &Connection, change: Change) -> Result<()> {
     Ok(())
 }
 
-/// Dossier créé dans ThunderLook sous un dossier d'un compte : son nom sur le serveur est calculé (sous la Boîte de
-/// réception au premier niveau, comme l'exige Hostinger) et sa création est mise en attente. Sans effet hors compte.
-pub(crate) fn folder_created(conn: &Connection, folder: i64) -> Result<()> {
-    let (source, parent, name): (i64, Option<i64>, String) =
-        conn.query_row("SELECT source_id, parent_id, name FROM folder WHERE id = ?1", [folder], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(err)?;
-    let Some(account): Option<i64> = conn.query_row("SELECT id FROM account WHERE source_id = ?1", [source], |r| r.get(0)).optional().map_err(err)?
-    else {
-        return Ok(());
-    };
-    let parent_name: Option<String> = match parent {
-        Some(p) => conn.query_row("SELECT imap_name FROM folder WHERE id = ?1", [p], |r| r.get(0)).map_err(err)?,
-        None => None,
-    };
-    let inbox: Option<String> = conn
-        .query_row("SELECT imap_name FROM folder WHERE source_id = ?1 AND role = 'inbox' AND imap_name IS NOT NULL", [source], |r| r.get(0))
-        .optional()
-        .map_err(err)?;
-    let base = parent_name.or(inbox).unwrap_or_else(|| "INBOX".into());
-    // Séparateur du serveur : celui qui suit « INBOX » dans un nom existant (« INBOX.Sent »), sinon « / ».
-    let delimiter = conn
+fn account_of(conn: &Connection, source: i64) -> Result<Option<i64>> {
+    conn.query_row("SELECT id FROM account WHERE source_id = ?1", [source], |r| r.get(0)).optional().map_err(err)
+}
+
+/// Séparateur IMAP du compte de la source : celui qui suit `base` (sinon « INBOX ») dans un nom existant
+/// (« INBOX.Sent »), sinon « / ».
+pub(crate) fn delimiter(conn: &Connection, source: i64, base: &str) -> Result<String> {
+    Ok(conn
         .query_row(
             "SELECT substr(imap_name, length(?2) + 1, 1) FROM folder WHERE source_id = ?1 AND imap_name LIKE ?2 || '_%' LIMIT 1",
             params![source, base],
@@ -204,11 +199,140 @@ pub(crate) fn folder_created(conn: &Connection, folder: i64) -> Result<()> {
                 .ok()
                 .flatten()
         })
-        .unwrap_or_else(|| "/".into());
-    let leaf = server_leaf(&name, &delimiter);
+        .unwrap_or_else(|| "/".into()))
+}
+
+/// Nom affiché, nom IMAP et séparateur d'un dossier `name` placé sous `parent` dans un compte : sous la Boîte de
+/// réception au premier niveau (comme l'exige Hostinger), séparateur remplacé dans le nom ([`server_leaf`]).
+fn server_name(conn: &Connection, source: i64, parent: Option<i64>, name: &str) -> Result<(String, String, String)> {
+    let parent_name: Option<String> = match parent {
+        Some(p) => conn.query_row("SELECT imap_name FROM folder WHERE id = ?1", [p], |r| r.get(0)).map_err(err)?,
+        None => None,
+    };
+    let inbox: Option<String> = conn
+        .query_row("SELECT imap_name FROM folder WHERE source_id = ?1 AND role = 'inbox' AND imap_name IS NOT NULL", [source], |r| r.get(0))
+        .optional()
+        .map_err(err)?;
+    let base = parent_name.or(inbox).unwrap_or_else(|| "INBOX".into());
+    let delimiter = delimiter(conn, source, &base)?;
+    let leaf = server_leaf(name, &delimiter);
     let imap_name = format!("{base}{delimiter}{}", crate::imap_utf7::encode(&leaf));
+    Ok((leaf, imap_name, delimiter))
+}
+
+/// Dossier créé dans ThunderLook sous un dossier d'un compte : son nom sur le serveur est calculé (sous la Boîte de
+/// réception au premier niveau, comme l'exige Hostinger) et sa création est mise en attente. Sans effet hors compte.
+pub(crate) fn folder_created(conn: &Connection, folder: i64) -> Result<()> {
+    let (source, parent, name): (i64, Option<i64>, String) =
+        conn.query_row("SELECT source_id, parent_id, name FROM folder WHERE id = ?1", [folder], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(err)?;
+    let Some(account) = account_of(conn, source)? else { return Ok(()) };
+    let (leaf, imap_name, _) = server_name(conn, source, parent, &name)?;
     conn.execute("UPDATE folder SET name = ?2, imap_name = ?3 WHERE id = ?1", params![folder, leaf, imap_name]).map_err(err)?;
     push(conn, account, "mkdir", &imap_name, None, None, "{}".into())
+}
+
+/// Le nom IMAP `name` est `old` ou l'un de ses sous-dossiers : renvoie ce qui suit `old` (vide pour `old` lui-même).
+pub fn under<'a>(name: &'a str, old: &str, delimiter: &str) -> Option<&'a str> {
+    let rest = name.strip_prefix(old)?;
+    (rest.is_empty() || (!delimiter.is_empty() && rest.starts_with(delimiter))).then_some(rest)
+}
+
+/// Dossier d'un compte renommé ou déplacé dans ThunderLook (renommer, déplacer, supprimer vers « Éléments
+/// supprimés », annuler l'une de ces opérations), appelé une fois la ligne `folder` à jour (parent, nom) : nouveau nom
+/// IMAP du dossier et de ses sous-dossiers (le serveur les renomme avec lui, RFC 3501 § 6.3.5), cibles des règles qui
+/// les désignent (`imap:<source>:<nom>`), et `RENAME` mis en attente. Sans effet hors compte.
+pub(crate) fn folder_relocated(conn: &Connection, folder: i64) -> Result<()> {
+    let (source, parent, name, old): (i64, Option<i64>, String, Option<String>) = conn
+        .query_row("SELECT source_id, parent_id, name, imap_name FROM folder WHERE id = ?1", [folder], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .map_err(err)?;
+    let (Some(account), Some(old)) = (account_of(conn, source)?, old) else { return Ok(()) };
+    let (leaf, new, delimiter) = server_name(conn, source, parent, &name)?;
+    conn.execute("UPDATE folder SET name = ?2 WHERE id = ?1", params![folder, leaf]).map_err(err)?;
+    if new == old {
+        return Ok(());
+    }
+    // Le dossier et tous ses sous-dossiers : préfixe remplacé.
+    let all: Vec<(i64, String)> = conn
+        .prepare("SELECT id, imap_name FROM folder WHERE source_id = ?1 AND imap_name IS NOT NULL")
+        .map_err(err)?
+        .query_map([source], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(err)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(err)?;
+    for (id, imap) in all {
+        if let Some(rest) = under(&imap, &old, &delimiter) {
+            conn.execute("UPDATE folder SET imap_name = ?2 WHERE id = ?1", params![id, format!("{new}{rest}")]).map_err(err)?;
+        }
+    }
+    retarget_rules(conn, source, &old, &new, &delimiter, &leaf)?;
+    push(conn, account, "rename", &old, None, None, to_arg(&new))
+}
+
+/// Règles dont une action vise `old` ou l'un de ses sous-dossiers (`imap:<source>:<nom>`) : la cible suit le nouveau
+/// nom, et le nom affiché du dossier renommé lui-même devient `display`.
+fn retarget_rules(conn: &Connection, source: i64, old: &str, new: &str, delimiter: &str, display: &str) -> Result<()> {
+    let prefix = format!("imap:{source}:");
+    let rows: Vec<(i64, String)> = conn
+        .prepare("SELECT id, rule_json FROM rule")
+        .map_err(err)?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(err)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(err)?;
+    for (id, json) in rows {
+        let Ok(mut rule) = serde_json::from_str::<thunderlook_rules::Rule>(&json) else { continue };
+        let mut changed = false;
+        for value in rule.elements.iter_mut().flat_map(|e| e.values.iter_mut()) {
+            let thunderlook_rules::Value::Folder { folder_entry_id, name, .. } = value else { continue };
+            let Some(target) = std::str::from_utf8(folder_entry_id).ok().and_then(|t| t.strip_prefix(prefix.as_str())) else { continue };
+            let Some(rest) = under(target, old, delimiter) else { continue };
+            if rest.is_empty() {
+                *name = display.to_string();
+            }
+            *folder_entry_id = crate::rules::imap_target(source, &format!("{new}{rest}"));
+            changed = true;
+        }
+        if changed {
+            conn.execute("UPDATE rule SET rule_json = ?2 WHERE id = ?1", params![id, serde_json::to_string(&rule).map_err(err)?]).map_err(err)?;
+        }
+    }
+    Ok(())
+}
+
+/// Dossier d'un compte supprimé définitivement (dans « Éléments supprimés », ou création annulée), appelé avant la
+/// suppression des lignes : `DELETE` de ses sous-dossiers puis de lui-même (le serveur ne supprime pas les
+/// sous-dossiers avec leur parent, RFC 3501 § 6.3.4). Une création encore en attente est simplement retirée.
+pub(crate) fn folder_removed(conn: &Connection, folder: i64) -> Result<()> {
+    let (source, old): (i64, Option<String>) =
+        conn.query_row("SELECT source_id, imap_name FROM folder WHERE id = ?1", [folder], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?;
+    let (Some(account), Some(old)) = (account_of(conn, source)?, old) else { return Ok(()) };
+    let delimiter = delimiter(conn, source, &old)?;
+    let mut names: Vec<String> = conn
+        .prepare("SELECT imap_name FROM folder WHERE source_id = ?1 AND imap_name IS NOT NULL")
+        .map_err(err)?
+        .query_map([source], |r| r.get::<_, String>(0))
+        .map_err(err)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(err)?
+        .into_iter()
+        .filter(|n| under(n, &old, &delimiter).is_some())
+        .collect();
+    // Les plus profonds d'abord.
+    names.sort_by_key(|n| std::cmp::Reverse(n.len()));
+    for name in names {
+        // Suppressions et drapeaux de ses messages : sans objet, la boîte part avec eux.
+        conn.execute("DELETE FROM imap_pending WHERE account_id = ?1 AND mailbox = ?2 AND kind IN ('flags', 'expunge')", params![account, name])
+            .map_err(err)?;
+        let creating = conn
+            .execute("DELETE FROM imap_pending WHERE account_id = ?1 AND kind = 'mkdir' AND mailbox = ?2", params![account, name])
+            .map_err(err)?;
+        if creating == 0 {
+            push(conn, account, "rmdir", &name, None, None, "{}".into())?;
+        }
+    }
+    Ok(())
 }
 
 /// Nom d'un dossier tel qu'il est créé sur le serveur : le séparateur IMAP n'y peut pas figurer, sinon

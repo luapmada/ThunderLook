@@ -21,7 +21,7 @@ use mail_builder::{
     mime::{BodyPart, MimePart},
 };
 use mail_parser::{Addr, Message, MessageParser};
-use thunderlook_model::{ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, Signature, format};
+use thunderlook_model::{ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, LastVerb, Signature, format};
 use thunderlook_store::rusqlite::{OptionalExtension, params};
 
 use crate::{
@@ -699,7 +699,57 @@ impl Mailbox {
         self.conn()
             .execute("INSERT OR REPLACE INTO outbox (message_id, account_id, queued_at) VALUES (?1, ?2, ?3)", params![id, account_id, now])
             .map_err(err)?;
+        self.mark_original(d, id, now)?;
         Ok(format!("m{id}"))
+    }
+
+    /// Message d'origine d'une réponse ou d'un transfert, et la nature de l'envoi. Rédaction ouverte depuis le message :
+    /// `source_id` et `kind`. Brouillon rouvert (qui les a perdus) : le message que cite son en-tête In-Reply-To, et la
+    /// nature d'après le préfixe d'objet (« TR: », « Fw: », « Fwd: » : transfert ; sinon réponse).
+    fn original_of(&self, d: &Draft, sent: i64) -> Result<Option<(i64, LastVerb)>> {
+        let verb = match d.kind {
+            ComposeKind::Reply => Some(LastVerb::Replied),
+            ComposeKind::ReplyAll => Some(LastVerb::RepliedAll),
+            ComposeKind::Forward => Some(LastVerb::Forwarded),
+            ComposeKind::New => None,
+        };
+        if let (Some(verb), Some(source)) = (verb, d.source_id.as_deref()) {
+            return Ok(Some((message_db_id(source)?, verb)));
+        }
+        let (irt, subject): (Option<String>, String) = self
+            .conn()
+            .query_row("SELECT in_reply_to, subject FROM message WHERE id = ?1", [sent], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(err)?;
+        let Some(irt) = irt.map(|m| bare(&m)).filter(|m| !m.is_empty()) else { return Ok(None) };
+        let original: Option<i64> = self
+            .conn()
+            .query_row(
+                "SELECT m.id FROM message m JOIN folder f ON f.id = m.folder_id
+                 WHERE trim(m.internet_message_id, '<> ') = ?1 AND m.id <> ?2 AND f.role NOT IN ('drafts', 'outbox', 'sent')
+                 ORDER BY m.received_at DESC LIMIT 1",
+                params![irt, sent],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(err)?;
+        let lower = subject.trim_start().to_lowercase();
+        let forward = ["tr:", "fw:", "fwd:"].iter().any(|p| lower.starts_with(p));
+        Ok(original.map(|o| (o, if forward { LastVerb::Forwarded } else { LastVerb::Replied })))
+    }
+
+    /// Après « Envoyer », comme Outlook : l'original d'une réponse ou d'un transfert est marqué répondu ou transféré
+    /// (`PidTagLastVerbExecuted` et son heure), et le drapeau IMAP `\Answered` ou `$Forwarded` lui est ajouté sur le
+    /// serveur s'il est dans un compte.
+    fn mark_original(&self, d: &Draft, sent: i64, at: i64) -> Result<()> {
+        let Some((original, verb)) = self.original_of(d, sent)? else { return Ok(()) };
+        let tx = self.conn().unchecked_transaction().map_err(err)?;
+        let n = tx
+            .execute("UPDATE message SET last_verb = ?2, last_verb_at = ?3 WHERE id = ?1", params![original, verb.code(), at])
+            .map_err(err)?;
+        if n == 1 {
+            crate::remote::queue(&tx, crate::remote::Change::Verb { id: original, forwarded: verb.is_forward() })?;
+        }
+        tx.commit().map_err(err)
     }
 
     /// Enregistre le brouillon dans le dossier Brouillons de sa source (création ou mise à jour) et le renvoie

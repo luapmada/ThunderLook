@@ -3,7 +3,7 @@
 use serde::{Serialize, de::DeserializeOwned};
 use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
-    AccountSummary, AutoReply, JunkLists, JunkMark, MessageSummary, MessageView, NewRule, OpResult, RuleDraft, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
+    AccountSummary, AutoReply, JunkLists, JunkMark, MessageSummary, MessageView, NewRule, OpResult, OpenItem, RuleDraft, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
     quicksteps::QuickStep,
     calendar::{CalendarQuery, CalendarView},
     settings::Settings,
@@ -37,6 +37,17 @@ struct SettingsArg {
 #[derive(Serialize)]
 struct QueryArg<'a> {
     query: &'a ListQuery,
+}
+
+#[derive(Serialize)]
+struct PositionArg<'a> {
+    token: u64,
+    id: &'a str,
+}
+
+/// Position d'un message dans une vue ouverte.
+pub async fn message_position(token: u64, id: &str) -> Result<Option<u32>, String> {
+    call("message_position", &PositionArg { token, id }).await
 }
 
 #[derive(Serialize)]
@@ -318,10 +329,38 @@ struct AddAccountArg<'a> {
     password: &'a str,
     imap_host: &'a str,
     smtp_host: &'a str,
+    imap_port: u16,
+    imap_security: &'a str,
+    smtp_port: u16,
+    smtp_security: &'a str,
 }
 
-pub async fn add_account(address: &str, name: &str, password: &str, imap_host: &str, smtp_host: &str) -> Result<Vec<AccountSummary>, String> {
-    call("add_account", &AddAccountArg { address, name, password, imap_host, smtp_host }).await
+/// Serveurs d'un compte à ajouter : hôte, port et chiffrement (« tls » ou « starttls »).
+pub struct AccountServers {
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub imap_security: String,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_security: String,
+}
+
+pub async fn add_account(address: &str, name: &str, password: &str, s: &AccountServers) -> Result<Vec<AccountSummary>, String> {
+    call(
+        "add_account",
+        &AddAccountArg {
+            address,
+            name,
+            password,
+            imap_host: &s.imap_host,
+            smtp_host: &s.smtp_host,
+            imap_port: s.imap_port,
+            imap_security: &s.imap_security,
+            smtp_port: s.smtp_port,
+            smtp_security: &s.smtp_security,
+        },
+    )
+    .await
 }
 
 #[derive(Serialize)]
@@ -398,6 +437,24 @@ pub fn on_sync(f: impl Fn(SyncEvent) + 'static) {
     });
     wasm_bindgen_futures::spawn_local(async move {
         let _ = tauri_listen("sync", &handler).await;
+        handler.forget();
+    });
+}
+
+#[derive(serde::Deserialize)]
+struct OpenItemEnvelope {
+    payload: OpenItem,
+}
+
+/// Suit l'événement « open-item » du cœur (clic sur une notification de nouveaux messages).
+pub fn on_open_item(f: impl Fn(OpenItem) + 'static) {
+    let handler = Closure::<dyn FnMut(JsValue)>::new(move |v: JsValue| {
+        if let Ok(e) = serde_wasm_bindgen::from_value::<OpenItemEnvelope>(v) {
+            f(e.payload);
+        }
+    });
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = tauri_listen("open-item", &handler).await;
         handler.forget();
     });
 }

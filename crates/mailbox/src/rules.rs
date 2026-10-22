@@ -46,6 +46,8 @@ pub struct FolderResolver {
     /// Nom replié → (dossier, messages), du plus rempli au moins rempli.
     by_name: HashMap<String, Vec<(i64, i64)>>,
     paths: HashMap<i64, String>,
+    /// Source (fichier de données ou compte) de chaque dossier.
+    source_of: HashMap<i64, i64>,
 }
 
 impl FolderResolver {
@@ -72,6 +74,7 @@ impl FolderResolver {
             .map_err(err)?;
         let parents: HashMap<i64, (Option<i64>, &str, &str)> = rows.iter().map(|r| (r.0, (r.1, r.2.as_str(), r.3.as_str()))).collect();
         let (mut by_entry, mut by_name, mut paths) = (HashMap::new(), HashMap::<String, Vec<(i64, i64)>>::new(), HashMap::new());
+        let source_of: HashMap<i64, i64> = rows.iter().map(|r| (r.0, r.8)).collect();
         for (id, _, name, _, hidden, props, source, imap_name, source_id) in &rows {
             if let Some(entry) = props.as_deref().and_then(|p| bag_value(p, ENTRY_ID, 0x0102)) {
                 by_entry.insert(entry.to_vec(), *id);
@@ -99,17 +102,34 @@ impl FolderResolver {
         for list in by_name.values_mut() {
             list.sort_by_key(|(id, n)| (std::cmp::Reverse(*n), *id));
         }
-        Ok(Self { by_entry, by_name, paths })
+        Ok(Self { by_entry, by_name, paths, source_of })
     }
 
     pub fn resolve(&self, entry_id: &[u8], name: &str) -> FolderMatch {
+        self.resolve_for(None, entry_id, name)
+    }
+
+    /// Comme [`Self::resolve`], pour une règle du jeu d'un compte (`account` : sa source) : un dossier désigné
+    /// explicitement (EntryID, `imap:<source>:<nom>`) est pris où qu'il soit, mais la recherche par nom reste dans
+    /// le compte. Sinon un dossier du compte disparu ferait déplacer ses messages vers un homonyme d'un PST ou d'un
+    /// autre compte, donc les retirer du serveur.
+    pub fn resolve_for(&self, account: Option<i64>, entry_id: &[u8], name: &str) -> FolderMatch {
         if let Some(f) = self.by_entry.get(entry_id) {
             return FolderMatch::EntryId(*f);
         }
-        match self.by_name.get(&fold(name)).and_then(|l| l.first().map(|f| (f.0, l.len()))) {
-            Some((folder, homonyms)) => FolderMatch::Name { folder, homonyms },
+        let list: Vec<(i64, i64)> = self
+            .by_name
+            .get(&fold(name))
+            .map(|l| l.iter().copied().filter(|(f, _)| account.is_none_or(|a| self.source_of.get(f) == Some(&a))).collect())
+            .unwrap_or_default();
+        match list.first() {
+            Some(&(folder, _)) => FolderMatch::Name { folder, homonyms: list.len() },
             None => FolderMatch::Missing,
         }
+    }
+
+    pub fn source_of(&self, folder: i64) -> Option<i64> {
+        self.source_of.get(&folder).copied()
     }
 
     pub fn path(&self, folder: i64) -> &str {
@@ -118,19 +138,40 @@ impl FolderResolver {
 
     /// Avertissements d'une règle sur ses dossiers cibles.
     pub fn warnings(&self, rule: &Rule) -> Vec<String> {
+        self.warnings_for(rule, None)
+    }
+
+    /// Avertissements d'une règle ; pour une règle du jeu d'un compte, aussi un déplacement hors du compte (vers un
+    /// PST ou un autre compte) : comme dans Outlook en IMAP, le message est alors retiré du serveur du compte.
+    pub fn warnings_for(&self, rule: &Rule, account: Option<i64>) -> Vec<String> {
         let mut out = Vec::new();
-        for value in rule.elements.iter().flat_map(|e| &e.values) {
-            let Value::Folder { folder_entry_id, name, .. } = value else { continue };
-            match self.resolve(folder_entry_id, name) {
-                FolderMatch::Missing => out.push(format!("dossier « {name} » introuvable")),
-                FolderMatch::Name { folder, homonyms } if homonyms > 1 => {
-                    out.push(format!("dossier « {name} » : {homonyms} dossiers de ce nom, le plus rempli est retenu ({})", self.path(folder)))
+        for e in &rule.elements {
+            for value in &e.values {
+                let Value::Folder { folder_entry_id, name, .. } = value else { continue };
+                let found = self.resolve_for(account, folder_entry_id, name);
+                match found {
+                    FolderMatch::Missing => out.push(format!("dossier « {name} » introuvable")),
+                    FolderMatch::Name { folder, homonyms } if homonyms > 1 => {
+                        out.push(format!("dossier « {name} » : {homonyms} dossiers de ce nom, le plus rempli est retenu ({})", self.path(folder)))
+                    }
+                    _ => {}
                 }
-                _ => {}
+                if let (Some(a), Some(folder), 0x12C) = (account, found.folder(), e.id)
+                    && self.source_of(folder) != Some(a)
+                {
+                    out.push(away_warning(self.path(folder)));
+                }
             }
         }
         out
     }
+}
+
+/// Avertissement d'une règle de compte qui déplace hors du compte (vers un PST ou un autre compte).
+pub fn away_warning(path: &str) -> String {
+    format!(
+        "dossier « {path} » hors du compte : comme dans Outlook, les messages déplacés sont retirés du serveur, et leur seule copie est alors celle de ThunderLook"
+    )
 }
 
 /// Désignation d'un dossier de compte dans une règle copiée (à la place de l'EntryID d'un dossier de PST) : la source
@@ -310,6 +351,7 @@ impl Mailbox {
             folder_name: m.folder_name,
             rule_set: origin_label(&self.conn, &origin, Some(m.source)),
             note,
+            account_section: (kind == "account").then(|| format!("s{}", m.source)),
         })
     }
 
@@ -406,8 +448,9 @@ impl Mailbox {
         let mut out = Vec::new();
         for row in rows {
             let (id, origin, source, position, name, active, json) = row.map_err(err)?;
+            let account = if origin.starts_with("account:") { source } else { None };
             let (description, error, warnings) = match serde_json::from_str::<Rule>(&json) {
-                Ok(rule) => (thunderlook_rules::describe(&rule), rule.error.clone(), folders.warnings(&rule)),
+                Ok(rule) => (thunderlook_rules::describe(&rule), rule.error.clone(), folders.warnings_for(&rule, account)),
                 Err(e) => (Vec::new(), Some(format!("règle illisible : {e}")), Vec::new()),
             };
             out.push(RuleSummary {

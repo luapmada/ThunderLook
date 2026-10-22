@@ -22,9 +22,9 @@ fn main() -> Result<(), String> {
             return Ok(());
         }
         Some(a) => {
-            // Outil de test : le mot de passe de test est remis dans le gestionnaire d'identifiants (un retrait du
-            // compte ailleurs, par ui_check par exemple, l'en a ôté : l'entrée est propre à l'adresse).
-            account::store_password(address, acc["password"].as_str().unwrap_or_default())?;
+            // Outil de test : le mot de passe de test est remis dans le gestionnaire d'identifiants, au nom de ce
+            // dossier de test (il a pu être enregistré avant la liste de ses utilisateurs, ou changé).
+            account::store_password(address, acc["password"].as_str().unwrap_or_default(), dir)?;
             a.source_id
         }
         None => {

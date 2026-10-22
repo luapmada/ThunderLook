@@ -22,14 +22,14 @@ use std::{
 use chrono::{DateTime, Local, TimeZone};
 use thunderlook_model::{
     CategoryChip, ConversationInfo, FlagState, Folder, FolderRole, FolderSection, FolderTree, Importance, ListGroup,
-    ListQuery, ListView, MessageSummary, SearchQuery, SearchScope, SortField, format,
+    LastVerb, ListQuery, ListView, MessageSummary, SearchQuery, SearchScope, SortField, format,
 };
 use thunderlook_store::rusqlite::{Connection, params_from_iter, types::Value};
 
 pub use compose::{MailAddress, default_signature, format_address, parse_addresses, signatures};
 pub use index::{body_text, index_pending};
 pub use oft::draft_from_oft;
-pub use remote::file_message;
+pub use remote::{file_message, under as imap_under};
 pub use rules::{FolderMatch, FolderResolver};
 pub use message::{AttachmentData, BLOCKED_EXTENSIONS, is_blocked};
 
@@ -806,7 +806,8 @@ impl Mailbox {
         let sql = format!(
             "SELECT m.id, f.source_id, m.from_name, m.from_addr, m.subject, m.preview, m.received_at, m.size, m.is_read,
                     m.flag_status, m.importance,
-                    EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0), f.name, f.id
+                    EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0), f.name, f.id,
+                    m.last_verb
              FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id IN ({marks})"
         );
         let mut stmt = self.conn.prepare(&sql).map_err(err)?;
@@ -839,6 +840,7 @@ impl Mailbox {
                         folder: if search { Some(r.get(12)?) } else { None },
                         conversation: None,
                         child: false,
+                        last_verb: r.get::<_, Option<i64>>(14)?.and_then(LastVerb::from_code),
                     },
                     (r.get::<_, i64>(13)?, r.get::<_, String>(12)?),
                 ))
@@ -912,6 +914,13 @@ impl Mailbox {
     }
 
     /// Messages visés par les lignes `[a, b[` d'une vue (ceux du dossier pour un en-tête de conversation).
+    /// Position dans la vue `token` de la ligne qui montre ou contient le message `id` (« m123 »).
+    pub fn position_in_view(&self, token: u64, id: &str) -> Result<Option<u32>> {
+        let id = message_db_id(id)?;
+        let rows = &self.views.get(&token).ok_or("vue expirée : rouvrir le dossier")?.rows;
+        Ok(rows.iter().position(|r| r.item.targets().contains(&id)).map(|p| p as u32))
+    }
+
     pub fn view_targets(&self, token: u64, a: u32, b: u32) -> Option<Vec<i64>> {
         let rows = &self.views.get(&token)?.rows;
         let (a, b) = ((a as usize).min(rows.len()), (b as usize).min(rows.len()));

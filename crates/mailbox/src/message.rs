@@ -9,7 +9,7 @@ use std::{collections::HashMap, fs};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::{DateTime, Local};
 use mail_parser::{Message, MessageParser, MimeHeaders};
-use thunderlook_model::{AttachmentInfo, BodyView, FlagState, MessageView, format};
+use thunderlook_model::{AttachmentInfo, BodyView, FlagState, LastVerb, MessageView, format};
 use thunderlook_store::rusqlite::{OptionalExtension, params};
 
 use crate::{Mailbox, Result, err, flag_state, importance, local, message_db_id};
@@ -54,6 +54,17 @@ pub(crate) struct Row {
     pub(crate) message_class: String,
     pub(crate) eml_path: String,
     pub(crate) source: i64,
+    pub(crate) last_verb: Option<i64>,
+    pub(crate) last_verb_at: Option<i64>,
+}
+
+/// Barre d'information d'Outlook 2021 sur un message répondu ou transféré.
+pub(crate) fn last_verb_label(verb: LastVerb, at: Option<DateTime<Local>>) -> String {
+    let what = if verb.is_forward() { "Vous avez transféré ce message" } else { "Vous avez répondu à ce message" };
+    match at {
+        Some(d) => format!("{what} le {}.", d.format("%d/%m/%Y %H:%M")),
+        None => format!("{what}."),
+    }
 }
 
 fn item_kind(class: &str) -> Option<String> {
@@ -186,7 +197,8 @@ impl Mailbox {
         self.conn()
             .query_row(
                 "SELECT m.subject, m.from_name, m.from_addr, m.to_line, m.cc_line, m.received_at, m.sent_at, m.importance,
-                        m.flag_status, m.flag_request, m.flag_due, m.flag_completed, m.message_class, m.eml_path, f.source_id
+                        m.flag_status, m.flag_request, m.flag_due, m.flag_completed, m.message_class, m.eml_path, f.source_id,
+                        m.last_verb, m.last_verb_at
                  FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id = ?1",
                 params![id],
                 |r| {
@@ -206,6 +218,8 @@ impl Mailbox {
                         message_class: r.get(12)?,
                         eml_path: r.get(13)?,
                         source: r.get(14)?,
+                        last_verb: r.get(15)?,
+                        last_verb_at: r.get(16)?,
                     })
                 },
             )
@@ -287,6 +301,8 @@ impl Mailbox {
             body,
             remote_blocked,
             item_kind: item_kind(&row.message_class),
+            last_verb: row.last_verb.and_then(LastVerb::from_code),
+            last_verb_label: row.last_verb.and_then(LastVerb::from_code).map(|v| last_verb_label(v, local(row.last_verb_at))),
         })
     }
 

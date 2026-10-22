@@ -227,6 +227,19 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // Clic sur une notification de nouveaux messages : module Courrier, dossier du compte (recherche fermée), et le
+    // message s'il était seul ; le cœur a déjà mis la fenêtre au premier plan.
+    ipc::on_open_item(move |item| {
+        ui.module.set(Module::Mail);
+        ui.search_text.set(String::new());
+        ui.pending_message.set(item.message_id);
+        if ui.folder.get_untracked() == item.folder_id {
+            ui.view_epoch.update(|e| *e += 1);
+        } else {
+            ui.folder.set(item.folder_id);
+        }
+    });
+
     // Chargement initial : réglages puis arborescence ; ouverture de la Boîte de réception.
     spawn_local(async move {
         match ipc::load_settings().await {
@@ -313,6 +326,16 @@ pub fn App() -> impl IntoView {
             requested.set_value(HashSet::from([(view.token, 0)]));
             if !same {
                 ui.collapsed_groups.set(HashSet::new());
+            }
+            // Message demandé (notification) : sa ligne, si la vue le contient.
+            if let Some(id) = ui.pending_message.get_untracked() {
+                ui.pending_message.set(None);
+                if let Ok(Some(p)) = ipc::message_position(view.token, &id).await {
+                    ui.pending_select.set(Some(p));
+                }
+                if !current() {
+                    return;
+                }
             }
             ui.rows.set(first.into_iter().map(|m| (m.pos, m)).collect());
             ui.view.set(Some(view));

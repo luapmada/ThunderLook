@@ -543,6 +543,7 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
         (m.flag == FlagState::Done).then_some("suivi terminé"),
         (m.importance == Importance::High).then_some("importance haute"),
         m.has_attachments.then_some("pièce jointe"),
+        m.last_verb.map(|v| if v.is_forward() { "transféré" } else { "répondu" }),
     ]
     .into_iter()
     .flatten()
@@ -620,6 +621,12 @@ fn Row(pos: u32, top: f64, total: u32, m: Option<MessageSummary>) -> impl IntoVi
                         })
                         .collect_view();
                     view! { <span class="cats" on:contextmenu=move |ev| context(ui, pos, &ev, ContextTarget::Categories)>{chips}</span> }
+                })}
+                // Répondu ou transféré (`PidTagIconIndex` 0x105 / 0x106 chez Outlook).
+                {m.last_verb.map(|v| if v.is_forward() {
+                    view! { <span class="verb" title="Vous avez transféré ce message."><Svg icon=FORWARD size=14 /></span> }.into_any()
+                } else {
+                    view! { <span class="verb" title="Vous avez répondu à ce message."><Svg icon=REPLY size=14 /></span> }.into_any()
                 })}
                 {m.has_attachments.then(|| view! { <Svg icon=PAPERCLIP size=14 /> })}
                 // Indicateur, ou son emplacement (drapeau visible au survol de la ligne, comme Outlook) : clic droit,

@@ -74,6 +74,7 @@ fn rule_from_sender_moves_into_account_folder() {
     assert_eq!((draft.to_name.as_str(), draft.to_addr.as_str()), ("Paul", "paul@example.org"));
     assert_eq!((draft.folder_id.as_str(), draft.rule_set.as_str()), (format!("f{inbox}").as_str(), "paul@example.org"));
     assert!(draft.note.is_some(), "règles à l'arrivée désactivées : signalé");
+    assert_eq!(draft.account_section.as_deref(), Some("s3"), "section du compte : avertissement d'une cible hors du compte");
 
     let mut req = NewRule {
         message_id: format!("m{from_x}"),

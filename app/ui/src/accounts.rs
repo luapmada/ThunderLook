@@ -22,6 +22,10 @@ pub fn AccountsDialog() -> impl IntoView {
     let note = RwSignal::new(None::<String>);
     let (address, name, password) = (RwSignal::new(String::new()), RwSignal::new(String::new()), RwSignal::new(String::new()));
     let (imap, smtp) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
+    // Port et chiffrement (« tls » : SSL/TLS dès l'ouverture, « starttls ») de chaque serveur, comme les « Paramètres
+    // avancés » d'Outlook.
+    let (imap_port, imap_sec) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
+    let (smtp_port, smtp_sec) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
 
     let focus_first = move || {
         request_animation_frame(move || {
@@ -64,6 +68,10 @@ pub fn AccountsDialog() -> impl IntoView {
         password.set(String::new());
         imap.set("imap.hostinger.com".into());
         smtp.set("smtp.hostinger.com".into());
+        imap_port.set("993".into());
+        imap_sec.set("tls".into());
+        smtp_port.set("465".into());
+        smtp_sec.set("tls".into());
         note.set(None);
         adding.set(true);
         focus_first();
@@ -79,10 +87,22 @@ pub fn AccountsDialog() -> impl IntoView {
             return;
         }
         let (i, s) = (imap.get_untracked(), smtp.get_untracked());
+        let (Ok(ip), Ok(sp)) = (imap_port.get_untracked().trim().parse::<u16>(), smtp_port.get_untracked().trim().parse::<u16>()) else {
+            note.set(Some("Indiquez un numéro de port valide pour chaque serveur.".into()));
+            return;
+        };
+        let servers = ipc::AccountServers {
+            imap_host: i,
+            imap_port: ip,
+            imap_security: imap_sec.get_untracked(),
+            smtp_host: s,
+            smtp_port: sp,
+            smtp_security: smtp_sec.get_untracked(),
+        };
         busy.set(true);
         note.set(Some("Vérification de la connexion…".into()));
         spawn_local(async move {
-            match ipc::add_account(&a, &n, &p, &i, &s).await {
+            match ipc::add_account(&a, &n, &p, &servers).await {
                 Ok(v) => {
                     password.set(String::new());
                     list.set(v);
@@ -131,7 +151,7 @@ pub fn AccountsDialog() -> impl IntoView {
             }
             "Tab" => {
                 if let Some(r) = root.get_untracked() {
-                    let Ok(found) = r.query_selector_all("input, button, [tabindex='0']") else { return };
+                    let Ok(found) = r.query_selector_all("input, select, button, [tabindex='0']") else { return };
                     let els: Vec<web_sys::HtmlElement> = (0..found.length()).filter_map(|i| found.item(i)?.dyn_into().ok()).collect();
                     let active = document().active_element();
                     let pos = els.iter().position(|e| active.as_ref().is_some_and(|a| a == e.unchecked_ref::<web_sys::Element>()));
@@ -163,6 +183,50 @@ pub fn AccountsDialog() -> impl IntoView {
         }
     };
 
+    // Port et chiffrement d'un serveur ; changer de chiffrement change aussi le port s'il était celui par défaut de
+    // l'autre (993 ↔ 143, 465 ↔ 587).
+    let security_row = move |server: &'static str, port: RwSignal<String>, sec: RwSignal<String>, defaults: (&'static str, &'static str)| {
+        let port_label = format!("Port {server}");
+        let sec_label = format!("Chiffrement {server}");
+        view! {
+            <div class="field-row">
+                <label class="field">
+                    <span>"Port"</span>
+                    <input
+                        type="text"
+                        inputmode="numeric"
+                        aria-label=port_label
+                        autocomplete="off"
+                        prop:value=move || port.get()
+                        on:input=move |ev| port.set(event_target_value(&ev))
+                    />
+                </label>
+                <label class="field">
+                    <span>"Chiffrement"</span>
+                    <select
+                        aria-label=sec_label
+                        prop:value=move || sec.get()
+                        on:change=move |ev| {
+                            let next = event_target_value(&ev);
+                            let (tls, starttls) = defaults;
+                            port.update(|p| {
+                                if next == "starttls" && p.trim() == tls {
+                                    *p = starttls.into();
+                                } else if next == "tls" && p.trim() == starttls {
+                                    *p = tls.into();
+                                }
+                            });
+                            sec.set(next);
+                        }
+                    >
+                        <option value="tls">"SSL/TLS"</option>
+                        <option value="starttls">"STARTTLS"</option>
+                    </select>
+                </label>
+            </div>
+        }
+    };
+
     view! {
         <Show when=move || ui.dialog.get() == Some(Dialog::Accounts)>
             <div class="modal-backdrop" on:pointerdown=move |ev| {
@@ -178,8 +242,10 @@ pub fn AccountsDialog() -> impl IntoView {
                             {field("Nom", "text", name, "name")}
                             {field("Mot de passe", "password", password, "current-password")}
                             {field("Serveur IMAP", "text", imap, "off")}
+                            {security_row("IMAP", imap_port, imap_sec, ("993", "143"))}
                             {field("Serveur SMTP", "text", smtp, "off")}
-                            <p class="dialog-note">"IMAP en TLS sur le port 993, SMTP en TLS sur le port 465 (Hostinger). Le mot de passe est gardé par Windows (Gestionnaire d'identification)."</p>
+                            {security_row("SMTP", smtp_port, smtp_sec, ("465", "587"))}
+                            <p class="dialog-note">"Hostinger : IMAP 993 et SMTP 465 en SSL/TLS (ou 143 et 587 en STARTTLS). Le mot de passe est gardé par Windows (Gestionnaire d'identification)."</p>
                         }.into_any()
                     } else {
                         view! {
@@ -187,13 +253,18 @@ pub fn AccountsDialog() -> impl IntoView {
                                 aria-activedescendant=move || format!("acc-{}", current.get())>
                                 {move || list.get().into_iter().enumerate().map(|(i, a)| {
                                     let detail = format!(
-                                        "IMAP {} · SMTP {} · {}",
+                                        "IMAP {} · SMTP {} · {}{}",
                                         a.imap,
                                         a.smtp,
                                         match (&a.last_error, &a.last_sync) {
                                             (Some(e), _) => format!("erreur : {e}"),
                                             (None, Some(t)) => format!("relevé le {t}"),
                                             (None, None) => "jamais relevé".into(),
+                                        },
+                                        match a.pending {
+                                            0 => String::new(),
+                                            1 => " · 1 changement à reporter sur le serveur".into(),
+                                            n => format!(" · {n} changements à reporter sur le serveur"),
                                         }
                                     );
                                     view! {

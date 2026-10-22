@@ -13,7 +13,7 @@ pub use rusqlite;
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub const DB_FILE: &str = "thunderlook.db";
-const SCHEMA_VERSION: i32 = 9;
+const SCHEMA_VERSION: i32 = 10;
 
 /// Schéma v1. Les dates sont en millisecondes depuis l'époque Unix (UTC).
 /// `props` : sac de propriétés MAPI brut (format décrit dans `thunderlook-import-pst::propbag`),
@@ -271,6 +271,10 @@ const V8_COLUMNS: &[(&str, &str, &str)] = &[
 /// relèvent les mêmes boîtes IMAP et les règles ne doivent tourner que d'un côté).
 const V9_COLUMNS: &[(&str, &str, &str)] = &[("account", "rules_on_arrival", "INTEGER NOT NULL DEFAULT 0")];
 
+/// v10 : dernière action sur un message reçu, comme Outlook (`PidTagLastVerbExecuted` : 102 répondu, 103 répondu à
+/// tous, 104 transféré ; `PidTagLastVerbExecutionTime`, en millisecondes). Sur le serveur : `\Answered`, `$Forwarded`.
+const V10_COLUMNS: &[(&str, &str, &str)] = &[("message", "last_verb", "INTEGER"), ("message", "last_verb_at", "INTEGER")];
+
 fn add_missing_columns(conn: &Connection, columns: &[(&str, &str, &str)]) -> rusqlite::Result<()> {
     for (table, column, decl) in columns {
         let exists: bool =
@@ -333,6 +337,7 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
         add_missing_columns(&conn, V8_COLUMNS)?;
         conn.execute_batch(SCHEMA_V8)?;
         add_missing_columns(&conn, V9_COLUMNS)?;
+        add_missing_columns(&conn, V10_COLUMNS)?;
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version < SCHEMA_VERSION {
         // Migrations par ajout uniquement : la base est lue par d'autres outils (ADI Facturation).
@@ -342,6 +347,7 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
         add_missing_columns(&conn, V8_COLUMNS)?;
         conn.execute_batch(SCHEMA_V8)?;
         add_missing_columns(&conn, V9_COLUMNS)?;
+        add_missing_columns(&conn, V10_COLUMNS)?;
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version > SCHEMA_VERSION {
         return Err(rusqlite::Error::InvalidParameterName(format!(

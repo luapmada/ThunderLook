@@ -81,14 +81,32 @@ fn remote_folders(list: &[(String, Option<String>, Vec<NameAttribute<'static>>)]
         .collect()
 }
 
+/// `name` est `base` ou l'un de ses sous-dossiers (séparateur « . » ou « / »).
+fn below(name: &str, base: &str) -> bool {
+    name.strip_prefix(base).is_some_and(|rest| rest.is_empty() || rest.starts_with(['.', '/']))
+}
+
 /// Crée, renomme ou retire les dossiers locaux pour refléter le serveur ; renvoie les dossiers à relever.
 fn reconcile_folders(conn: &Connection, data_dir: &Path, source: i64, remotes: &[Remote]) -> Result<Vec<(i64, String)>> {
     let top: i64 = conn
         .query_row("SELECT id FROM folder WHERE source_id = ?1 AND role = 'ipm'", [source], |r| r.get(0))
         .map_err(e)?;
     let mut ids: Vec<(String, i64)> = Vec::new();
+    // Changements de dossiers pas encore reportés (en échec) : (sorte, boîte, nouveau nom).
+    let pending: Vec<(String, String, Option<String>)> = conn
+        .prepare(
+            "SELECT p.kind, p.mailbox, json_extract(p.arg, '$.to') FROM imap_pending p JOIN account a ON a.id = p.account_id
+             WHERE a.source_id = ?1 AND p.kind IN ('mkdir', 'rename', 'rmdir')",
+        )
+        .map_err(e)?
+        .query_map([source], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(e)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(e)?;
+    // Ancien nom d'un dossier renommé, dossier supprimé : encore sur le serveur, mais plus dans ThunderLook.
+    let leaving = |name: &str| pending.iter().any(|(k, mb, _)| (k == "rename" && below(name, mb)) || (k == "rmdir" && name == mb));
     // Parents avant enfants : tri par profondeur du nom.
-    let mut ordered: Vec<&Remote> = remotes.iter().collect();
+    let mut ordered: Vec<&Remote> = remotes.iter().filter(|r| !leaving(&r.name)).collect();
     ordered.sort_by_key(|r| r.name.matches(['.', '/']).count());
     for (pos, r) in ordered.iter().enumerate() {
         let parent = r.parent.as_ref().and_then(|p| ids.iter().find(|(n, _)| n == p).map(|x| x.1)).unwrap_or(top);
@@ -125,22 +143,25 @@ fn reconcile_folders(conn: &Connection, data_dir: &Path, source: i64, remotes: &
         .into_iter()
         .filter(|id| !ids.iter().any(|(_, x)| x == id))
         .collect();
-    // Un dossier dont la création n'est pas encore reportée sur le serveur n'a pas disparu.
-    let creating: Vec<i64> = conn
-        .prepare("SELECT f.id FROM folder f JOIN imap_pending p ON p.kind = 'mkdir' AND p.mailbox = f.imap_name WHERE f.source_id = ?1")
-        .map_err(e)?
-        .query_map([source], |r| r.get(0))
-        .map_err(e)?
-        .collect::<std::result::Result<_, _>>()
-        .map_err(e)?;
-    let gone: Vec<i64> = gone.into_iter().filter(|id| !creating.contains(id)).collect();
+    // Un dossier dont la création ou le changement de nom n'est pas encore reporté sur le serveur n'a pas disparu.
+    let arriving = |name: &str| {
+        pending.iter().any(|(k, mb, to)| (k == "mkdir" && name == mb) || (k == "rename" && to.as_deref().is_some_and(|to| below(name, to))))
+    };
+    let mut kept = Vec::new();
+    for id in gone {
+        let name: Option<String> = conn.query_row("SELECT imap_name FROM folder WHERE id = ?1", [id], |r| r.get(0)).map_err(e)?;
+        if !name.as_deref().is_some_and(arriving) {
+            kept.push(id);
+        }
+    }
+    let gone = kept;
     for id in gone {
         purge_messages(conn, data_dir, &format!("folder_id = {id}"))?;
         conn.execute("DELETE FROM folder WHERE id = ?1", [id]).map_err(e)?;
     }
     Ok(ids
         .into_iter()
-        .filter(|(name, _)| remotes.iter().any(|r| &r.name == name && r.selectable))
+        .filter(|(name, _)| ordered.iter().any(|r| &r.name == name && r.selectable))
         .map(|(n, id)| (id, n))
         .collect())
 }
@@ -185,10 +206,23 @@ fn importance(m: &mail_parser::Message) -> i64 {
     }
 }
 
+/// Dernière action d'après les drapeaux IMAP (`PidTagLastVerbExecuted`) : `\Answered` répondu (102), `$Forwarded`
+/// transféré (104).
+fn verb_of(flags: &[Flag]) -> Option<i64> {
+    if flags.iter().any(|f| matches!(f, Flag::Answered)) {
+        Some(102)
+    } else if flags.iter().any(|f| matches!(f, Flag::Custom(k) if k.eq_ignore_ascii_case("$Forwarded"))) {
+        Some(104)
+    } else {
+        None
+    }
+}
+
 struct Incoming {
     uid: u32,
     seen: bool,
     flagged: bool,
+    verb: Option<i64>,
     internal_ms: Option<i64>,
     bytes: Vec<u8>,
 }
@@ -266,6 +300,9 @@ fn store_message(conn: &Connection, data_dir: &Path, source: i64, folder: i64, m
     )
     .map_err(e)?;
     let id = conn.last_insert_rowid();
+    if m.verb.is_some() {
+        conn.execute("UPDATE message SET last_verb = ?2 WHERE id = ?1", params![id, m.verb]).map_err(e)?;
+    }
     let rel = thunderlook_store::eml_relative_path(source, id);
     let path = thunderlook_store::resolve(data_dir, &rel);
     if let Some(dir) = path.parent() {
@@ -339,6 +376,14 @@ async fn sync_folder(s: &mut ImapSession, conn: &Connection, data_dir: &Path, so
                     params![folder, uid, seen, flagged],
                 )
                 .map_err(e)? as u32;
+            // Répondu ou transféré ailleurs (Outlook, webmail) : l'état local suit, sans effacer celui de ThunderLook.
+            if let Some(verb) = verb_of(&flags) {
+                conn.execute(
+                    "UPDATE message SET last_verb = ?3 WHERE folder_id = ?1 AND imap_uid = ?2 AND last_verb IS NULL",
+                    params![folder, uid, verb],
+                )
+                .map_err(e)?;
+            }
         }
     }
 
@@ -362,6 +407,7 @@ async fn sync_folder(s: &mut ImapSession, conn: &Connection, data_dir: &Path, so
                 uid,
                 seen: flags.iter().any(|x| matches!(x, Flag::Seen)),
                 flagged: flags.iter().any(|x| matches!(x, Flag::Flagged)),
+                verb: verb_of(&flags),
                 internal_ms: f.internal_date().map(|d| d.timestamp_millis()),
                 bytes: body.to_vec(),
             };
@@ -397,4 +443,57 @@ pub async fn sync(s: &mut ImapSession, conn: &Connection, data_dir: &Path, accou
     }
     report.elapsed_ms = started.elapsed().as_millis() as u32;
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Relève pendant qu'un renommage ou une suppression de dossier attend d'être reporté (serveur injoignable,
+    /// erreur) : l'ancien nom encore présent sur le serveur ne recrée pas de dossier, et le dossier renommé n'est
+    /// pas pris pour disparu (ses messages restent).
+    #[test]
+    fn pending_rename_and_rmdir_survive_a_fetch() {
+        let dir = std::env::temp_dir().join(format!("tl-fetch-pending-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let c = thunderlook_store::open(&dir).unwrap();
+        c.execute("INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at) VALUES (3, 'imap', 'a', '', 'a', 0, 0)", []).unwrap();
+        c.execute(
+            "INSERT INTO account (id, source_id, name, email, username, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, save_sent, created_at)
+             VALUES (1, 3, '', 'a@example.org', 'a', 'h', 993, 'tls', 'h', 465, 'tls', 1, 0)",
+            [],
+        )
+        .unwrap();
+        let folder = |parent: Option<i64>, role: &str, imap: Option<&str>| -> i64 {
+            c.execute(
+                "INSERT INTO folder (source_id, parent_id, nid, name, role, container_class, hidden, position, imap_name) VALUES (3, ?1, 0, 'x', ?2, 'IPF.Note', 0, 0, ?3)",
+                params![parent, role, imap],
+            )
+            .unwrap();
+            c.last_insert_rowid()
+        };
+        let top = folder(None, "ipm", None);
+        let inbox = folder(Some(top), "inbox", Some("INBOX"));
+        let renamed = folder(Some(inbox), "folder", Some("INBOX.Nouveau"));
+        let sub = folder(Some(renamed), "folder", Some("INBOX.Nouveau.Sous"));
+        for (kind, mailbox, arg) in [("rename", "INBOX.Ancien", r#"{"to":"INBOX.Nouveau"}"#), ("rmdir", "INBOX.Parti", "{}")] {
+            c.execute("INSERT INTO imap_pending (account_id, kind, mailbox, arg, created_at) VALUES (1, ?1, ?2, ?3, 0)", params![kind, mailbox, arg]).unwrap();
+        }
+        let list: Vec<(String, Option<String>, Vec<NameAttribute<'static>>)> =
+            ["INBOX", "INBOX.Ancien", "INBOX.Ancien.Sous", "INBOX.Parti", "INBOX.Ancienne"].iter().map(|n| (n.to_string(), Some(".".into()), vec![])).collect();
+        let synced = reconcile_folders(&c, &dir, 3, &remote_folders(&list)).unwrap();
+        let names: Vec<String> = synced.into_iter().map(|(_, n)| n).collect();
+        assert_eq!(names, ["INBOX", "INBOX.Ancienne"], "anciens noms ignorés, homonyme plus long gardé");
+        let local: Vec<String> = c
+            .prepare("SELECT imap_name FROM folder WHERE imap_name IS NOT NULL ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(local, ["INBOX", "INBOX.Nouveau", "INBOX.Nouveau.Sous", "INBOX.Ancienne"]);
+        let _ = sub;
+        drop(c);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

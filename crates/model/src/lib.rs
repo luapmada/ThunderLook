@@ -193,6 +193,40 @@ pub struct CategoryChip {
     pub color: Option<String>,
 }
 
+/// Dernière action faite sur un message reçu (`PidTagLastVerbExecuted`, [MS-OXOMSG] § 2.2.1.24) : Outlook en tire
+/// l'icône de la liste (`PidTagIconIndex` 0x105 répondu, 0x106 transféré) et la barre « Vous avez répondu… ».
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LastVerb {
+    Replied,
+    RepliedAll,
+    Forwarded,
+}
+
+impl LastVerb {
+    /// `NOTEIVERB_REPLYTOSENDER` (102), `NOTEIVERB_REPLYTOALL` (103), `NOTEIVERB_FORWARD` (104).
+    pub fn from_code(code: i64) -> Option<Self> {
+        match code {
+            102 => Some(Self::Replied),
+            103 => Some(Self::RepliedAll),
+            104 => Some(Self::Forwarded),
+            _ => None,
+        }
+    }
+
+    pub fn code(self) -> i64 {
+        match self {
+            Self::Replied => 102,
+            Self::RepliedAll => 103,
+            Self::Forwarded => 104,
+        }
+    }
+
+    pub fn is_forward(self) -> bool {
+        self == Self::Forwarded
+    }
+}
+
 /// Ligne de la liste des messages, prête à afficher.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -221,6 +255,9 @@ pub struct MessageSummary {
     /// Élément d'une conversation dépliée, affiché sous son en-tête.
     #[serde(default)]
     pub child: bool,
+    /// Répondu ou transféré (icône de la liste).
+    #[serde(default)]
+    pub last_verb: Option<LastVerb>,
 }
 
 /// Conversation résumée par son en-tête. Les éléments comptés sont ceux du fichier de données, hors
@@ -275,6 +312,11 @@ pub struct MessageView {
     pub remote_blocked: bool,
     /// Élément autre qu'un courrier (contact, rendez-vous…), en attendant les modules dédiés.
     pub item_kind: Option<String>,
+    /// Répondu ou transféré, et la barre d'information d'Outlook (« Vous avez répondu à ce message le … »).
+    #[serde(default)]
+    pub last_verb: Option<LastVerb>,
+    #[serde(default)]
+    pub last_verb_label: Option<String>,
 }
 
 /// Étendue d'une recherche (onglet Rechercher).
@@ -525,6 +567,10 @@ pub struct RuleDraft {
     pub rule_set: String,
     /// Remarque affichée dans la boîte (règles à l'arrivée désactivées, fichier de données sans compte).
     pub note: Option<String>,
+    /// Section du volet des dossiers (`s<source>`) du compte qui recevra la règle : un dossier de destination hors de
+    /// cette section (PST, autre compte) retire les messages du serveur, ce que la boîte signale.
+    #[serde(default)]
+    pub account_section: Option<String>,
 }
 
 /// Règle créée depuis un message : conditions cochées et dossier de destination.
@@ -627,6 +673,9 @@ pub struct AccountSummary {
     /// Règles actives appliquées aux nouveaux messages de la Boîte de réception (désactivé par défaut).
     #[serde(default)]
     pub rules_on_arrival: bool,
+    /// Changements locaux pas encore reportés sur le serveur (file `imap_pending`).
+    #[serde(default)]
+    pub pending: u32,
 }
 
 /// État de l'envoi et de la réception (J7), émis par le cœur (événement « sync ») à chaque début et fin de passage.
@@ -639,6 +688,15 @@ pub struct SyncEvent {
     pub sent: u32,
     pub received: u32,
     pub error: Option<String>,
+}
+
+/// Clic sur une notification de nouveaux messages (événement « open-item ») : dossier à afficher, et message à
+/// sélectionner s'il n'y en avait qu'un.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenItem {
+    pub folder_id: String,
+    pub message_id: Option<String>,
 }
 
 /// Réponse automatique locale (J7), enregistrée par le cœur dans `autoreply.json`.

@@ -320,6 +320,7 @@ async function realSend(log, blocked) {
   const fill = (label, value) => js(`(() => { const i = document.querySelector('.dialog input[aria-label=${JSON.stringify(label)}]'); i.value = ${JSON.stringify(value)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const click = (selector, text) => js(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim().startsWith(${JSON.stringify(text)})).click()`);
   let added = false;
+  let cleanupError = null;
   if (!(await js(`!!${section}`))) {
     await clickTab('Envoyer/Recevoir');
     await js(`document.querySelector('button[aria-label="Paramètres du compte"]').click()`);
@@ -407,12 +408,23 @@ async function realSend(log, blocked) {
       await js(`[...document.querySelectorAll('.dialog button')].find(b => b.textContent.trim() === 'OK').click()`);
       await sleep(800);
     }
-    // Les suppressions sont reportées sur le serveur au passage suivant : F9, puis attente de la fin du passage.
-    await js(`document.querySelector('[role=listbox]').focus()`);
-    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120 });
-    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120 });
-    await sleep(1500);
-    for (let i = 0; i < 30 && (await js(`(document.querySelector('.statusbar')?.textContent ?? '').includes('Envoi et réception')`)); i++) await sleep(1000);
+    // Les suppressions sont reportées sur le serveur au passage suivant. Le compte de test ne doit pas être retiré
+    // avant : sa file de changements partirait avec lui et les messages resteraient sur le serveur. On relance donc
+    // des passages (F9) jusqu'à ce que la file du compte soit vide (« pending » de la commande accounts), en suivant
+    // l'événement « sync » (fin d'un passage commencé après la demande) plutôt que la barre d'état.
+    const pendingOf = `window.__TAURI__.core.invoke('accounts').then(l => (l.find(a => a.address.toLowerCase() === ${JSON.stringify(acc.address.toLowerCase())}) ?? { pending: -1 }).pending)`;
+    await js(`(() => { if (!window.__tlSync) { window.__tlSync = []; window.__TAURI__.event.listen('sync', e => window.__tlSync.push(e.payload)); } })()`);
+    let pending = await js(pendingOf);
+    for (let i = 0; i < 10 && pending > 0; i++) {
+      const before = await js(`window.__tlSync.length`);
+      await js(`document.querySelector('[role=listbox]').focus()`);
+      await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120 });
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F9', code: 'F9', windowsVirtualKeyCode: 120 });
+      for (let k = 0; k < 120 && !(await js(`window.__tlSync.slice(${before}).some(e => !e.running)`)); k++) await sleep(500);
+      pending = await js(pendingOf);
+    }
+    if (pending === 0) log('suppressions reportées sur le serveur (file du compte de test vide)');
+    else cleanupError = `nettoyage incomplet : ${pending} changement(s) du compte de test non reporté(s) sur le serveur (messages de test restés sur le serveur ; target/tl-scripts/purge_test_j7.py)`;
     if (added) {
       await clickTab('Envoyer/Recevoir');
       await js(`document.querySelector('button[aria-label="Paramètres du compte"]').click()`);
@@ -424,6 +436,7 @@ async function realSend(log, blocked) {
       log('compte de test retiré de ThunderLook (rien n\'est effacé sur le serveur)');
     }
   }
+  if (cleanupError) throw new Error(cleanupError);
 }
 CHECKS.push(['J7 : envoi réel puis réception sur le compte de test', (log) => realSend(log, false)]);
 CHECKS.push(['J7 : expéditeur bloqué, message reçu dans le Courrier indésirable', (log) => realSend(log, true)]);

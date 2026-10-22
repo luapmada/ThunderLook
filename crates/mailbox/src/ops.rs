@@ -709,7 +709,10 @@ impl Mailbox {
                 }
                 let parent = f.parent.ok_or("dossier racine")?;
                 let name = check_name(&self.conn, parent, name, Some(id))?;
-                self.conn.execute("UPDATE folder SET name = ?2 WHERE id = ?1", params![id, name]).map_err(err)?;
+                let tx = self.conn.transaction().map_err(err)?;
+                tx.execute("UPDATE folder SET name = ?2 WHERE id = ?1", params![id, name]).map_err(err)?;
+                remote::folder_relocated(&tx, id)?;
+                tx.commit().map_err(err)?;
                 self.push_undo(format!("renommer « {} »", f.name), Undo::FolderRename(id, f.name.clone()));
                 Ok(done(format!("Dossier « {} » renommé en « {name} »", f.name), None, self))
             }
@@ -729,7 +732,10 @@ impl Mailbox {
                 }
                 check_name(&self.conn, parent, &f.name, Some(id))?;
                 let position = next_position(&self.conn, parent)?;
-                self.conn.execute("UPDATE folder SET parent_id = ?2, position = ?3 WHERE id = ?1", params![id, parent, position]).map_err(err)?;
+                let tx = self.conn.transaction().map_err(err)?;
+                tx.execute("UPDATE folder SET parent_id = ?2, position = ?3 WHERE id = ?1", params![id, parent, position]).map_err(err)?;
+                remote::folder_relocated(&tx, id)?;
+                tx.commit().map_err(err)?;
                 self.push_undo(format!("déplacer le dossier « {} »", f.name), Undo::FolderMove(id, f.parent, None));
                 Ok(done(format!("Dossier « {} » déplacé dans « {} »", f.name, p.name), None, self))
             }
@@ -743,6 +749,7 @@ impl Mailbox {
                     let msgs = subtree_messages(&self.conn, id)?;
                     let tx = self.conn.transaction().map_err(err)?;
                     let paths = purge(&tx, &msgs)?;
+                    remote::folder_removed(&tx, id)?;
                     tx.execute("DELETE FROM folder WHERE id = ?1", [id]).map_err(err)?;
                     tx.commit().map_err(err)?;
                     for p in paths {
@@ -753,9 +760,11 @@ impl Mailbox {
                 let trash = special_folder(&self.conn, f.source, "deleted")?.ok_or("pas de dossier « Éléments supprimés » dans ce fichier")?;
                 let name = check_name(&self.conn, trash, &f.name, Some(id)).unwrap_or_else(|_| format!("{} ({})", f.name, Local::now().format("%d-%m-%Y %H.%M")));
                 let position = next_position(&self.conn, trash)?;
-                self.conn
-                    .execute("UPDATE folder SET parent_id = ?2, position = ?3, name = ?4 WHERE id = ?1", params![id, trash, position, name])
-                    .map_err(err)?;
+                // Comme Outlook : le dossier va dans « Éléments supprimés » (sur le serveur aussi, par RENAME).
+                let tx = self.conn.transaction().map_err(err)?;
+                tx.execute("UPDATE folder SET parent_id = ?2, position = ?3, name = ?4 WHERE id = ?1", params![id, trash, position, name]).map_err(err)?;
+                remote::folder_relocated(&tx, id)?;
+                tx.commit().map_err(err)?;
                 let old_name = (name != f.name).then(|| f.name.clone());
                 self.push_undo(format!("supprimer le dossier « {} »", f.name), Undo::FolderMove(id, f.parent, old_name));
                 Ok(done(format!("Dossier « {} » déplacé vers « Éléments supprimés »", f.name), None, self))
@@ -856,6 +865,7 @@ impl Mailbox {
                 let msgs = subtree_messages(&self.conn, id)?;
                 let tx = self.conn.transaction().map_err(err)?;
                 let paths = purge(&tx, &msgs)?;
+                remote::folder_removed(&tx, id)?;
                 tx.execute("DELETE FROM folder WHERE id = ?1", [id]).map_err(err)?;
                 tx.commit().map_err(err)?;
                 for p in paths {
@@ -863,17 +873,23 @@ impl Mailbox {
                 }
             }
             Undo::FolderRename(id, name) => {
-                self.conn.execute("UPDATE folder SET name = ?2 WHERE id = ?1", params![id, name]).map_err(err)?;
+                let tx = self.conn.transaction().map_err(err)?;
+                tx.execute("UPDATE folder SET name = ?2 WHERE id = ?1", params![id, name]).map_err(err)?;
+                remote::folder_relocated(&tx, id)?;
+                tx.commit().map_err(err)?;
             }
             Undo::FolderMove(id, parent, old_name) => {
                 let position = match parent {
                     Some(p) => next_position(&self.conn, p)?,
                     None => 0,
                 };
-                self.conn.execute("UPDATE folder SET parent_id = ?2, position = ?3 WHERE id = ?1", params![id, parent, position]).map_err(err)?;
+                let tx = self.conn.transaction().map_err(err)?;
+                tx.execute("UPDATE folder SET parent_id = ?2, position = ?3 WHERE id = ?1", params![id, parent, position]).map_err(err)?;
                 if let Some(name) = old_name {
-                    self.conn.execute("UPDATE folder SET name = ?2 WHERE id = ?1", params![id, name]).map_err(err)?;
+                    tx.execute("UPDATE folder SET name = ?2 WHERE id = ?1", params![id, name]).map_err(err)?;
                 }
+                remote::folder_relocated(&tx, id)?;
+                tx.commit().map_err(err)?;
             }
             Undo::Favorites(prev) => self.write_favorites(&prev)?,
         }

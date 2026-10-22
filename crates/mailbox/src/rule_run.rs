@@ -221,7 +221,9 @@ fn flag_action(when: u32) -> Option<FlagAction> {
     })
 }
 
-fn compile(db_id: i64, rule: &Rule, folders: &FolderResolver) -> Compiled {
+/// `account` : source du compte pour une règle de son jeu (`account:<source>`) ; la recherche d'un dossier cible
+/// par son nom reste alors dans le compte ([`FolderResolver::resolve_for`]).
+fn compile(db_id: i64, rule: &Rule, folders: &FolderResolver, account: Option<i64>) -> Compiled {
     let mut c = Compiled {
         db_id: format!("r{db_id}"),
         name: rule.name.clone(),
@@ -229,7 +231,7 @@ fn compile(db_id: i64, rule: &Rule, folders: &FolderResolver) -> Compiled {
         acts: Vec::new(),
         actions: Vec::new(),
         not_run: Vec::new(),
-        warnings: folders.warnings(rule),
+        warnings: folders.warnings_for(rule, account),
         skipped: None,
     };
     if let Some(e) = &rule.error {
@@ -253,7 +255,7 @@ fn compile(db_id: i64, rule: &Rule, folders: &FolderResolver) -> Compiled {
             },
             Some(Kind::Action) => {
                 let act = match (e.id, e.values.first()) {
-                    (0x12C | 0x139, Some(Value::Folder { folder_entry_id, name, .. })) => match folders.resolve(folder_entry_id, name) {
+                    (0x12C | 0x139, Some(Value::Folder { folder_entry_id, name, .. })) => match folders.resolve_for(account, folder_entry_id, name) {
                         FolderMatch::Missing => {
                             c.not_run.push(format!("{label} (dossier introuvable)"));
                             continue;
@@ -559,15 +561,18 @@ impl Mailbox {
         let folders = FolderResolver::load(&self.conn)?;
         let mut rules: Vec<Compiled> = Vec::new();
         {
-            let mut stmt = self.conn.prepare("SELECT id, rule_json FROM rule ORDER BY kind, origin, position").map_err(err)?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).map_err(err)?;
+            let mut stmt = self.conn.prepare("SELECT id, rule_json, kind, source_id FROM rule ORDER BY kind, origin, position").map_err(err)?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<i64>>(3)?)))
+                .map_err(err)?;
             for row in rows {
-                let (id, json) = row.map_err(err)?;
+                let (id, json, kind, source) = row.map_err(err)?;
                 if !wanted.contains(&id) {
                     continue;
                 }
                 let rule: Rule = serde_json::from_str(&json).map_err(|e| format!("règle r{id} illisible : {e}"))?;
-                rules.push(compile(id, &rule, &folders));
+                let account = if kind == "account" { source } else { None };
+                rules.push(compile(id, &rule, &folders, account));
             }
         }
         if rules.len() != wanted.len() {
