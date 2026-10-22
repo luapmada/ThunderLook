@@ -298,3 +298,10 @@ Registre `HKCU\Software\Microsoft\Office\16.0\Outlook` : `DefaultProfile = Outlo
   Retour arrière : restaurer ce fichier depuis la sauvegarde de l'étape 1.
 - **En attente** : étape 3 (repointer sur « Outlook », synchro manuelle à faire avec Paul devant la fenêtre de
   confirmation) ; étape 5 (banc d'essai S20 FE) : Paul doit confirmer que le S20 FE peut être vidé et le connecter.
+- **2026-10-22 14 h 11, incident sans conséquence** : la relance de MPE après la sauvegarde a déclenché une
+  multi-synchro (`MultiSyncOnStart=1` sur le SM-S916U1, connexion Wi-Fi 192.168.1.160). Contacts 2 139/2 140 :
+  0 action ; calendrier 370/370 : 36 mises à jour vers Outlook (UO=36) proposées dans la fenêtre de confirmation, non
+  validées (MPE fermé ensuite pour l'étape 2). Vérifié par COM : 0 élément de Calendrier, Contacts, Notes, Tâches modifié
+  après 14 h 05. **Ne pas relancer MPE sans prévenir Paul** : chaque démarrage lance une synchro.
+- **Vérifié avant l'étape 3** : depuis le profil « Outlook », les EntryID des dossiers du PST sont ceux que MPE a en
+  mémoire (Contacts …A2800000, Calendrier …002870000, Notes …022810000, Tâches …022870000).
