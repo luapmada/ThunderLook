@@ -19,6 +19,10 @@ fn account_lifecycle_keeps_password_out_of_the_database() {
     assert_eq!((a.address.as_str(), a.endpoints.imap.host.as_str()), (address.as_str(), "imap.hostinger.com"));
     let s = account::summaries(&conn).unwrap();
     assert_eq!((s[0].id.clone(), s[0].smtp.clone()), (format!("s{id}"), "smtp.hostinger.com:465".to_string()));
+    // Changements à reporter sur le serveur (ui_check attend une file vide avant de retirer le compte de test).
+    assert_eq!(s[0].pending, 0);
+    conn.execute("INSERT INTO imap_pending (account_id, kind, mailbox, uid, arg, created_at) VALUES (?1, 'expunge', 'INBOX', 3, '{}', 0)", [a.id]).unwrap();
+    assert_eq!(account::summaries(&conn).unwrap()[0].pending, 1);
     // Règles à l'arrivée : désactivées par défaut.
     assert!(!a.rules_on_arrival && !s[0].rules_on_arrival);
     account::set_rules_on_arrival(&conn, id, true).unwrap();

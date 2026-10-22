@@ -673,6 +673,9 @@ pub struct AccountSummary {
     /// Règles actives appliquées aux nouveaux messages de la Boîte de réception (désactivé par défaut).
     #[serde(default)]
     pub rules_on_arrival: bool,
+    /// Changements locaux pas encore reportés sur le serveur (file `imap_pending`).
+    #[serde(default)]
+    pub pending: u32,
 }
 
 /// État de l'envoi et de la réception (J7), émis par le cœur (événement « sync ») à chaque début et fin de passage.

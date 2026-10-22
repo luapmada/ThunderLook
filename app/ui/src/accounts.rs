@@ -253,13 +253,18 @@ pub fn AccountsDialog() -> impl IntoView {
                                 aria-activedescendant=move || format!("acc-{}", current.get())>
                                 {move || list.get().into_iter().enumerate().map(|(i, a)| {
                                     let detail = format!(
-                                        "IMAP {} · SMTP {} · {}",
+                                        "IMAP {} · SMTP {} · {}{}",
                                         a.imap,
                                         a.smtp,
                                         match (&a.last_error, &a.last_sync) {
                                             (Some(e), _) => format!("erreur : {e}"),
                                             (None, Some(t)) => format!("relevé le {t}"),
                                             (None, None) => "jamais relevé".into(),
+                                        },
+                                        match a.pending {
+                                            0 => String::new(),
+                                            1 => " · 1 changement à reporter sur le serveur".into(),
+                                            n => format!(" · {n} changements à reporter sur le serveur"),
                                         }
                                     );
                                     view! {

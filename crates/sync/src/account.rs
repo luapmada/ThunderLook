@@ -211,6 +211,9 @@ pub fn summaries(conn: &Connection) -> Result<Vec<AccountSummary>> {
             last_sync: last_sync.and_then(|t| chrono::Local.timestamp_millis_opt(t).single()).map(|d| d.format("%d/%m/%Y %H:%M").to_string()),
             last_error,
             rules_on_arrival: a.rules_on_arrival,
+            pending: conn
+                .query_row("SELECT COUNT(*) FROM imap_pending WHERE account_id = ?1", [a.id], |r| r.get(0))
+                .map_err(|e| e.to_string())?,
         })
     })
     .collect()
