@@ -575,6 +575,41 @@ CHECKS.push(['Clic droit : les actions des sous-menus s\'exécutent (Règles ›
   }
 }]);
 
+CHECKS.push(['J10 : contacts (dossiers, liste triée, fiche, filtre)', async (log) => {
+  const press = (k, mods = {}) => js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, ctrlKey: ${!!mods.ctrl}, altKey: ${!!mods.alt}, bubbles: true }))`);
+  try {
+    await press('3', { ctrl: true });
+    await until(`document.querySelectorAll('.contact-nav .cal-item').length > 0 && document.querySelectorAll('.contact-row').length > 0`, 'module Contacts (Ctrl+3)');
+    const sel = await js(`document.querySelector('.contact-nav .cal-item.selected')?.textContent.trim()`);
+    const rows = await js(`document.querySelectorAll('.contact-row').length`);
+    const count = await js(`Number(document.querySelector('.contact-nav .cal-item.selected .count').textContent)`);
+    if (rows !== count) throw new Error(`${rows} lignes pour ${count} contacts annoncés`);
+    log(`Ctrl+3 : dossier « ${sel} », ${rows} contacts, mention : ${await js(`document.querySelector('.contacts .cal-note')?.textContent ?? '(aucune)'`)}`);
+    // Tri : libellés dans l'ordre, sans tenir compte de la casse ni des accents.
+    const titles = await js(`[...document.querySelectorAll('.contact-title')].map(e => e.textContent)`);
+    const key = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const bad = titles.findIndex((t, i) => i > 0 && key(titles[i - 1]) > key(t));
+    if (bad > 0) throw new Error(`tri : « ${titles[bad - 1]} » avant « ${titles[bad]} »`);
+    await until(`!!document.querySelector('.contact-card h2')?.textContent.trim()`, 'fiche du premier contact');
+    // Filtre sur un mot du premier libellé qui contient des lettres.
+    const name = titles.find((t) => /\p{L}{3}/u.test(t)) ?? '';
+    const probe = name.split(/[ ,]+/).find((w) => w.length >= 3) ?? name;
+    await js(`(() => { const i = document.querySelector('.contact-search input'); i.value = ${JSON.stringify(probe)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await until(`document.querySelectorAll('.contact-row').length > 0 && document.querySelectorAll('.contact-row').length < ${rows}`, `filtre « ${probe} »`);
+    log(`filtre « ${probe} » : ${await js(`document.querySelectorAll('.contact-row').length`)} contact(s)`);
+    await js(`(() => { const i = document.querySelector('.contact-search input'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await js(`document.querySelector('.contact-rows').focus()`);
+    const before = await js(`document.querySelector('.contact-card h2').textContent`);
+    await js(`document.querySelector('.contact-rows').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))`);
+    await until(`document.querySelector('.contact-card h2')?.textContent !== ${JSON.stringify(before)}`, 'fiche suivante (↓)');
+    const sections = await js(`[...document.querySelectorAll('.contact-section h3')].map(e => e.textContent).join(', ')`);
+    log(`↓ : fiche « ${await js(`document.querySelector('.contact-card h2').textContent`)} » (${sections || 'sans section'})`);
+  } finally {
+    await press('1', { ctrl: true });
+    await sleep(300);
+  }
+}]);
+
 // --- Exécution ------------------------------------------------------------------------------------
 const app = spawn(exe, [], {
   env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },

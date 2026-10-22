@@ -969,6 +969,38 @@ fn clear_calendar(cache: &CalendarCache) -> Result<(), String> {
     Ok(())
 }
 
+/// Contacts (J10) : dossiers qui en contiennent.
+#[tauri::command(async)]
+fn contact_folders(app: AppHandle) -> Result<Vec<thunderlook_model::contacts::ContactFolder>, String> {
+    let conn = thunderlook_store::open(&data_dir(&app)?).map_err(|e| e.to_string())?;
+    thunderlook_contacts::view::folders(&conn)
+}
+
+/// Contacts d'un dossier (`k<id>`), triés comme Outlook.
+#[tauri::command(async)]
+fn contact_list(app: AppHandle, folder: String) -> Result<thunderlook_model::contacts::ContactList, String> {
+    let id: i64 = folder.strip_prefix('k').and_then(|f| f.parse().ok()).ok_or("dossier de contacts inconnu")?;
+    let conn = thunderlook_store::open(&data_dir(&app)?).map_err(|e| e.to_string())?;
+    let all = thunderlook_contacts::load(&conn, Some(id), None)?;
+    let mut list = thunderlook_contacts::view::list(&all, id);
+    list.source_note = thunderlook_contacts::source_note(&conn, id)?;
+    Ok(list)
+}
+
+/// Fiche d'un contact (`p<id>`), avec ses notes et sa photo.
+#[tauri::command(async)]
+fn contact_card(app: AppHandle, id: String) -> Result<thunderlook_model::contacts::ContactCard, String> {
+    use base64::Engine;
+    let id: i64 = id.strip_prefix('p').and_then(|f| f.parse().ok()).ok_or("contact inconnu")?;
+    let dir = data_dir(&app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    let all = thunderlook_contacts::load(&conn, None, Some(id))?;
+    let c = all.contacts.first().ok_or("contact introuvable")?;
+    let (notes, photo) = thunderlook_contacts::extras(c, &dir);
+    let photo = photo.map(|(mime, bytes)| format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)));
+    Ok(thunderlook_contacts::view::card(c, notes, photo))
+}
+
 #[tauri::command(async)]
 fn calendar_view(app: AppHandle, cache: State<CalendarCache>, query: CalendarQuery) -> Result<CalendarView, String> {
     let dir = data_dir(&app)?;
@@ -1199,6 +1231,9 @@ pub fn run() {
             save_quick_steps,
             perf_mark,
             calendar_view,
+            contact_folders,
+            contact_list,
+            contact_card,
             set_calendar_shown,
             calendar_import,
             calendar_export,

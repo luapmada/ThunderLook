@@ -18,6 +18,7 @@ use crate::{
     autoreply::AutoReplyDialog,
     junk::JunkOptionsDialog,
     calendar::{self, CalendarPane},
+    contacts::{self, ContactsPane},
     dialogs::Dialogs,
     quicksteps::QuickStepsDialog,
     rules::RulesDialog,
@@ -212,6 +213,7 @@ pub fn App() -> impl IntoView {
 
     actions::load_categories(ui);
     calendar::watch(ui);
+    contacts::watch(ui);
 
     // Envoi et réception (J7) : barre d'état, puis liste et arborescence rafraîchies à la fin d'un passage.
     ipc::on_sync(move |e| {
@@ -546,6 +548,7 @@ fn Main() -> impl IntoView {
                 .into_any(),
                 (Module::Mail, ReadingPane::Off) => view! { <MessageList /> }.into_any(),
                 (Module::Calendar, _) => view! { <CalendarPane /> }.into_any(),
+                (Module::Contacts, _) => view! { <ContactsPane /> }.into_any(),
                 (other, _) => view! {
                     <section class="pane placeholder" aria-label=other.label()>
                         <div>

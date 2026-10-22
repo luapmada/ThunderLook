@@ -208,7 +208,10 @@ pub fn FolderPane() -> impl IntoView {
             <Show when=move || !collapsed_pane() && ui.module.get() == Module::Calendar>
                 <CalendarNav />
             </Show>
-            <Show when=move || !collapsed_pane() && ui.module.get() != Module::Calendar>
+            <Show when=move || !collapsed_pane() && ui.module.get() == Module::Contacts>
+                <crate::contacts::ContactNav />
+            </Show>
+            <Show when=move || !collapsed_pane() && !matches!(ui.module.get(), Module::Calendar | Module::Contacts)>
                 <div
                     class="tree"
                     role="tree"

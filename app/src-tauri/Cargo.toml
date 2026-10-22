@@ -24,6 +24,8 @@ thunderlook-mailbox = { path = "../../crates/mailbox" }
 thunderlook-sync = { path = "../../crates/sync" }
 thunderlook-store = { path = "../../crates/store" }
 thunderlook-calendar = { path = "../../crates/calendar" }
+thunderlook-contacts = { path = "../../crates/contacts" }
+base64 = "0.22.1"
 tokio = { version = "1", features = ["rt"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 tauri-plugin-dialog = "2"

@@ -6,6 +6,7 @@ mod app;
 mod autoreply;
 mod calendar;
 mod commandbar;
+mod contacts;
 mod compose;
 mod create_rule;
 mod dialogs;

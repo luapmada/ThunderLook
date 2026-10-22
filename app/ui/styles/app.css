@@ -1994,3 +1994,180 @@ input {
   gap: calc(var(--u) * 2);
   margin-top: var(--u);
 }
+
+/* ---------- J10 : Contacts (vue « Personnes ») ---------- */
+.pane.contacts {
+  flex-direction: row;
+}
+
+.contact-list-pane {
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  min-width: 260px;
+  border-right: 1px solid var(--border);
+}
+
+.contact-search {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  margin: calc(var(--u) * 2);
+  padding: 0 calc(var(--u) * 2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-2);
+}
+
+.contact-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--target);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.contact-search:focus-within {
+  border-color: var(--accent);
+}
+
+.contact-rows {
+  flex: 1;
+  overflow: auto;
+  outline: none;
+}
+
+.contact-letter {
+  position: sticky;
+  top: 0;
+  padding: var(--u) calc(var(--u) * 3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 3);
+  padding: calc(var(--u) * 1.5) calc(var(--u) * 3);
+  cursor: pointer;
+}
+
+.contact-row:hover {
+  background: var(--hover);
+}
+
+.contact-row.selected {
+  background: var(--selected);
+}
+
+.contact-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.contact-title,
+.contact-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.avatar.small {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  font-size: var(--fs-sm);
+}
+
+.avatar.large {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  font-size: 24px;
+  object-fit: cover;
+}
+
+.contact-card-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+
+.contact-card {
+  max-width: 720px;
+  padding: calc(var(--u) * 6);
+}
+
+.contact-head {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 5);
+  margin-bottom: calc(var(--u) * 5);
+}
+
+.contact-head h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.contact-job,
+.contact-cats {
+  margin: var(--u) 0 0;
+  color: var(--text-2);
+}
+
+.contact-section {
+  margin-top: calc(var(--u) * 5);
+}
+
+.contact-section h3 {
+  margin: 0 0 calc(var(--u) * 2);
+  padding-bottom: var(--u);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.contact-section dl {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: calc(var(--u) * 2) calc(var(--u) * 5);
+  margin: 0;
+}
+
+.contact-section dt {
+  color: var(--text-2);
+}
+
+.contact-section dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.contact-section a {
+  color: var(--accent-text);
+}
+
+.multiline {
+  white-space: pre-wrap;
+}
+
+.contact-nav .cal-item.selected {
+  background: var(--selected);
+}

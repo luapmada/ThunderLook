@@ -8,11 +8,17 @@
    « répondu », `open-item` sélectionne le message, champs Port/Chiffrement d'« Ajouter un compte »). Correctif de la
    fusion : un compte retiré pendant que son dossier est affiché laissait une liste vide (`77bcc14`).
    Script de vérification : `target/tl-scripts/verify_v092.mjs` (coupe puis rétablit « marquer comme lu »).
-2. **Quand se passer d'Outlook** (réponse donnée à Paul le 22/10) : après 1) points J7 ; 2) écriture du calendrier
+2. **J10 Contacts en cours** (22/10, `notes/j10-plan.md`) : lecture et module Contacts faits et vérifiés (COM et
+   `ui_check` J10). Paul a demandé « contacts d'abord » ; il demande si le calendrier peut être **le même** pour
+   Outlook et ThunderLook : réponse donnée = oui, en écrivant dans Outlook par COM (Outlook reste le stockage, MPE
+   inchangé, Outlook doit tourner). Attendre sa décision avant de coder l'écriture (calendrier et contacts).
+   Reste au J10 : rechargement des contacts depuis une copie fraîche, listes de distribution, vCard.
+   Demandé aussi par Paul : clic depuis le Centre de notifications (activation COM, AUMID + ToastActivatorCLSID).
+3. **Quand se passer d'Outlook** (réponse donnée à Paul le 22/10) : après 1) points J7 ; 2) écriture du calendrier
    dans ThunderLook (créer/modifier/supprimer, rappels — étape 4 du J9, sans objet en option A) ; 3) Contacts, Tâches,
    Notes (J10+) ; 4) synchro du téléphone par MPE sur fichiers vCard/iCal/vNote (MPE ne parle qu'à Outlook ou à des
    fichiers ; pas de CalDAV/CardDAV). Ordre : 1, 2, 3, 4. Aucune date promise.
-3. **MPE (MyPhoneExplorer) : FONDAMENTAL et très sensible pour Paul.** Plan et journal : `notes/mpe-plan.md` (§9).
+4. **MPE (MyPhoneExplorer) : FONDAMENTAL et très sensible pour Paul.** Plan et journal : `notes/mpe-plan.md` (§9).
    - MPE ne parle pas à ThunderLook : il synchronise le téléphone principal (SM-S916U1, S23+) avec le PST
      `Outlook_300923.pst` via le profil `pop-original`, en Wi-Fi. Il fonctionne normalement (synchro du 22/10 14 h 11 :
      contacts 2 139/2 140 sans action, calendrier 370/370, 36 mises à jour vers Outlook proposées, non validées).
@@ -24,8 +30,8 @@
    - Étape 3 (repointer MPE de `pop-original` vers le profil « Outlook », 3 lignes de `settings.dat`) : acceptée **à
      condition de lister avant à Paul**, à faire avec lui devant la fenêtre de confirmation. EntryID des dossiers
      identiques dans les deux profils (vérifié). Pas encore faite.
-4. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : à supprimer par Paul.
-5. **Images distantes** : Paul a parlé d'un « message identifié Outlook » ; introuvable dans les messages (recherche du
+5. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : à supprimer par Paul.
+6. **Images distantes** : Paul a parlé d'un « message identifié Outlook » ; introuvable dans les messages (recherche du
    22/10). Lui demander l'objet du message concerné s'il revient dessus.
 
 ## Fait le 22/10 (v0.9.0 et v0.9.1, poussées)

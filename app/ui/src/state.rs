@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use leptos::{html, prelude::*};
 use thunderlook_model::{
-    CategoryInfo, Draft, calendar::{CalendarEvent, CalendarView}, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, quicksteps::QuickStep, settings::Settings,
+    CategoryInfo, Draft, calendar::{CalendarEvent, CalendarView}, contacts::{ContactCard, ContactFolder, ContactList}, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, quicksteps::QuickStep, settings::Settings,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,6 +209,13 @@ pub struct Ui {
     pub cal_anchor: RwSignal<String>,
     pub cal_epoch: RwSignal<u64>,
     pub cal_selected: RwSignal<Option<CalendarEvent>>,
+    /// Contacts (J10) : dossiers, dossier affiché (`k<id>`), liste, contact sélectionné (`p<id>`), sa fiche, filtre.
+    pub contact_folders: RwSignal<Vec<ContactFolder>>,
+    pub contact_folder: RwSignal<String>,
+    pub contact_list: RwSignal<Option<ContactList>>,
+    pub contact_selected: RwSignal<Option<String>>,
+    pub contact_card: RwSignal<Option<ContactCard>>,
+    pub contact_filter: RwSignal<String>,
     pub refs: Refs,
 }
 
@@ -257,6 +264,12 @@ impl Ui {
             cal_anchor: RwSignal::new(String::new()),
             cal_epoch: RwSignal::new(0),
             cal_selected: RwSignal::new(None),
+            contact_folders: RwSignal::new(Vec::new()),
+            contact_folder: RwSignal::new(String::new()),
+            contact_list: RwSignal::new(None),
+            contact_selected: RwSignal::new(None),
+            contact_card: RwSignal::new(None),
+            contact_filter: RwSignal::new(String::new()),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),

@@ -83,7 +83,8 @@ Taille relative : S, M, L. Chaque jalon se termine par un commit, un push et une
 | J7 ✅ | IMAP + SMTP (Hostinger) | Comptes, synchronisation, envoi, boîte d'envoi, F9, hors connexion, notifications, réponse automatique locale | Envoi et réception réels sur un compte de test | L |
 | J8 ✖ | POP3 | Abandonné le 2026-10-21 : pendant la transition, Outlook et ThunderLook relèvent les mêmes boîtes en IMAP (en POP3, ce qu'un client relève, l'autre ne le voit pas) | — | — |
 | J9 ✅ | Calendrier (option A : Outlook fait foi) | Lecture des 4 198 rendez-vous du PST (périodicités, exceptions, fuseaux), expansion des occurrences, vues Jour, Semaine de travail, Semaine, Mois, navigateur de dates, superposition des calendriers, détail en lecture seule ; rechargement depuis une copie plus récente du PST (`tl-import --calendars`) ; import/export `.ics` et CSV d'Outlook, calendriers importés en lecture seule. Création/modification sans objet en option A ; réunions iTIP/iMIP abandonnées le 2026-10-22 à la demande de Paul (« pas besoin ») | Occurrences identiques à celles calculées par Outlook sur 2023-2026 ; aller-retour `.ics` sans écart (`notes/j9-plan.md`) | L |
-| J10+ | Contacts, puis Tâches | Ordre fixé par Q3. Import de 6 046 contacts, tâches, .vcf | Jalons détaillés plus tard | L |
+| J10 (en cours) | Contacts (lecture, Outlook fait foi) | 10 649 contacts lus depuis les sacs MAPI déjà importés ; module Contacts : dossiers, liste triée, filtre, fiche avec photo et notes (`notes/j10-plan.md`) ; reste : rechargement, listes de distribution, vCard ; écriture à décider (piste : Outlook par COM) | Fiches identiques à Outlook (COM) sur 14 champs | L |
+| J11+ | Tâches | Ordre fixé par Q3 | Jalons détaillés plus tard | M |
 
 ## 5. Vérification
 - Tests Rust : unitaires, plus des tests « dorés » d'import sur les copies locales (non versionnées), comparés à `pst-probe` et libpff.

@@ -6,6 +6,7 @@ use thunderlook_model::{
     AccountSummary, AutoReply, JunkLists, JunkMark, MessageSummary, MessageView, NewRule, OpResult, OpenItem, RuleDraft, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
     quicksteps::QuickStep,
     calendar::{CalendarQuery, CalendarView},
+    contacts::{ContactCard, ContactFolder, ContactList},
     settings::Settings,
 };
 use wasm_bindgen::prelude::*;
@@ -148,6 +149,23 @@ struct CalendarArg<'a> {
 
 pub async fn calendar_view(query: &CalendarQuery) -> Result<CalendarView, String> {
     call("calendar_view", &CalendarArg { query }).await
+}
+
+pub async fn contact_folders() -> Result<Vec<ContactFolder>, String> {
+    call("contact_folders", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct FolderArg<'a> {
+    folder: &'a str,
+}
+
+pub async fn contact_list(folder: &str) -> Result<ContactList, String> {
+    call("contact_list", &FolderArg { folder }).await
+}
+
+pub async fn contact_card(id: &str) -> Result<ContactCard, String> {
+    call("contact_card", &IdArg { id }).await
 }
 
 #[derive(Serialize)]

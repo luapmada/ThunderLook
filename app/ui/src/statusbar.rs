@@ -40,6 +40,10 @@ pub fn StatusBar() -> impl IntoView {
                     }}</span>
                 }
                 .into_any(),
+                Module::Contacts => view! {
+                    <span>{move || format!("Éléments : {}", thousands(ui.contact_list.with(|l| l.as_ref().map_or(0, |l| l.rows.len())) as u32))}</span>
+                }
+                .into_any(),
                 other => view! { <span>{format!("{} : module prévu après le courrier", other.label())}</span> }.into_any(),
             }}
             <Show when=move || ui.module.get() == Module::Mail && ui.unread_only.get()>

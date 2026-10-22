@@ -4,6 +4,7 @@
 //! l'interface ne fait qu'afficher.
 
 pub mod calendar;
+pub mod contacts;
 pub mod format;
 pub mod quicksteps;
 pub mod settings;
