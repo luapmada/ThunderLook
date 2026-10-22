@@ -646,9 +646,20 @@ fn accounts(app: AppHandle) -> Result<Vec<AccountSummary>, String> {
     thunderlook_sync::account::summaries(&conn)
 }
 
-/// Ajoute un compte après avoir vérifié l'identification IMAP et SMTP (TLS, ports 993 et 465), puis lance la
-/// première relève. Le mot de passe va dans le gestionnaire d'identifiants de Windows.
+/// Chiffrement choisi dans « Ajouter un compte » : « tls » (SSL/TLS dès l'ouverture) ou « starttls » ; absent : TLS.
+fn security_arg(s: Option<&str>) -> Result<thunderlook_sync::Security, String> {
+    match s.map(str::trim) {
+        None | Some("" | "tls") => Ok(thunderlook_sync::Security::Tls),
+        Some("starttls") => Ok(thunderlook_sync::Security::StartTls),
+        Some(other) => Err(format!("chiffrement « {other} » non pris en charge (SSL/TLS ou STARTTLS)")),
+    }
+}
+
+/// Ajoute un compte après avoir vérifié l'identification IMAP et SMTP (par défaut TLS, ports 993 et 465 ; STARTTLS
+/// sur 143 et 587 au choix), puis lance la première relève. Le mot de passe va dans le gestionnaire d'identifiants de
+/// Windows.
 #[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 fn add_account(
     app: AppHandle,
     address: String,
@@ -656,6 +667,10 @@ fn add_account(
     password: String,
     imap_host: String,
     smtp_host: String,
+    imap_port: Option<u16>,
+    imap_security: Option<String>,
+    smtp_port: Option<u16>,
+    smtp_security: Option<String>,
 ) -> Result<Vec<AccountSummary>, String> {
     // Domaine en minuscules (l'adresse sert d'expéditeur) ; la partie locale est gardée telle quelle.
     let address = match address.trim().rsplit_once('@') {
@@ -669,6 +684,10 @@ fn add_account(
     if !smtp_host.trim().is_empty() {
         ep.smtp.host = smtp_host.trim().to_string();
     }
+    ep.imap.security = security_arg(imap_security.as_deref())?;
+    ep.smtp.security = security_arg(smtp_security.as_deref())?;
+    ep.imap.port = imap_port.filter(|p| *p > 0).unwrap_or(if ep.imap.security == thunderlook_sync::Security::Tls { 993 } else { 143 });
+    ep.smtp.port = smtp_port.filter(|p| *p > 0).unwrap_or(if ep.smtp.security == thunderlook_sync::Security::Tls { 465 } else { 587 });
     // Vérification dans un fil à part : la commande tourne déjà sur le runtime de Tauri.
     let (ep2, pw) = (ep.clone(), password.clone());
     std::thread::spawn(move || -> Result<(), String> {

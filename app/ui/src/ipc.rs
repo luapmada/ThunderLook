@@ -329,10 +329,38 @@ struct AddAccountArg<'a> {
     password: &'a str,
     imap_host: &'a str,
     smtp_host: &'a str,
+    imap_port: u16,
+    imap_security: &'a str,
+    smtp_port: u16,
+    smtp_security: &'a str,
 }
 
-pub async fn add_account(address: &str, name: &str, password: &str, imap_host: &str, smtp_host: &str) -> Result<Vec<AccountSummary>, String> {
-    call("add_account", &AddAccountArg { address, name, password, imap_host, smtp_host }).await
+/// Serveurs d'un compte à ajouter : hôte, port et chiffrement (« tls » ou « starttls »).
+pub struct AccountServers {
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub imap_security: String,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_security: String,
+}
+
+pub async fn add_account(address: &str, name: &str, password: &str, s: &AccountServers) -> Result<Vec<AccountSummary>, String> {
+    call(
+        "add_account",
+        &AddAccountArg {
+            address,
+            name,
+            password,
+            imap_host: &s.imap_host,
+            smtp_host: &s.smtp_host,
+            imap_port: s.imap_port,
+            imap_security: &s.imap_security,
+            smtp_port: s.smtp_port,
+            smtp_security: &s.smtp_security,
+        },
+    )
+    .await
 }
 
 #[derive(Serialize)]

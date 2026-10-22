@@ -1076,6 +1076,15 @@ input {
   color: var(--text-2);
 }
 
+.field-row {
+  display: flex;
+  gap: calc(var(--u) * 2);
+}
+
+.field-row .field {
+  flex: 1;
+}
+
 .field input,
 .field select {
   min-height: var(--target);

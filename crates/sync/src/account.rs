@@ -32,6 +32,19 @@ fn users_entry(address: &str) -> Result<keyring::Entry> {
     keyring::Entry::new(KEYRING_SERVICE, &format!("{}#dossiers", address.to_lowercase())).map_err(keyring_err)
 }
 
+/// Écrit une entrée et la relit : sous écritures simultanées (essais en parallèle), le gestionnaire d'identifiants a
+/// déjà rendu une valeur antérieure juste après une écriture réussie ; l'écriture est alors refaite.
+fn set_verified(e: &keyring::Entry, value: &str) -> Result<()> {
+    for attempt in 0..5 {
+        e.set_password(value).map_err(keyring_err)?;
+        if e.get_password().is_ok_and(|v| v == value) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20 * (attempt + 1)));
+    }
+    Err("gestionnaire d'identifiants : l'entrée écrite ne se relit pas".into())
+}
+
 fn read_users(address: &str) -> Result<Option<Vec<String>>> {
     match users_entry(address)?.get_password() {
         Ok(json) => Ok(Some(serde_json::from_str(&json).unwrap_or_else(|_| vec![LEGACY_USER.to_string()]))),
@@ -48,7 +61,7 @@ fn write_users(address: &str, users: &[String]) -> Result<()> {
             Err(x) => Err(keyring_err(x)),
         };
     }
-    e.set_password(&serde_json::to_string(users).map_err(|x| x.to_string())?).map_err(keyring_err)
+    set_verified(&e, &serde_json::to_string(users).map_err(|x| x.to_string())?)
 }
 
 /// Clé d'un dossier de données dans la liste : son chemin absolu, en minuscules (Windows ne distingue pas la casse).
@@ -82,7 +95,7 @@ pub fn store_password(address: &str, password: &str, data_dir: &Path) -> Result<
     if !users.contains(&key) {
         users.push(key);
     }
-    entry(address)?.set_password(password).map_err(keyring_err)?;
+    set_verified(&entry(address)?, password)?;
     write_users(address, &users)
 }
 
@@ -174,6 +187,14 @@ pub fn account(conn: &Connection, source_id: i64) -> Result<Account> {
         .ok_or_else(|| format!("compte introuvable (source {source_id})"))
 }
 
+/// « hôte:port », suivi de « (STARTTLS) » quand le chiffrement n'est pas pris dès l'ouverture.
+fn server_label(s: &Server) -> String {
+    match s.security {
+        Security::Tls => format!("{}:{}", s.host, s.port),
+        Security::StartTls => format!("{}:{} (STARTTLS)", s.host, s.port),
+    }
+}
+
 /// Pour la boîte « Paramètres du compte ».
 pub fn summaries(conn: &Connection) -> Result<Vec<AccountSummary>> {
     use chrono::TimeZone;
@@ -183,8 +204,8 @@ pub fn summaries(conn: &Connection) -> Result<Vec<AccountSummary>> {
         let (a, last_sync, last_error) = r.map_err(|e| e.to_string())?;
         Ok(AccountSummary {
             id: format!("s{}", a.source_id),
-            imap: format!("{}:{}", a.endpoints.imap.host, a.endpoints.imap.port),
-            smtp: format!("{}:{}", a.endpoints.smtp.host, a.endpoints.smtp.port),
+            imap: server_label(&a.endpoints.imap),
+            smtp: server_label(&a.endpoints.smtp),
             address: a.address,
             sender_name: a.sender_name,
             last_sync: last_sync.and_then(|t| chrono::Local.timestamp_millis_opt(t).single()).map(|d| d.format("%d/%m/%Y %H:%M").to_string()),

@@ -64,21 +64,29 @@ fn tls_connector() -> TlsConnector {
     TlsConnector::from(Arc::new(config))
 }
 
-/// Ouvre une session IMAP authentifiée (TLS implicite ; STARTTLS n'est pas encore pris en charge).
+/// Ouvre une session IMAP authentifiée : TLS dès l'ouverture (993), ou STARTTLS (143 : connexion en clair, accueil,
+/// commande STARTTLS, puis TLS avant toute identification ; le mot de passe ne passe jamais en clair).
 pub async fn imap_login(server: &Server, username: &str, password: &str) -> Result<ImapSession> {
-    if server.security != Security::Tls {
-        return Err(format!("{} : seule la connexion TLS (port 993) est prise en charge pour l'instant", server.host));
-    }
     let tcp = TcpStream::connect((server.host.as_str(), server.port)).await.map_err(|e| format!("{}:{} : {e}", server.host, server.port))?;
     let name = rustls::pki_types::ServerName::try_from(server.host.clone()).map_err(|e| format!("{} : {e}", server.host))?;
-    let tls = tls_connector().connect(name, tcp).await.map_err(|e| format!("{} : TLS : {e}", server.host))?;
+    let greeting = |e: std::io::Error| format!("{} : accueil IMAP : {e}", server.host);
+    let tls = match server.security {
+        Security::Tls => tls_connector().connect(name, tcp).await.map_err(|e| format!("{} : TLS : {e}", server.host))?,
+        Security::StartTls => {
+            let mut plain = async_imap::Client::new(tcp);
+            plain.read_response().await.map_err(greeting)?.ok_or_else(|| format!("{} : connexion fermée avant l'accueil", server.host))?;
+            plain
+                .run_command_and_check_ok("STARTTLS", None)
+                .await
+                .map_err(|e| format!("{} : STARTTLS refusé ({e})", server.host))?;
+            tls_connector().connect(name, plain.into_inner()).await.map_err(|e| format!("{} : TLS : {e}", server.host))?
+        }
+    };
     let mut client = async_imap::Client::new(tls);
-    // Accueil du serveur (« * OK … ») avant toute commande.
-    client
-        .read_response()
-        .await
-        .map_err(|e| format!("{} : accueil IMAP : {e}", server.host))?
-        .ok_or_else(|| format!("{} : connexion fermée avant l'accueil", server.host))?;
+    // Accueil du serveur (« * OK … ») avant toute commande ; aucun après STARTTLS (RFC 3501 § 6.2.1).
+    if server.security == Security::Tls {
+        client.read_response().await.map_err(greeting)?.ok_or_else(|| format!("{} : connexion fermée avant l'accueil", server.host))?;
+    }
     client.login(username, password).await.map_err(|(e, _)| format!("{} : identification refusée ({e})", server.host))
 }
 

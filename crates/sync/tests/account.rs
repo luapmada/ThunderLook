@@ -55,7 +55,12 @@ fn password_is_shared_between_data_dirs() {
     let _ = std::fs::remove_dir_all(&base);
     let (a, b) = (base.join("Données"), base.join("Essai"));
     let (ca, cb) = (thunderlook_store::open(&a).unwrap(), thunderlook_store::open(&b).unwrap());
-    let address = format!("partage-{}@thunderlook.invalid", std::process::id());
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let address = format!("partage-{}-{nanos}@thunderlook.invalid", std::process::id());
+    // Restes éventuels d'un essai interrompu (mêmes noms) : retirés d'abord.
+    for user in [address.to_lowercase(), format!("{}#dossiers", address.to_lowercase())] {
+        let _ = keyring::Entry::new("ThunderLook", &user).unwrap().delete_credential();
+    }
     let ep = Endpoints::hostinger(&address);
     let ia = account::create(&ca, &address, "A", &ep, "secret-a").unwrap();
     let ib = account::create(&cb, &address, "B", &ep, "secret-a").unwrap();
@@ -83,4 +88,23 @@ fn password_is_shared_between_data_dirs() {
     let _ = keyring::Entry::new("ThunderLook", &format!("{}#dossiers", address.to_lowercase())).unwrap().delete_credential();
     drop((ca, cb));
     let _ = std::fs::remove_dir_all(&base);
+}
+
+/// IMAP en STARTTLS (port 143) : paramètres gardés et relus tels quels, affichés comme tels.
+#[test]
+fn starttls_endpoints_round_trip() {
+    use thunderlook_sync::Security;
+    let dir = std::env::temp_dir().join(format!("tl-account-starttls-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let conn = thunderlook_store::open(&dir).unwrap();
+    let address = format!("starttls-{}@thunderlook.invalid", std::process::id());
+    let mut ep = Endpoints::hostinger(&address);
+    (ep.imap.port, ep.imap.security, ep.smtp.port, ep.smtp.security) = (143, Security::StartTls, 587, Security::StartTls);
+    let id = account::create(&conn, &address, "Test", &ep, "x").unwrap();
+    assert_eq!(account::account(&conn, id).unwrap().endpoints, ep);
+    let s = &account::summaries(&conn).unwrap()[0];
+    assert_eq!((s.imap.as_str(), s.smtp.as_str()), ("imap.hostinger.com:143 (STARTTLS)", "smtp.hostinger.com:587 (STARTTLS)"));
+    account::remove(&conn, &dir, id).unwrap();
+    drop(conn);
+    let _ = std::fs::remove_dir_all(&dir);
 }
