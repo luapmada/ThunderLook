@@ -206,9 +206,17 @@ fn occurrences_in<'a>(cal: &'a Calendar, shown: &HashSet<i64>, from: NaiveDate, 
 
 pub fn build(cal: &Calendar, calendars: Vec<CalendarInfo>, query: &CalendarQuery, now: NaiveDateTime) -> CalendarView {
     let today = now.date();
-    let anchor = NaiveDate::parse_from_str(&query.anchor, "%Y-%m-%d").unwrap_or(today);
+    let mut anchor = NaiveDate::parse_from_str(&query.anchor, "%Y-%m-%d").unwrap_or(today);
     let kind = query.kind;
-    let (first, last) = period(kind, anchor);
+    let mut range = period(kind, anchor);
+    // Vue Mois défilée à la roulette : six semaines à partir de `start` ; le mois de référence (titre, jours du mois)
+    // est celui de la troisième semaine.
+    if let Some(start) = query.start.as_deref().filter(|_| kind == CalendarViewKind::Month).and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()) {
+        let first = monday(start);
+        range = (first, first + Duration::days(41));
+        anchor = first + Duration::days(17);
+    }
+    let (first, last) = range;
     let shown: HashSet<i64> = calendars.iter().filter(|c| c.shown).filter_map(|c| c.id[1..].parse().ok()).collect();
     let color = |folder: i64| calendars.iter().find(|c| c.id == format!("c{folder}")).map_or(0, |c| c.color);
 

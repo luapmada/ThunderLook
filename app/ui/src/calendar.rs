@@ -26,18 +26,25 @@ pub fn watch(ui: Ui) {
             });
         }
     });
+    // Toute autre navigation (jour, flèches, Aujourd'hui, type de vue) quitte le défilement de la vue Mois.
+    Effect::new(move |_| {
+        ui.cal_anchor.track();
+        ui.settings.with(|s| s.calendar_view);
+        ui.cal_month_start.set(None);
+    });
     Effect::new(move |_| {
         if ui.module.get() != Module::Calendar || !ui.settings_loaded.get() {
             return;
         }
         let kind = ui.settings.with(|s| s.calendar_view);
         let anchor = ui.cal_anchor.get();
+        let start = ui.cal_month_start.get();
         ui.cal_epoch.track();
         spawn_local(async move {
-            match ipc::calendar_view(&CalendarQuery { kind, anchor: anchor.clone() }).await {
+            match ipc::calendar_view(&CalendarQuery { kind, anchor: anchor.clone(), start: start.clone() }).await {
                 Ok(v) => {
                     // Une réponse arrivée après un autre changement est ignorée.
-                    if ui.cal_anchor.get_untracked() == anchor && ui.settings.with_untracked(|s| s.calendar_view) == kind {
+                    if ui.cal_anchor.get_untracked() == anchor && ui.cal_month_start.get_untracked() == start && ui.settings.with_untracked(|s| s.calendar_view) == kind {
                         if ui.cal_anchor.get_untracked().is_empty() {
                             ui.cal_anchor.set(v.anchor.clone());
                         }
@@ -70,7 +77,7 @@ pub fn import(ui: Ui) {
 
 /// Export des calendriers affichés : `.ics` (tous leurs éléments) ou CSV d'Outlook (période affichée).
 pub fn export(ui: Ui, csv: bool) {
-    let query = CalendarQuery { kind: ui.settings.with_untracked(|s| s.calendar_view), anchor: ui.cal_anchor.get_untracked() };
+    let query = CalendarQuery { kind: ui.settings.with_untracked(|s| s.calendar_view), anchor: ui.cal_anchor.get_untracked(), start: None };
     spawn_local(async move {
         match ipc::calendar_export(if csv { "csv" } else { "ics" }, &query).await {
             Ok(Some(msg)) => ui.status.set(Some(msg)),
@@ -89,6 +96,34 @@ fn go(ui: Ui, next: bool) {
     if let Some(d) = ui.cal_view.with_untracked(|v| v.as_ref().map(|v| if next { v.next.clone() } else { v.prev.clone() })) {
         ui.cal_anchor.set(d);
     }
+}
+
+thread_local! {
+    /// Défilement accumulé (pixels) : un pavé tactile envoie beaucoup de petits pas, une roulette des crans de ~100.
+    static WHEEL: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+}
+
+/// Un cran de roulette (+1 vers le bas, -1 vers le haut) quand le défilement accumulé atteint 50 pixels.
+fn wheel_step(ev: &web_sys::WheelEvent) -> Option<i32> {
+    let dy = ev.delta_y() * if ev.delta_mode() == 1 { 40.0 } else { 1.0 };
+    WHEEL.with(|w| {
+        let acc = w.get() + dy;
+        if acc.abs() >= 50.0 {
+            w.set(0.0);
+            Some(if acc > 0.0 { 1 } else { -1 })
+        } else {
+            w.set(acc);
+            None
+        }
+    })
+}
+
+/// `AAAA-MM-JJ` décalé de `days` jours.
+fn shift_days(date: &str, days: i32) -> String {
+    let n = |r: std::ops::Range<usize>| date.get(r).and_then(|s| s.parse::<f64>().ok()).unwrap_or(1.0);
+    let ms = js_sys::Date::utc(n(0..4), n(5..7) - 1.0) + (n(8..10) - 1.0 + f64::from(days)) * 86_400_000.0;
+    let d = js_sys::Date::new(&ms.into());
+    format!("{:04}-{:02}-{:02}", d.get_utc_full_year(), d.get_utc_month() + 1, d.get_utc_date())
 }
 
 /// Premier jour du mois précédent ou suivant celui d'une date `AAAA-MM-JJ`.
@@ -233,8 +268,16 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
 fn MonthGrid(view: CalendarView) -> impl IntoView {
     let ui = use_ui();
     const SHOWN: usize = 3;
+    // Roulette : une semaine plus tôt ou plus tard, comme la vue Mois d'Outlook.
+    let first = view.days.first().map(|d| d.date.clone()).unwrap_or_default();
+    let on_wheel = move |ev: leptos::ev::WheelEvent| {
+        if let Some(step) = wheel_step(&ev) {
+            ev.prevent_default();
+            ui.cal_month_start.set(Some(shift_days(&first, 7 * step)));
+        }
+    };
     view! {
-        <div class="cal-month">
+        <div class="cal-month" on:wheel=on_wheel>
             <div class="cal-month-head">{WEEKDAYS_SHORT.iter().map(|w| view! { <div>{*w}</div> }).collect_view()}</div>
             <div class="cal-month-body">
                 {view
@@ -427,8 +470,16 @@ pub fn CalendarNav() -> impl IntoView {
                     let months = v.navigator.clone();
                     let first = months.first().and_then(|m| m.weeks.iter().flatten().find(|d| d.in_month).map(|d| d.date.clone())).unwrap_or_default();
                     let (prev, next) = (shift_month(&first, -1), shift_month(&first, 1));
+                    let (wheel_prev, wheel_next) = (prev.clone(), next.clone());
+                    // Roulette sur le navigateur de dates : mois précédent ou suivant.
+                    let on_wheel = move |ev: leptos::ev::WheelEvent| {
+                        if let Some(step) = wheel_step(&ev) {
+                            ev.prevent_default();
+                            ui.cal_anchor.set(if step > 0 { wheel_next.clone() } else { wheel_prev.clone() });
+                        }
+                    };
                     view! {
-                        <div class="nav-months">
+                        <div class="nav-months" on:wheel=on_wheel>
                             {months
                                 .into_iter()
                                 .enumerate()

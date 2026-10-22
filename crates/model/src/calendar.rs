@@ -42,6 +42,9 @@ pub struct CalendarQuery {
     pub kind: CalendarViewKind,
     /// Jour de référence ; vide = aujourd'hui.
     pub anchor: String,
+    /// Vue Mois défilée à la roulette (semaine par semaine, comme Outlook) : lundi de la première semaine affichée.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
 }
 
 /// Un calendrier (dossier de rendez-vous) et son affichage.
