@@ -434,6 +434,13 @@ async function realSend(log, blocked) {
       await sleep(1500);
       await js(`document.querySelector('.dialog')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
       log('compte de test retiré de ThunderLook (rien n\'est effacé sur le serveur)');
+      // Son dossier était affiché : la vue doit revenir à une Boîte de réception, pas rester vide.
+      try {
+        await until(`!!document.querySelector('.msg[aria-posinset="1"]')`, 'Boîte de réception après le retrait du compte');
+        log(`vue rouverte sur « ${await js(`document.querySelector('.treeitem[aria-selected=true]')?.textContent ?? '?'`)} »`);
+      } catch (e) {
+        cleanupError ??= `${e.message} : la vue est restée sur le dossier du compte retiré`;
+      }
     }
   }
   if (cleanupError) throw new Error(cleanupError);
@@ -548,6 +555,13 @@ CHECKS.push(['Clic droit : les actions des sous-menus s\'exécutent (Règles ›
   const ctx = `(() => { const e = document.querySelector('.msg[aria-posinset="1"]'); e.click(); const b = e.getBoundingClientRect(); e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: b.left + 80, clientY: b.top + 20 })); })()`;
   const item = (t) => `[...document.querySelectorAll('[role=menuitem]')].find(e => e.textContent.trim().startsWith(${JSON.stringify(t)}))`;
   const escape = () => js(`document.querySelector('.dialog')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  // Après le cas J9 (retour au Courrier par Ctrl+1), la liste peut ne pas être encore rechargée.
+  try {
+    await until(`!!document.querySelector('.msg[aria-posinset="1"]')`, 'liste des messages');
+  } catch (e) {
+    const state = await js(`JSON.stringify({ sel: document.querySelector('.treeitem[aria-selected=true]')?.textContent, msgs: document.querySelectorAll('.msg').length, cal: !!document.querySelector('.cal-cell, .cal-timed'), list: document.querySelector('.list, [role=grid], [role=listbox]')?.textContent?.slice(0, 200) })`);
+    throw new Error(`${e.message} — ${state}`);
+  }
   for (const [entry, check] of [['Gérer les règles', `!!document.querySelector('.dialog.wide .rules-item')`], ['Créer une règle', `document.querySelector('#create-rule-title')?.textContent === 'Créer une règle'`]]) {
     await js(ctx);
     await until(`!!${item('Règles')}`, 'menu contextuel');
@@ -576,8 +590,8 @@ try {
   initialConversations = await settingsOn();
   // Les vérifications déplacent la sélection : sans cela, des messages réels seraient marqués lus.
   initialMarkRead = await setMarkRead(false);
-  // UI_ONLY=J9 : seulement les vérifications dont le nom commence ainsi.
-  for (const [name, run] of CHECKS.filter(([n]) => !process.env.UI_ONLY || n.startsWith(process.env.UI_ONLY))) {
+  // UI_ONLY=J9 (ou J9,Clic) : seulement les vérifications dont le nom commence ainsi.
+  for (const [name, run] of CHECKS.filter(([n]) => !process.env.UI_ONLY || process.env.UI_ONLY.split(',').some(p => n.startsWith(p)))) {
     const lines = [];
     try {
       await run((l) => lines.push(l));

@@ -173,7 +173,17 @@ pub fn select_single(ui: Ui, pos: u32) {
 pub fn refresh_tree(ui: Ui) {
     spawn_local(async move {
         match ipc::folder_tree().await {
-            Ok(t) => ui.tree.set(Some(t)),
+            Ok(t) => {
+                // Dossier affiché disparu (compte retiré, dossier supprimé définitivement) : Boîte de réception.
+                let current = ui.folder.get_untracked();
+                if current.starts_with('f') && t.find_folder(&current).is_none() {
+                    if let Some(f) = t.default_folder() {
+                        ui.folder.set(f.id.clone());
+                        ui.tree_focus.set(f.id.clone());
+                    }
+                }
+                ui.tree.set(Some(t));
+            }
             Err(e) => ui.error.set(Some(e)),
         }
     });
