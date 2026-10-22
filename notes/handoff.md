@@ -1,15 +1,13 @@
 # Passation — état au 2026-10-22 au soir (fin de contexte)
 
 ## À reprendre en premier
-1. **Agent J7 en cours** (lancé le 22/10) dans le worktree `A:\PROJETS\IA-LAB\rea-outlook-clone-j7`, branche
-   `j7-points-ouverts` (partie de `3ec6280`) : corrige les points ouverts du J7 dans l'ordre 6, 2, 3, 5, 4, 1, 7, 8, un
-   commit par point, sans pousser. À la reprise : `git -C ../rea-outlook-clone-j7 log --oneline main..` pour voir où il
-   en est ; fusionner dans `main` (`git merge --no-ff`), construire, `node tools/ui_check.mjs` complet (8 cas), vérifier à
-   l'écran par CDP (`tools/shot.mjs`), étiqueter **v0.9.2**, pousser, `git worktree remove ../rea-outlook-clone-j7`.
-   - 6 renommer/supprimer un dossier de compte reporté sur le serveur ; 2 original marqué répondu/transféré ;
-     3 clic sur la notification Windows ; 5 mot de passe rangé par adresse (retirer un compte d'un dossier de données
-     efface celui des autres) ; 4 compte supprimé encore surveillé (IDLE) 10 min ; 1 IMAP STARTTLS (143) ;
-     7 règle à l'arrivée vers un dossier du PST retire le message du serveur ; 8 nettoyage serveur du cas J7 de ui_check.
+1. **v0.9.2 publiée le 22/10** : les 8 points ouverts du J7 (voir « Points ouverts du J7 », rayés) fusionnés depuis la
+   branche `j7-points-ouverts` (worktree retiré). **Base au schéma v10** (`message.last_verb`, `last_verb_at`) :
+   un exécutable antérieur refuse `data/store` ; sauvegarde d'avant migration
+   `data/store/thunderlook.db*.bak-2026-10-22-v092`. `ui_check` 8/8 ; vérifié à l'écran par CDP (icône et barre
+   « répondu », `open-item` sélectionne le message, champs Port/Chiffrement d'« Ajouter un compte »). Correctif de la
+   fusion : un compte retiré pendant que son dossier est affiché laissait une liste vide (`77bcc14`).
+   Script de vérification : `target/tl-scripts/verify_v092.mjs` (coupe puis rétablit « marquer comme lu »).
 2. **Quand se passer d'Outlook** (réponse donnée à Paul le 22/10) : après 1) points J7 ; 2) écriture du calendrier
    dans ThunderLook (créer/modifier/supprimer, rappels — étape 4 du J9, sans objet en option A) ; 3) Contacts, Tâches,
    Notes (J10+) ; 4) synchro du téléphone par MPE sur fichiers vCard/iCal/vNote (MPE ne parle qu'à Outlook ou à des
@@ -56,13 +54,13 @@
 - Outils (`crates/sync/examples`) : compare, find, dates, subscriptions, copy_rules, rehome, cross_move, junk_roundtrip, mkdir, account_rules. Dossier de test : `$CLAUDE_JOB_DIR/tmp/j7store` (comptes test et test2).
 
 ## Où on en est
-- Livré : J0 à J7, J3b et J9 (J8 abandonné). Version courante **v0.9.1** ; prochaine : v0.9.2 (fusion J7), puis 0.10.0.
+- Livré : J0 à J7, J3b et J9 (J8 abandonné). Version courante **v0.9.2** ; prochaine : 0.10.0.
 - `data/store` au schéma 9 ; comptes paul@ (source 3), electromagnetisme (4), angeliquemaillet (5) ; le cas J7 de
   `ui_check` ajoute puis retire le compte de test.
 - ADI Facturation : hors sujet pour l'instant, à la demande de Paul. Ne pas relancer.
 
 ## Prochain jalon
-- Fusion des points J7 (agent), puis écriture du calendrier, puis J10 Contacts (voir « À reprendre en premier » § 2).
+- Écriture du calendrier, puis J10 Contacts (voir « À reprendre en premier » § 2).
 
 ## Transition Outlook ↔ ThunderLook (2026-10-21)
 - Outlook basculé sur son profil **« Outlook » (IMAP, déjà configuré)** à la place de « pop-original » (POP3, copie gardée 14 jours puis effacée) : plus rien n'est retiré du serveur. PST `A:\Fichiers Outlook\Outlook_300923.pst` rattaché comme fichier de données secondaire (historique visible ; règles inactives pendant la transition).
@@ -86,14 +84,16 @@
 - Exemples (`crates/sync/examples`) : `probe`, `sync` (crée le compte dans un dossier de test et remet le mot de passe), `ops_roundtrip`, `send_roundtrip`, `idle`, `autoreply_roundtrip`. Dossier de test habituel : `$CLAUDE_JOB_DIR/tmp/j7store` (jamais `data/store`).
 - MCP Hostinger : `claude mcp add -s user --transport http hostinger https://mcp.hostinger.com` ; OAuth fait ; `mcp__hostinger__execute` autorisé par Paul.
 
-## Points ouverts du J7
-- Créer, renommer, supprimer un **dossier** d'un compte n'est pas reporté sur le serveur (seulement les messages).
-- IMAP en STARTTLS (port 143) non pris en charge (TLS 993 seulement) ; SMTP accepte les deux.
-- Mot de passe rangé par adresse dans le gestionnaire d'identifiants : retirer le compte d'un dossier de données le retire pour tous (le cas J7 de `ui_check` l'ôte ; l'exemple `sync` le remet).
-- Le message d'origine n'est pas marqué « répondu » / « transféré » après l'envoi.
-- Règles à l'arrivée : toutes les règles actives, comme Outlook ; une règle qui déplace vers un dossier du PST retire le message du serveur.
-- Un compte supprimé garde sa surveillance IDLE jusqu'à 10 min (fin de l'attente en cours).
-- Notification Windows : pas d'action au clic.
+## Points ouverts du J7 (tous traités en v0.9.2, 22/10)
+- ~~Dossiers de compte non reportés~~ : renommer, déplacer, supprimer (→ `INBOX.Trash`), suppression définitive, Ctrl+Z.
+- ~~IMAP STARTTLS~~ : 143 STARTTLS et 993 TLS ; port et chiffrement dans « Ajouter un compte ».
+- ~~Mot de passe partagé~~ : liste `<adresse>#dossiers` ; effacé au retrait du dernier dossier ; ancien mot de passe « (antérieur) » jamais effacé.
+- ~~Original non marqué~~ : `last_verb` (102/103/104), `\Answered` / `$Forwarded` sur le serveur et repris à la relève.
+- ~~Règle vers un dossier du PST~~ : comportement d'Outlook gardé, avec garde-fous (recherche par nom limitée au compte, avertissements, suppression serveur seulement si la copie locale existe).
+- ~~IDLE d'un compte supprimé~~ : arrêt immédiat (0,29 s).
+- ~~Notification sans action~~ : clic → Boîte de réception du compte ou message.
+- Limites restantes : clic depuis le Centre de notifications sans effet (activation COM non faite) ; messages du PST
+  déjà traités dans Outlook (propriété 0x1081) non marqués.
 
 ## Méthode et pièges
 - Ne jamais réécrire un fichier source avec `Set-Content -Encoding Ascii` ni `utf8` sous PowerShell 5.1 (accents perdus, BOM) : passer par Python (`io.open(..., encoding="utf-8", newline="\n")`) ou l'outil d'édition. Heredocs bash avec apostrophes : écrire le script dans `target/tl-scripts/`.
