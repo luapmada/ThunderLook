@@ -3,6 +3,8 @@
 //! Dossier de données, par ordre de priorité : variable d'environnement `THUNDERLOOK_DATA`,
 //! `dataDir` dans `config.json` (dossier de configuration de l'application), sinon `<données locales>\data`.
 
+mod toast;
+
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -230,9 +232,9 @@ fn sync_all(app: &AppHandle) -> SyncEvent {
 }
 
 /// Notification Windows des nouveaux messages, une par compte : expéditeur et objet s'il n'y en a qu'un, sinon leur
-/// nombre. Le clic ([`open_from_notification`]) ouvre la Boîte de réception du compte, ou ce message.
-fn notify_arrivals(app: &AppHandle, dir: &Path, arrived: &[(i64, String, Vec<i64>)]) {
-    use tauri_plugin_notification::NotificationExt;
+/// nombre. Le clic (lien `thunderlook:`, voir [`toast`] et [`open_from_notification`]) ouvre la Boîte de réception du
+/// compte, ou ce message, même depuis le Centre de notifications.
+fn notify_arrivals(_app: &AppHandle, dir: &Path, arrived: &[(i64, String, Vec<i64>)]) {
     let conn = thunderlook_store::open(dir).ok();
     for (source, address, ids) in arrived {
         let single = match ids.as_slice() {
@@ -244,34 +246,29 @@ fn notify_arrivals(app: &AppHandle, dir: &Path, arrived: &[(i64, String, Vec<i64
             }),
             _ => None,
         };
-        let body = match &single {
+        let lines: Vec<String> = match &single {
             Some((name, addr, subject)) => {
                 let who = if name.trim().is_empty() { addr } else { name };
                 let subject = if subject.trim().is_empty() { "(aucun objet)" } else { subject.as_str() };
-                format!("{who}
-{subject}")
+                vec![who.clone(), subject.to_string()]
             }
-            None => format!("{} nouveaux messages pour {address}", ids.len()),
+            None => vec![format!("{} nouveaux messages pour {address}", ids.len())],
         };
-        let mut builder = app.notification().builder().id(*source as i32).title("ThunderLook").body(body).extra("source", *source);
-        if let [id] = ids.as_slice() {
-            builder = builder.extra("message", *id);
+        let message = match ids.as_slice() {
+            [id] => Some(*id),
+            _ => None,
+        };
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        if let Err(e) = toast::show("ThunderLook", &lines, &toast::open_uri(*source, message)) {
+            log::warn!("{e}");
         }
-        let _ = builder.show();
     }
 }
 
 /// Clic sur une notification : ThunderLook passe au premier plan et affiche la Boîte de réception du compte, ou le
 /// message s'il était seul (dans son dossier actuel : une règle a pu le déplacer).
 fn open_from_notification(app: &AppHandle, source: i64, message: Option<i64>) {
-    if let Some(w) = app.webview_windows().into_values().next() {
-        let _ = w.unminimize();
-        let _ = w.show();
-        // Windows ne laisse passer au premier plan qu'une fenêtre « au-dessus » : on l'y met le temps du focus.
-        let _ = w.set_always_on_top(true);
-        let _ = w.set_focus();
-        let _ = w.set_always_on_top(false);
-    }
+    bring_to_front(app);
     let Ok(conn) = data_dir(app).and_then(|d| thunderlook_store::open(&d).map_err(|e| e.to_string())) else { return };
     let current = message.and_then(|m| conn.query_row("SELECT folder_id FROM message WHERE id = ?1", [m], |r| r.get::<_, i64>(0)).ok());
     let item = match current {
@@ -282,6 +279,18 @@ fn open_from_notification(app: &AppHandle, source: i64, message: Option<i64>) {
         }
     };
     let _ = app.emit("open-item", item);
+}
+
+/// Fenêtre de ThunderLook restaurée et au premier plan (clic sur une notification, second lancement).
+fn bring_to_front(app: &AppHandle) {
+    if let Some(w) = app.webview_windows().into_values().next() {
+        let _ = w.unminimize();
+        let _ = w.show();
+        // Windows ne laisse passer au premier plan qu'une fenêtre « au-dessus » : on l'y met le temps du focus.
+        let _ = w.set_always_on_top(true);
+        let _ = w.set_focus();
+        let _ = w.set_always_on_top(false);
+    }
 }
 
 fn junk_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1140,10 +1149,19 @@ fn perf_mark(app: AppHandle, label: String, ms: f64) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Lancé par Windows depuis une notification (lien `thunderlook:`) alors que ThunderLook est déjà ouvert : cette
+    // seconde instance s'arrête aussitôt (single-instance) ; elle cède d'abord le premier plan à la première.
+    #[cfg(windows)]
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(windows::Win32::UI::WindowsAndMessaging::ASFW_ANY);
+    }
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| match argv.iter().find_map(|a| toast::parse_uri(a)) {
+            Some((source, message)) => open_from_notification(app, source, message),
+            None => bring_to_front(app),
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
         .manage(Store(Mutex::new(None)))
         .manage(Indexer::default())
         .manage(Syncer::default())
@@ -1168,22 +1186,24 @@ pub fn run() {
                     NewWindowResponse::Deny
                 })
                 .build()?;
-            // Clic sur une notification de nouveaux messages (le greffon le signale tant que la notification est à
-            // l'écran, pas depuis le Centre de notifications) : voir `open_from_notification`.
-            {
-                use tauri_plugin_notification::NotificationExt;
+            // Identité des notifications et lien `thunderlook:` (voir `toast`) ; l'icône est copiée dans le dossier de
+            // configuration, d'où Windows la lit.
+            if let Ok(dir) = app.path().app_config_dir() {
+                let icon = dir.join("notification.png");
+                let _ = fs::create_dir_all(&dir).and_then(|_| fs::write(&icon, include_bytes!("../icons/128x128.png")));
+                if let Err(e) = toast::register(&icon) {
+                    log::warn!("{e}");
+                }
+            }
+            // Démarré par un clic sur une notification alors que ThunderLook était fermé : le lien est en argument.
+            if let Some((source, message)) = std::env::args().find_map(|a| toast::parse_uri(&a)) {
                 let handle = app.handle().clone();
-                app.notification().on_action(move |a| {
-                    if a.action_id() != "tap" {
-                        return;
-                    }
-                    let extra = a.notification().map(|n| n.extra().clone()).unwrap_or_default();
-                    let Some(source) = extra.get("source").and_then(|v| v.as_i64()) else { return };
-                    let message = extra.get("message").and_then(|v| v.as_i64());
-                    // Le gestionnaire tourne sur un fil d'arrière-plan : la fenêtre se manipule depuis le fil principal.
+                std::thread::spawn(move || {
+                    // Laisser l'interface s'abonner à « open-item ».
+                    std::thread::sleep(std::time::Duration::from_secs(3));
                     let h = handle.clone();
                     let _ = handle.run_on_main_thread(move || open_from_notification(&h, source, message));
-                })?;
+                });
             }
             start_scheduler(app.handle());
             Ok(())
