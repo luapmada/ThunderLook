@@ -1692,6 +1692,23 @@ input {
   height: 100%;
 }
 
+/* Rendez-vous classé : rempli de la couleur de sa catégorie, bande de disponibilité éclaircie (relevé d'Outlook). */
+.cal-ev.cat {
+  background: color-mix(in srgb, var(--c) 92%, var(--bg));
+  border-color: color-mix(in srgb, var(--c) 92%, var(--bg));
+  border-left-color: color-mix(in srgb, var(--c) 62%, #fff);
+  color: #fff;
+}
+
+.cal-ev.cat.busy-free,
+.cal-ev.cat.busy-tentative {
+  background: color-mix(in srgb, var(--c) 92%, var(--bg));
+}
+
+.cal-ev.cat.busy-free {
+  border-left-color: color-mix(in srgb, var(--c) 45%, #000);
+}
+
 .cal-ev.busy-free {
   border-left-style: dashed;
   background: color-mix(in srgb, var(--c) 7%, var(--bg));

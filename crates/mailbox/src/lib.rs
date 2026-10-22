@@ -111,12 +111,12 @@ type Item = (i64, i64, String, String);
 /// Dossiers de recherche prédéfinis : identifiant, nom, requête.
 const BUILTIN_SEARCH_FOLDERS: [(&str, &str, &str); 2] = [("s-unread", "Courrier non lu", "lu:non"), ("s-flagged", "Pour le suivi", "suivi:oui")];
 
-/// Couleurs des 25 catégories prédéfinies ([MS-OXOCFG] : `preset0` à `preset24`). Teintes propres
-/// au projet, choisies pour rester lisibles en thème clair et sombre.
+/// Couleurs des 25 catégories prédéfinies ([MS-OXOCFG] : `preset0` à `preset24`), relevées dans le sélecteur
+/// « Couleur » d'Outlook (`notes/outlook-couleurs-menus.md`).
 const CATEGORY_COLORS: [&str; 25] = [
-    "#d13438", "#e8730c", "#e3a21a", "#d6b70c", "#3f9b2f", "#1f9b8f", "#7f8c2a", "#2f6fc0", "#7a4cc2",
-    "#b0306a", "#6f8299", "#4c5d73", "#8a8886", "#5c5b5a", "#2b2b2b", "#a4262c", "#b85b0a", "#a8771a",
-    "#9a840a", "#2d6e22", "#14706a", "#5b641d", "#1f4e8c", "#55348a", "#7d2350",
+    "#b10e1c", "#c33400", "#e69a3e", "#e3cc00", "#009c4e", "#00a3ae", "#7eac00", "#006cbe", "#756cc8",
+    "#cc007e", "#919da1", "#005265", "#8c8e83", "#5d6c70", "#3e3e3e", "#6a0a1a", "#b5490f", "#814e29",
+    "#ae8e00", "#0a600a", "#02767a", "#427505", "#00345c", "#684697", "#8c0059",
 ];
 
 pub fn category_color(index: i64) -> Option<String> {
@@ -982,7 +982,7 @@ mod tests {
 
     #[test]
     fn colors() {
-        assert_eq!(category_color(0).as_deref(), Some("#d13438"));
+        assert_eq!(category_color(0).as_deref(), Some("#b10e1c"));
         assert_eq!(category_color(-1), None);
         assert_eq!(category_color(25), None);
     }

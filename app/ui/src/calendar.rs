@@ -167,9 +167,18 @@ fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool) -> impl Into
     let ev = event.clone();
     let open_id = event.id.clone();
     let shared = ui.cal_view.with_untracked(|v| v.as_ref().is_some_and(|v| v.calendars.iter().any(|c| c.id == event.calendar_id && c.shared)));
+    // Comme Outlook : un rendez-vous classé prend la couleur de sa première catégorie.
+    let first_category = event.categories.first().cloned();
+    let category_color = move || {
+        let name = first_category.as_ref()?.to_lowercase();
+        ui.categories.with(|cs| cs.iter().find(|c| c.name.to_lowercase() == name).and_then(|c| c.color.clone()))
+    };
+    let cat_style = category_color.clone();
     view! {
         <button
             class=format!("cal-ev cal-c{} busy-{}", event.color, event.busy)
+            class:cat=move || category_color().is_some()
+            style=move || cat_style().map(|c| format!("--c: {c}")).unwrap_or_default()
             class:selected=selected
             class:continued=event.continued
             aria-label=label.clone()
