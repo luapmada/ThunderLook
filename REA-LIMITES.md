@@ -161,3 +161,7 @@ Chaque entrée : action → résultat → cause → contournement → source.
 ## Interface native d'Outlook (23/10)
 - `observe_native_ui`, `capture_native_ui_scenario` et `trace_native_ui_action` sont décrits comme liés à une cible **Mach-O** (accessibilité macOS, `AXValue`). **Non testés sur `OUTLOOK.EXE`** : déduit de leur description seulement.
 - Pistes REA non macOS à essayer pour les menus et les couleurs : `inspect_pe_resources` (menus et dialogues dans les ressources PE), `search_strings` / `xrefs` (palette des catégories), `observe_native_calls`.
+
+## Menus d'Outlook par les ressources PE (23/10)
+- `inspect_pe_resources` : `OUTLOOK.EXE` n'a **aucun** RT_MENU (icônes, bitmaps, 268 UIFILE DirectUI). `1036\OUTLLIBR.DLL` en a 87, mais le résultat est une arborescence d'offsets (non décodée) : menus et chaînes (RT_STRING) lus par script Python à partir des offsets.
+- Les menus décodés sont des menus Win32 hérités (dossiers, pièces jointes, zone de notification, etc.) : **les menus contextuels du calendrier (rendez-vous, créneau) n'y sont pas** ; ils viennent de la barre de commandes Office (hors RT_MENU). Pour eux, seule l'observation de l'interface (UIA) donne les libellés : relevés déjà faits dans `notes/outlook-couleurs-menus.md`.
