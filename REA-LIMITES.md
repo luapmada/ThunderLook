@@ -157,3 +157,6 @@ Chaque entrée : action → résultat → cause → contournement → source.
 - La méthode qui a payé : lister les **appelants** d'une primitive connue (singleton du catalogue, lecture d'un dword), décompiler en lot les voisins d'adresse, puis repérer les constantes de version dans le pseudo-code.
 - `batch_decompile` sur 7 fonctions dépasse la taille de réponse autorisée. REA enregistre alors le résultat dans un fichier, découpé ensuite en un fichier `.c` par fonction (`data/rea/`).
 - Résultats dans `notes/rea/regles-outlook.md` : versions du flux, `XR_Magic`, `bytecount`, étiquettes d'objet MFC et codage des longueurs.
+
+## Interface native d'Outlook (23/10)
+- `observe_native_ui`, `capture_native_ui_scenario` et `trace_native_ui_action` sont liés à une cible **Mach-O** et à l'accessibilité macOS (`AXValue`, PID + identifiant de fenêtre) : inutilisables sur `OUTLOOK.EXE` (Windows). Les relevés de couleurs et de menus d'Outlook restent donc faits par UI Automation (`tools/uia_*.ps1`), pas par REA.
