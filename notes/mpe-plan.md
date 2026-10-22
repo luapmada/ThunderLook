@@ -286,7 +286,7 @@ Registre `HKCU\Software\Microsoft\Office\16.0\Outlook` : `DefaultProfile = Outlo
 ## 9. Journal d'exécution
 - **2026-10-22, étape 1 (sauvegardes)**, avec l'accord de Paul :
   - MPE fermé proprement ; `%APPDATA%\MyPhoneExplorer` copié dans
-    `A:\AI_related\Claude_Code_Work\mpe-backup6-10-22\MyPhoneExplorer` (1 032 fichiers, 133 010 584 octets,
+    `A:\AI_related\Claude_Code_Work\mpe-backup\2026-10-22\MyPhoneExplorer` (1 032 fichiers, 133 010 584 octets,
     identiques à la source). Version de MPE lue sur l'exécutable : 2.03.
   - Outlook fermé proprement ; PST copié en `A:\Fichiers Outlook\Outlook_300923_BACKUP_2026-10-22_MPE.pst`
     (4 146 799 616 octets, SHA-256 identique, 21B088F5C8F202BB…). Outlook relancé par `explorer.exe`, MPE relancé.
