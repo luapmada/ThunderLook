@@ -33,8 +33,8 @@ struct Syncer {
     again: Arc<AtomicBool>,
     /// « Travailler hors connexion » : ni relève, ni envoi, ni surveillance.
     offline: Arc<AtomicBool>,
-    /// Comptes dont la Boîte de réception est surveillée (IDLE).
-    watched: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// Comptes dont la Boîte de réception est surveillée (IDLE), et de quoi arrêter chaque surveillance.
+    watched: Arc<Mutex<std::collections::HashMap<i64, Arc<thunderlook_sync::WatchStop>>>>,
     /// Début du dernier passage (millisecondes), pour la relève périodique.
     last_run: Arc<std::sync::atomic::AtomicI64>,
 }
@@ -57,18 +57,50 @@ fn start_watchers(app: &AppHandle) {
         return;
     };
     for a in accounts {
-        let fresh = syncer.watched.lock().map(|mut w| w.insert(a.source_id)).unwrap_or(false);
+        let cancel = Arc::new(thunderlook_sync::WatchStop::default());
+        let fresh = syncer
+            .watched
+            .lock()
+            .map(|mut w| match w.entry(a.source_id) {
+                std::collections::hash_map::Entry::Occupied(_) => false,
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    v.insert(cancel.clone());
+                    true
+                }
+            })
+            .unwrap_or(false);
         if !fresh {
             continue;
         }
         let (app, dir, offline, watched) = (app.clone(), dir.clone(), syncer.offline.clone(), syncer.watched.clone());
         std::thread::spawn(move || {
             let notify = app.clone();
-            thunderlook_sync::watch_inbox_blocking(&dir, a.source_id, &offline, move || start_sync(&notify), |e| log::warn!("surveillance IDLE : {e}"));
-            if let Ok(mut w) = watched.lock() {
+            thunderlook_sync::watch_inbox_blocking(&dir, a.source_id, &offline, &cancel, move || start_sync(&notify), |e| {
+                log::warn!("surveillance IDLE : {e}")
+            });
+            // Seulement la sienne : le compte a pu être retiré puis une autre surveillance lancée.
+            if let Ok(mut w) = watched.lock()
+                && w.get(&a.source_id).is_some_and(|c| Arc::ptr_eq(c, &cancel))
+            {
                 w.remove(&a.source_id);
             }
         });
+    }
+}
+
+/// Arrête tout de suite la surveillance d'un compte (toutes si `None`), sans attendre la fin de l'attente IDLE.
+fn stop_watchers(app: &AppHandle, source: Option<i64>) {
+    let stopped: Vec<Arc<thunderlook_sync::WatchStop>> = app
+        .state::<Syncer>()
+        .watched
+        .lock()
+        .map(|mut w| match source {
+            Some(s) => w.remove(&s).into_iter().collect(),
+            None => w.drain().map(|(_, c)| c).collect(),
+        })
+        .unwrap_or_default();
+    for c in stopped {
+        c.stop();
     }
 }
 
@@ -661,6 +693,8 @@ fn remove_account(app: AppHandle, id: String) -> Result<Vec<AccountSummary>, Str
     let source: i64 = id.strip_prefix('s').and_then(|n| n.parse().ok()).ok_or_else(|| format!("identifiant invalide : {id}"))?;
     let dir = data_dir(&app)?;
     let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    // Surveillance arrêtée d'abord : plus de connexion au serveur pour un compte retiré.
+    stop_watchers(&app, Some(source));
     thunderlook_sync::account::remove(&conn, &dir, source)?;
     thunderlook_sync::account::summaries(&conn)
 }
@@ -709,6 +743,7 @@ fn sync_now(app: AppHandle) {
 fn set_offline(app: AppHandle, offline: bool) -> bool {
     app.state::<Syncer>().offline.store(offline, Ordering::SeqCst);
     if offline {
+        stop_watchers(&app, None);
         let _ = app.emit("sync", SyncEvent { message: "Hors connexion".into(), ..Default::default() });
     } else {
         start_sync(&app);
