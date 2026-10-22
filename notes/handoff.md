@@ -1,16 +1,50 @@
-# Passation — état au 2026-10-22
+# Passation — état au 2026-10-22 au soir (fin de contexte)
 
 ## À reprendre en premier
-1. ~~Outlook n'affiche aucun sous-dossier IMAP~~ — **réglé le 21/10 à 21 h 35.**
-   - Vraie cause : la valeur de registre `IMAP Folder Path` du compte *est* le « chemin d'accès au dossier racine » (onglet Options avancées), et elle contenait le chemin d'un .ost (`A:\Fichiers Outlook\<compte>.ost`) pour les trois comptes. Les OST réellement utilisés sont dans `%LOCALAPPDATA%\Microsoft\Outlook` ; ceux de `A:\Fichiers Outlook` datent du 13/07 et ne servent plus.
-   - Correctif : racine = `INBOX` sur les trois comptes, via le panneau Courrier (MLCFG32.CPL) piloté par messages Win32 et UI Automation (scripts dans `$CLAUDE_JOB_DIR/tmp` : `uia.ps1`, `set_root.ps1`). Vérifié par COM : Sent, Drafts, Junk, Trash et les dossiers des règles apparaissent, avec les mêmes nombres que le serveur.
-   - Lancer Outlook : `explorer.exe "C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE"`. Lancé par `Start-Process` ou par COM (`-Embedding`) depuis la session, il reste figé sans fenêtre. Ne lire par COM qu'un Outlook déjà ouvert, dans un `Start-Job` avec délai.
-   - Pendant le réglage, une frappe clavier est arrivée dans la boîte de dialogue au premier plan (« rrent a charger ? ») : relire chaque champ avant OK.
-2. ~~Bogue du point dans un nom de dossier~~ — corrigé (`50e825a`) : le séparateur est remplacé par U+2024 / U+2215 côté serveur. paul@ : `INBOX.[electromagnetisme.fr]` renommé `INBOX.[electromagnetisme&ICQ-fr]`, cibles des 2 règles mises à jour. electromagnetisme : 7 règles copiées du PST désactivées (dont « contact@electromagnetisme.fr (1) », qui aurait déplacé tout le courrier du compte) ; restent actives AR, Mail Delivery System ×2, « a été lu le », catégories. Les 6 dossiers vides d'electromagnetisme ont été supprimés du serveur le 21/10 avec l'accord de Paul (`folder_fix.rs … delete`) ; restent INBOX, Accusés, Trash, Sent, Junk, Drafts. Sauvegarde de la base avant ces changements : `data/store/thunderlook.db.bak-2026-10-21-regles`.
-3. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : Paul doit le supprimer (garde-fou : suppression refusée à l'agent).
-4. ~~J9 Calendrier, option A~~ — **clos le 22/10 en v0.9.0** : étapes 1, 2, 3 (vues), 5 (`.ics`/CSV) et rechargement depuis le PST (`tl-import --calendars`) ; occurrences identiques à Outlook sur 2023-2026. Étape 4 sans objet (Outlook fait foi), étape 6 (réunions iTIP/iMIP) abandonnée à la demande de Paul. Détail : `notes/j9-plan.md` ; mesures : `PLAN.md` §5. Prochain : J10 (Contacts, puis Tâches).
+1. **Agent J7 en cours** (lancé le 22/10) dans le worktree `A:\PROJETS\IA-LAB\rea-outlook-clone-j7`, branche
+   `j7-points-ouverts` (partie de `3ec6280`) : corrige les points ouverts du J7 dans l'ordre 6, 2, 3, 5, 4, 1, 7, 8, un
+   commit par point, sans pousser. À la reprise : `git -C ../rea-outlook-clone-j7 log --oneline main..` pour voir où il
+   en est ; fusionner dans `main` (`git merge --no-ff`), construire, `node tools/ui_check.mjs` complet (8 cas), vérifier à
+   l'écran par CDP (`tools/shot.mjs`), étiqueter **v0.9.2**, pousser, `git worktree remove ../rea-outlook-clone-j7`.
+   - 6 renommer/supprimer un dossier de compte reporté sur le serveur ; 2 original marqué répondu/transféré ;
+     3 clic sur la notification Windows ; 5 mot de passe rangé par adresse (retirer un compte d'un dossier de données
+     efface celui des autres) ; 4 compte supprimé encore surveillé (IDLE) 10 min ; 1 IMAP STARTTLS (143) ;
+     7 règle à l'arrivée vers un dossier du PST retire le message du serveur ; 8 nettoyage serveur du cas J7 de ui_check.
+2. **Quand se passer d'Outlook** (réponse donnée à Paul le 22/10) : après 1) points J7 ; 2) écriture du calendrier
+   dans ThunderLook (créer/modifier/supprimer, rappels — étape 4 du J9, sans objet en option A) ; 3) Contacts, Tâches,
+   Notes (J10+) ; 4) synchro du téléphone par MPE sur fichiers vCard/iCal/vNote (MPE ne parle qu'à Outlook ou à des
+   fichiers ; pas de CalDAV/CardDAV). Ordre : 1, 2, 3, 4. Aucune date promise.
+3. **MPE (MyPhoneExplorer) : FONDAMENTAL et très sensible pour Paul.** Plan et journal : `notes/mpe-plan.md` (§9).
+   - MPE ne parle pas à ThunderLook : il synchronise le téléphone principal (SM-S916U1, S23+) avec le PST
+     `Outlook_300923.pst` via le profil `pop-original`, en Wi-Fi. Il fonctionne normalement (synchro du 22/10 14 h 11 :
+     contacts 2 139/2 140 sans action, calendrier 370/370, 36 mises à jour vers Outlook proposées, non validées).
+   - **Ne jamais fermer/relancer MPE sans prévenir Paul** (`MultiSyncOnStart=1` : chaque démarrage lance une synchro).
+     Pas d'analyse détaillée non demandée (Paul : « tu te barres dans des méandres pour me faire dépenser des tokens »).
+   - Fait le 22/10 : sauvegardes (config MPE → `A:\AI_related\Claude_Code_Work\mpe-backup\2026-10-22\`, PST →
+     `A:\Fichiers Outlook\Outlook_300923_BACKUP_2026-10-22_MPE.pst`, SHA-256 identique) ; synchro automatique du S20 FE
+     (SM-G781B) coupée. Export .vcf : refusé par Paul (inutile). Banc d'essai S20 FE : pas nécessaire pour l'instant.
+   - Étape 3 (repointer MPE de `pop-original` vers le profil « Outlook », 3 lignes de `settings.dat`) : acceptée **à
+     condition de lister avant à Paul**, à faire avec lui devant la fenêtre de confirmation. EntryID des dossiers
+     identiques dans les deux profils (vérifié). Pas encore faite.
+4. **Message à Mondial Relay** toujours dans la Boîte d'envoi d'Outlook (profil IMAP) : à supprimer par Paul.
+5. **Images distantes** : Paul a parlé d'un « message identifié Outlook » ; introuvable dans les messages (recherche du
+   22/10). Lui demander l'objet du message concerné s'il revient dessus.
 
-Fait : construction à jour (`aa30da2`), `ui_check` 5/5 au vert, ThunderLook relancé. Une instance sans fenêtre (20 h 35) bloquait l'exécutable : `CloseMainWindow` ne suffit pas, il faut alors `Stop-Process`.
+## Fait le 22/10 (v0.9.0 et v0.9.1, poussées)
+- J9 clos en **v0.9.0** (calendrier option A : lecture, expansion, vues, `.ics`/CSV, rechargement `tl-import --calendars`).
+- Courrier : clic droit complet (Répondre, Répondre à tous, Transférer, Catégoriser, Suivi, Actions rapides, Règles ›
+  Créer une règle… / Gérer, Déplacer, Courrier indésirable ›, Archiver, Supprimer) ; clic droit direct sur le drapeau et
+  sur les catégories. **Bogue réparé** : les entrées des sous-menus du clic droit ne faisaient rien (rappels d'une portée
+  Leptos détruite ; le sous-menu n'est plus mémorisé que par son libellé) ; cas `ui_check` de non-régression.
+- Expéditeurs bloqués/approuvés (`junk.json` du dossier de configuration), appliqués à l'arrivée avant réponse
+  automatique et règles ; boîte « Options du courrier indésirable » ; bouton « Télécharger les images ».
+- Champ « De » (`Draft.from_account`) : compte du message d'origine, sinon du dossier affiché ; sans compte,
+  « (par défaut) ». Avant, un nouveau message partait toujours de paul@ : le cas J7 de ui_check envoyait depuis le vrai
+  compte ; 13 messages et 2 brouillons de test supprimés de paul@ avec l'accord de Paul (`crates/sync/examples/delete_ids`),
+  serveur = local (1 281). Cas J7 corrigé (envoi depuis le compte de test) + cas « expéditeur bloqué ».
+- `ui_check` : 8 cas (J3b, J5, J6 ×2, J7 ×2, J9, clic droit) ; `UI_ONLY=<préfixe>` pour n'en lancer qu'un.
+- Piège : un script Python de `target/tl-scripts/` peut déjà exister sous le même nom (l'outil Write refuse alors
+  d'écrire) : vérifier le résultat de Write avant de lancer le script.
 
 ## Fait le 21/10 après la v0.8.0 (non publié, pas d'étiquette)
 - Schéma v9 : `account.rules_on_arrival` ; J8 POP3 abandonné.
@@ -22,43 +56,44 @@ Fait : construction à jour (`aa30da2`), `ui_check` 5/5 au vert, ThunderLook rel
 - Outils (`crates/sync/examples`) : compare, find, dates, subscriptions, copy_rules, rehome, cross_move, junk_roundtrip, mkdir, account_rules. Dossier de test : `$CLAUDE_JOB_DIR/tmp/j7store` (comptes test et test2).
 
 ## Où on en est
-- Livré : J0 à J5 et J3b. La version courante est **v0.6.0** (étiquette git, commit `405e624`).
-- Règle de version : une mineure par jalon, voir `notes/dev.md` § Versions. Le J6 clora en **v0.7.0**.
-- J6 (règles et actions rapides) **en cours**. Fait le 2026-10-20 :
-  1. `crates/rules/examples/dump.rs` : identique au prototype Python sur les 3 flux réels (60 règles, 198 textes et 611 nombres comparés, `target/tl-scripts/compare_rules.py`). `b5d4aea`
-  2. Schéma **v7** : table `rule` (origine `pst:<fai>` ou chemin du `.rwz`, position, nom, active, version, JSON, octets bruts). Flux du PST importé à l'ouverture (une seule fois : la case « active » est gardée), `.rwz` par `Mailbox::import_rwz` (réimport = remplacement). `97e857d`
-  3. Dossiers cibles : `FolderResolver` (EntryID du dossier dans `folder.props` 0x0FFF, sinon nom replié ; entre homonymes, le plus rempli, avec avertissement). Flux du PST : 7/7 par EntryID ; `.rwz` : tout par le nom. `79b4fb0`
-  4. et 5. Moteur `Mailbox::run_rules` (`crates/mailbox/src/rule_run.rs`) : simulation ou application, évaluation parallèle, actions sans objet retirées. Critère du jalon tenu sur une copie. `234bd55`
+- Livré : J0 à J7, J3b et J9 (J8 abandonné). Version courante **v0.9.1** ; prochaine : v0.9.2 (fusion J7), puis 0.10.0.
+- `data/store` au schéma 9 ; comptes paul@ (source 3), electromagnetisme (4), angeliquemaillet (5) ; le cas J7 de
+  `ui_check` ajoute puis retire le compte de test.
+- ADI Facturation : hors sujet pour l'instant, à la demande de Paul. Ne pas relancer.
 
-## Mesures du J6 (à reporter dans `PLAN.md` à la clôture)
-- Simulation, Boîte de réception (22 188 éléments), 12 règles actives du PST : 74 messages modifiés, 1,5 s à chaud (168 s avant parallélisation, à froid).
-- Simulation, archive entière (217 257) : `regles240913.rwz` 132 264 changements, `regles.rwz` 130 892 ; environ 160-180 s à froid.
-- Application sur une copie (`$CLAUDE_JOB_DIR/tmp/apply` : base copiée, `.eml` de la Boîte de réception copiés, pas de jonction) :
-  - flux du PST : 74 modifiés (73 déplacés, 1 catégories retirées), puis rejeu : 0 ;
-  - `regles240913.rwz` : 219 déplacés, rejeu : 0 ; `regles.rwz` : 0 (déjà couvert).
-  - Contrôle : [electromagnetisme.fr] +35 (28 + 7), CEM +7, LBC | FB +5, Ebay +3, Hébergements WEB +2, Accusés +28.
-- Règle écartée : « OXALIS » (carnet d'adresses : J9). Sous-chaînes fidèles à Outlook : « one.com » attrape « aroma-zone.com ».
+## Prochain jalon
+- Fusion des points J7 (agent), puis écriture du calendrier, puis J10 Contacts (voir « À reprendre en premier » § 2).
 
-## Points ouverts du J6
-- Homonymes (`.rwz` d'anciens PST) : « le plus rempli » n'est pas cohérent d'un dossier à l'autre (« listes Oxalis » dans `La Ruche - Oxalis1`, « Comox » dans une autre copie de l'arborescence). Prévoir le choix du dossier dans l'interface, ou préférer les candidats d'une même branche.
-- Ouvrir `data/store` avec le code actuel le migre au schéma 7 : l'application v0.6.0 installée refusera alors la base. Reconstruire l'application avant (ou travailler sur copie : `target/tl-scripts/mini_store.py [--props]`).
-- La phrase « l'assigner à la ADE spécifiée » est le libellé d'OUTLOOK.EXE tel quel (`%s` = catégorie).
+## Transition Outlook ↔ ThunderLook (2026-10-21)
+- Outlook basculé sur son profil **« Outlook » (IMAP, déjà configuré)** à la place de « pop-original » (POP3, copie gardée 14 jours puis effacée) : plus rien n'est retiré du serveur. PST `A:\Fichiers Outlook\Outlook_300923.pst` rattaché comme fichier de données secondaire (historique visible ; règles inactives pendant la transition).
+- Sauvegardes avant bascule : `A:\Fichiers Outlook\Outlook_300923_BACKUP_2026-10-21_1638.pst` (SHA-256 identique) et `Outlook_profils_BACKUP_2026-10-21_1638.reg`. Retour arrière : `DefaultProfile` = `pop-original`.
+- `paul@adam-declic.fr` ajouté dans ThunderLook par Paul (source 3, règles à l'arrivée décochées) : 1 256 messages, identiques au serveur dossier par dossier (`crates/sync/examples/compare.rs`) ; Boîte de réception 942 dans Outlook, le serveur et ThunderLook.
+- Profil IMAP d'Outlook : comptes paul@, contact@electromagnetisme.fr, contact@angeliquemaillet.art.
+- ThunderLook (21/10) : comptes paul@ (source 3, règles du PST copiées dans `account:3`, règles à l'arrivée actives), contact@electromagnetisme.fr (4 ; 94 messages = serveur), contact@angeliquemaillet.art (5 ; 5 = serveur). Mots de passe saisis par Paul (`target/tl-scripts/prefill_account.mjs` préremplit le formulaire par CDP, port 9336).
+- contact@hypso-stephaniemilliot.fr (boîte d'une cliente, réception seulement) : pas de compte ; redirection Hostinger vers paul@ avec copie gardée (FO8d8cf98a0366be8478d6796b31ff), confirmée le 21/10.
+- Dossiers créés sur le serveur de paul@ pour les règles : Accusés, LBC | FB, Allo Voisins, Ebay & Paypal, Hébergements WEB (noms IMAP en UTF-7 modifié).
+- Outlook se pilote en lecture par COM (`New-Object -ComObject Outlook.Application` ; `GetActiveObject` échoue quand Outlook a été lancé depuis la session). Écritures dans la messagerie (supprimer, déplacer) refusées par le garde-fou : à faire par Paul.
 
-## Données de test du J6 (non versionnées)
-- `data/samples/regles240913.rwz` (30 règles, version 0x140000) et `data/samples/regles.rwz` (17 règles, version 0x124F80).
-- Flux du PST : contenu associé `IPM.RuleOrganizer` de la Boîte de réception (fai id 19), propriété `0x6802`.
-  - Extrait par `target/tl-scripts/fai_rules.py` dans `data/rea/pst-rules-19.bin` (13 règles).
-- Spec communautaire en local : `data/specs/outlook_rule_spec.txt`.
-- Résultats REA : `notes/rea/regles-outlook.md`. Catalogue des 104 éléments avec libellés : `notes/rea/rule_catalog.md`.
-- Outil : `cargo run --release -p thunderlook-mailbox --example rules -- <dossier> [x.rwz…] [--run f<id> [--subfolders] [--apply] [--only <origine>]]`.
+## Incident du 21/10 au soir (réparé)
+- En appliquant les règles de paul@ à sa Boîte de réception, 111 messages ont été déplacés vers les dossiers homonymes de contact@electromagnetisme.fr : cibles de règles désignées par le seul nom IMAP (`imap:INBOX.…`), dossiers créés dans les deux comptes. Supprimés de paul@, déposés chez electromagnetisme, rien de perdu.
+- Correction `2b0354e` : cibles `imap:<source>:<nom>` ; déplacement entre comptes = dépôt puis suppression (`after_append`) ; INTERNALDATE au dépôt. Test de non-régression `crates/mailbox/tests/account_rules.rs`.
+- Réparation (`crates/sync/examples/rehome.rs`) : 111 messages ramenés dans les dossiers de paul@ (32 Allo Voisins, 33 Accusés, 26 LBC | FB, 20 Ebay & Paypal), dates d'origine conservées ; paul@ 1 271 = serveur, electromagnetisme 94 = serveur. Règles recopiées (`account:3`, `account:4`), règles à l'arrivée réactivées pour ces deux comptes.
 
-## Reste à faire pour le J6, dans l'ordre
-6. Boîte « Règles et alertes » : liste, case active, description, Exécuter maintenant (rapport de simulation, puis appliquer), Importer `.rwz`.
-7. Actions rapides : défauts et éditeur.
-8. Clôture :
-   - mesures dans `PLAN.md`, cas J6 dans `tools/ui_check.mjs` ;
-   - version 0.7.0 dans tous les `Cargo.toml` et dans `tauri.conf.json` ;
-   - étiquette `v0.7.0`, commit et push.
+## Comptes de test (Hostinger, offre gratuite « Free Business Email » d'adam-declic.fr, créés via le MCP Hostinger)
+- `thunderlook-test@adam-declic.fr` (critère du J7) et `thunderlook-test2@adam-declic.fr` (expéditeur extérieur : réponse automatique).
+- Identifiants : `data/test-account.json`, `data/test-account2.json` (non versionnés). IMAP `imap.hostinger.com:993`, SMTP `smtp.hostinger.com:465`, TLS.
+- Outils : `target/tl-scripts/server_side.py` (send / seen / delete / list ; `TL_ACCOUNT`, `TL_TO`), `check_account.py`.
+- Exemples (`crates/sync/examples`) : `probe`, `sync` (crée le compte dans un dossier de test et remet le mot de passe), `ops_roundtrip`, `send_roundtrip`, `idle`, `autoreply_roundtrip`. Dossier de test habituel : `$CLAUDE_JOB_DIR/tmp/j7store` (jamais `data/store`).
+- MCP Hostinger : `claude mcp add -s user --transport http hostinger https://mcp.hostinger.com` ; OAuth fait ; `mcp__hostinger__execute` autorisé par Paul.
+
+## Points ouverts du J7
+- Créer, renommer, supprimer un **dossier** d'un compte n'est pas reporté sur le serveur (seulement les messages).
+- IMAP en STARTTLS (port 143) non pris en charge (TLS 993 seulement) ; SMTP accepte les deux.
+- Mot de passe rangé par adresse dans le gestionnaire d'identifiants : retirer le compte d'un dossier de données le retire pour tous (le cas J7 de `ui_check` l'ôte ; l'exemple `sync` le remet).
+- Le message d'origine n'est pas marqué « répondu » / « transféré » après l'envoi.
+- Règles à l'arrivée : toutes les règles actives, comme Outlook ; une règle qui déplace vers un dossier du PST retire le message du serveur.
+- Un compte supprimé garde sa surveillance IDLE jusqu'à 10 min (fin de l'attente en cours).
+- Notification Windows : pas d'action au clic.
 
 ## Méthode et pièges
 - Ne jamais réécrire un fichier source avec `Set-Content -Encoding Ascii` ni `utf8` sous PowerShell 5.1 (accents perdus, BOM) : passer par Python (`io.open(..., encoding="utf-8", newline="\n")`) ou l'outil d'édition. Heredocs bash avec apostrophes : écrire le script dans `target/tl-scripts/`.
