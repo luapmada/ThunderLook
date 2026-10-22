@@ -281,3 +281,20 @@ Registre `HKCU\Software\Microsoft\Office\16.0\Outlook` : `DefaultProfile = Outlo
 5. Calendrier synchronisé : seul « Calendrier » (pas « Calendar Annexe »), sur ±90 jours : à conserver ?
 6. Option B comme cible finale, ou maintien durable d'Outlook comme pivot MPE (option A) ; une alternative hors MPE
    (CalDAV/CardDAV + DAVx⁵) n'est à étudier que sur demande.
+
+
+## 9. Journal d'exécution
+- **2026-10-22, étape 1 (sauvegardes)**, avec l'accord de Paul :
+  - MPE fermé proprement ; `%APPDATA%\MyPhoneExplorer` copié dans
+    `A:\AI_related\Claude_Code_Work\mpe-backup6-10-22\MyPhoneExplorer` (1 032 fichiers, 133 010 584 octets,
+    identiques à la source). Version de MPE lue sur l'exécutable : 2.03.
+  - Outlook fermé proprement ; PST copié en `A:\Fichiers Outlook\Outlook_300923_BACKUP_2026-10-22_MPE.pst`
+    (4 146 799 616 octets, SHA-256 identique, 21B088F5C8F202BB…). Outlook relancé par `explorer.exe`, MPE relancé.
+  - **Reste à faire par Paul** : export `.vcf` des contacts du téléphone principal (appli Contacts Samsung ou Smart
+    Switch) — le téléphone n'est pas joignable par adb, et c'est la seule copie indépendante de MPE.
+- **2026-10-22, étape 2 (S20 FE neutralisé)** : MPE fermé, dans `samsung SM-G781B […]\settings.dat`,
+  `MultiSyncOnAutoConnect` et `MultiSyncOnStart` passés de 1 à 0 (seuls octets changés ; script
+  `target/tl-scripts/mpe_s20_noauto.py`). Valeurs conservées après relance de MPE. Le SM-S916U1 n'est pas touché.
+  Retour arrière : restaurer ce fichier depuis la sauvegarde de l'étape 1.
+- **En attente** : étape 3 (repointer sur « Outlook », synchro manuelle à faire avec Paul devant la fenêtre de
+  confirmation) ; étape 5 (banc d'essai S20 FE) : Paul doit confirmer que le S20 FE peut être vidé et le connecter.
