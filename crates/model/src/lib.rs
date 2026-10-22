@@ -567,6 +567,10 @@ pub struct RuleDraft {
     pub rule_set: String,
     /// Remarque affichée dans la boîte (règles à l'arrivée désactivées, fichier de données sans compte).
     pub note: Option<String>,
+    /// Section du volet des dossiers (`s<source>`) du compte qui recevra la règle : un dossier de destination hors de
+    /// cette section (PST, autre compte) retire les messages du serveur, ce que la boîte signale.
+    #[serde(default)]
+    pub account_section: Option<String>,
 }
 
 /// Règle créée depuis un message : conditions cochées et dossier de destination.

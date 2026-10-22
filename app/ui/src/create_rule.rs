@@ -13,6 +13,16 @@ use crate::{
     state::{Dialog, use_ui},
 };
 
+/// Section du volet des dossiers (`s<source>`) qui contient le dossier `folder`.
+fn section_of(ui: crate::state::Ui, folder: &str) -> Option<String> {
+    fn has(folders: &[thunderlook_model::Folder], id: &str) -> bool {
+        folders.iter().any(|f| f.id == id || has(&f.children, id))
+    }
+    ui.tree.with_untracked(|t| {
+        t.as_ref()?.sections.iter().filter(|s| s.id.starts_with('s') && s.id != "searches").find(|s| has(&s.folders, folder)).map(|s| s.id.clone())
+    })
+}
+
 /// « Nom <adresse> », ou ce qui est connu des deux.
 fn who(name: &str, addr: &str) -> String {
     match (name.trim(), addr.trim()) {
@@ -232,6 +242,22 @@ pub fn CreateRuleDialog() -> impl IntoView {
                 <input type="checkbox" prop:checked=move || run_now.get() on:change=move |ev| run_now.set(event_target_checked(&ev)) />
                 <span>{run_label}</span>
             </label>
+            // Règle d'un compte qui déplace hors du compte (PST, autre compte) : comme Outlook en IMAP, le message
+            // quitte le serveur ; on le dit avant l'enregistrement.
+            {
+                let account = d.account_section.clone();
+                move || {
+                    let target = folder.get();
+                    let away = move_on.get()
+                        && !target.is_empty()
+                        && account.as_ref().is_some_and(|a| section_of(ui, &target).as_ref() != Some(a));
+                    away.then(|| view! {
+                        <p class="rules-warn" role="note">
+                            "ⓘ Ce dossier n'est pas dans le compte : comme dans Outlook, les messages déplacés par la règle seront retirés du serveur, et leur seule copie sera celle de ThunderLook."
+                        </p>
+                    })
+                }
+            }
             <p class="dialog-note">{format!("Jeu de règles : {}", d.rule_set)}</p>
             {d.note.map(|n| view! { <p class="dialog-note">{format!("ⓘ {n}")}</p> })}
         }

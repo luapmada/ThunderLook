@@ -207,3 +207,62 @@ fn folder_rename_and_delete_follow_on_server() {
     drop((c, mb));
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// Point ouvert du J7 : une règle de compte ne déplace jamais vers un homonyme hors du compte quand son dossier a
+/// disparu (le message quitterait le serveur), et une cible explicite hors du compte est signalée.
+#[test]
+fn account_rules_stay_in_their_account() {
+    let dir = std::env::temp_dir().join(format!("tl-account-away-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let c = thunderlook_store::open(&dir).unwrap();
+    let (_, own) = account(&c, 3, "paul@example.org");
+    let (_, other) = account(&c, 4, "contact@example.org");
+    // Un PST avec un dossier « Accusés » (homonyme).
+    c.execute("INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at) VALUES (1, 'pst', 'x', 'x', 'Archives', 0, 0)", [])
+        .unwrap();
+    c.execute(
+        "INSERT INTO folder (source_id, parent_id, nid, name, role, container_class, hidden, position) VALUES (1, NULL, 0, 'Accusés', 'folder', 'IPF.Note', 0, 0)",
+        [],
+    )
+    .unwrap();
+    let pst = c.last_insert_rowid();
+    let r = FolderResolver::load(&c).unwrap();
+    let mine = b"imap:3:INBOX.Accus&AOk-s";
+    assert_eq!(r.resolve_for(Some(3), mine, "Accusés"), FolderMatch::EntryId(own));
+    // Dossier du compte disparu : hors règle de compte, le nom retrouverait un homonyme (le plus rempli, ici le PST
+    // ou l'autre compte) ; dans le jeu du compte, seulement le compte : introuvable, la règle ne déplace rien.
+    let gone = b"imap:3:INBOX.Disparu";
+    assert!(matches!(r.resolve(gone, "Accusés"), FolderMatch::Name { homonyms: 3, .. }));
+    c.execute("UPDATE folder SET name = 'Accusés (ancien)' WHERE id = ?1", [own]).unwrap();
+    let r = FolderResolver::load(&c).unwrap();
+    assert_eq!(r.resolve_for(Some(3), gone, "Accusés"), FolderMatch::Missing);
+    assert!(matches!(r.resolve_for(None, gone, "Accusés").folder(), Some(f) if f == pst || f == other));
+
+    // Cible explicite hors du compte (autre compte) : avertie dans « Règles et alertes ».
+    let rule = thunderlook_rules::Rule {
+        name: "vers ailleurs".into(),
+        active: true,
+        xr: 0,
+        unknown: 0,
+        magic: [0; 3],
+        elements: vec![thunderlook_rules::Element {
+            id: 0x12C,
+            values: vec![thunderlook_rules::Value::Folder {
+                a: 0,
+                folder_entry_id: b"imap:4:INBOX.Accus&AOk-s".to_vec(),
+                store_entry_id: vec![],
+                name: "Accusés".into(),
+                tail: 0,
+            }],
+        }],
+        error: None,
+        raw: vec![],
+    };
+    let w = r.warnings_for(&rule, Some(3));
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("hors du compte") && w[0].contains("retirés du serveur"), "{w:?}");
+    assert!(r.warnings_for(&rule, Some(4)).is_empty(), "dans son propre compte : rien à dire");
+    assert!(r.warnings(&rule).is_empty(), "règle d'un PST : pas de serveur");
+    drop(c);
+    let _ = fs::remove_dir_all(&dir);
+}

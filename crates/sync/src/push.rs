@@ -104,6 +104,20 @@ async fn attach(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current
     Ok(())
 }
 
+/// Garde-fou avant de retirer du serveur un message déplacé hors du compte : sa copie locale existe (ligne `message`
+/// et `.eml` non vide, qui commence comme un message). Sinon l'opération reste en attente, avec son erreur.
+pub fn local_copy_ok(conn: &Connection, data_dir: &Path, id: i64) -> Result<()> {
+    let eml: Option<String> = conn.query_row("SELECT eml_path FROM message WHERE id = ?1", [id], |r| r.get(0)).optional().map_err(e)?;
+    let eml = eml.ok_or_else(|| format!("copie locale du message m{id} absente : il n'est pas retiré du serveur"))?;
+    let path = thunderlook_store::resolve(data_dir, &eml);
+    let mut head = [0u8; 64];
+    let n = std::fs::File::open(&path).and_then(|mut f| std::io::Read::read(&mut f, &mut head)).unwrap_or(0);
+    if n == 0 || !head[..n].contains(&b':') {
+        return Err(format!("copie locale du message m{id} illisible ({eml}) : il n'est pas retiré du serveur"));
+    }
+    Ok(())
+}
+
 /// Quitte la boîte sélectionnée avant de la renommer ou de la supprimer, sans CLOSE (qui effacerait les messages
 /// marqués « supprimé » par un autre client) : EXAMINE de la Boîte de réception, en lecture seule.
 async fn leave(s: &mut ImapSession, current: &mut Option<String>) -> Result<()> {
@@ -193,6 +207,11 @@ async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &
                 if pending {
                     return Ok(false);
                 }
+            }
+            // Message gardé localement hors du compte (règle ou déplacement vers un PST) : retiré du serveur
+            // seulement si sa copie locale est bien là (ligne et `.eml` lisible, non vide).
+            if let Some(id) = p.message {
+                local_copy_ok(conn, data_dir, id)?;
             }
             let uid = p.uid.ok_or("UID manquant")?;
             select(s, current, &p.mailbox).await?;
@@ -297,4 +316,40 @@ pub async fn push(s: &mut ImapSession, conn: &Connection, data_dir: &Path, accou
         }
     }
     Ok((done, last_error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Point ouvert du J7 : un message déplacé hors du compte (règle vers un PST) n'est retiré du serveur que si sa
+    /// copie locale est écrite.
+    #[test]
+    fn server_copy_kept_without_local_copy() {
+        let dir = std::env::temp_dir().join(format!("tl-push-guard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let c = thunderlook_store::open(&dir).unwrap();
+        c.execute("INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at) VALUES (1, 'pst', 'x', 'x', 'x', 0, 0)", []).unwrap();
+        c.execute("INSERT INTO folder (source_id, parent_id, nid, name, role, container_class, hidden, position) VALUES (1, NULL, 0, 'Archives', 'folder', NULL, 0, 0)", [])
+            .unwrap();
+        let folder = c.last_insert_rowid();
+        c.execute(
+            "INSERT INTO message (folder_id, nid, message_class, subject, from_name, from_addr, to_line, cc_line, message_flags, is_read, flag_status,
+                importance, sensitivity, size, attachment_count, body_kind, preview, eml_path, props)
+             VALUES (?1, 0, 'IPM.Note', 's', '', '', '', '', 0, 1, 0, 1, 0, 0, 0, 'text', '', 'eml/1/0000/1.eml', x'')",
+            [folder],
+        )
+        .unwrap();
+        let id = c.last_insert_rowid();
+        assert!(local_copy_ok(&c, &dir, id).unwrap_err().contains("illisible"), "fichier absent");
+        let path = thunderlook_store::resolve(&dir, "eml/1/0000/1.eml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"").unwrap();
+        assert!(local_copy_ok(&c, &dir, id).is_err(), "fichier vide");
+        std::fs::write(&path, b"From: a@example.org\r\nSubject: s\r\n\r\ncorps\r\n").unwrap();
+        assert!(local_copy_ok(&c, &dir, id).is_ok());
+        assert!(local_copy_ok(&c, &dir, id + 1).unwrap_err().contains("absente"), "ligne absente");
+        drop(c);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
