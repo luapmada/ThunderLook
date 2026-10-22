@@ -115,3 +115,95 @@ fn delimiter_in_folder_name_stays_one_folder() {
     drop((c, mb));
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// Point ouvert du J7 : renommer, déplacer, supprimer un dossier de compte est reporté sur le serveur (RENAME,
+/// DELETE), avec ses sous-dossiers, et les règles qui le visent suivent.
+#[test]
+fn folder_rename_and_delete_follow_on_server() {
+    use thunderlook_model::FolderOp;
+    let dir = std::env::temp_dir().join(format!("tl-account-rename-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let c = thunderlook_store::open(&dir).unwrap();
+    let (_, target) = account(&c, 3, "paul@example.org");
+    let top: i64 = c.query_row("SELECT id FROM folder WHERE source_id = 3 AND role = 'ipm'", [], |r| r.get(0)).unwrap();
+    c.execute(
+        "INSERT INTO folder (source_id, parent_id, nid, name, role, container_class, hidden, position, imap_name) VALUES (3, ?1, 0, 'Éléments supprimés', 'deleted', 'IPF.Note', 0, 5, 'INBOX.Trash')",
+        [top],
+    )
+    .unwrap();
+    // Un dossier du même nom dans un autre compte : jamais touché.
+    let (_, other) = account(&c, 4, "contact@example.org");
+    drop(c);
+    let rwz = dir.join("regles.rwz");
+    fs::write(&rwz, stream()).unwrap();
+    let mut mb = Mailbox::open(&dir).unwrap();
+    mb.import_rwz(&rwz).unwrap();
+    let origin = mb.rules().unwrap()[0].origin.clone();
+    mb.copy_rules_to_account(&origin, 3).unwrap();
+    mb.copy_rules_to_account(&origin, 4).unwrap();
+    let sub = mb.folder_op(&FolderOp::Create { parent_id: format!("f{target}"), name: "Sous".into() }).unwrap().created_id.unwrap();
+
+    let c = thunderlook_store::open(&dir).unwrap();
+    let imap = |id: i64| -> (String, String) { c.query_row("SELECT name, imap_name FROM folder WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap() };
+    let pending = || -> Vec<String> {
+        c.prepare("SELECT kind || ' ' || mailbox || ' ' || arg FROM imap_pending ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    let rule_target = |source: i64| -> (String, String) {
+        let json: String = c.query_row("SELECT rule_json FROM rule WHERE origin = ?1", [format!("account:{source}")], |r| r.get(0)).unwrap();
+        let rule: thunderlook_rules::Rule = serde_json::from_str(&json).unwrap();
+        let thunderlook_rules::Value::Folder { folder_entry_id, name, .. } = &rule.elements[1].values[0] else { panic!() };
+        (String::from_utf8(folder_entry_id.clone()).unwrap(), name.clone())
+    };
+    let sub_id: i64 = sub[1..].parse().unwrap();
+    assert_eq!(imap(sub_id).1, "INBOX.Accus&AOk-s.Sous");
+
+    // Renommer : le séparateur du nouveau nom est remplacé ; le sous-dossier et la règle suivent.
+    mb.folder_op(&FolderOp::Rename { id: format!("f{target}"), name: "Accusés 2026.1".into() }).unwrap();
+    assert_eq!(imap(target), ("Accusés 2026\u{2024}1".into(), "INBOX.Accus&AOk-s 2026&ICQ-1".into()));
+    assert_eq!(imap(sub_id).1, "INBOX.Accus&AOk-s 2026&ICQ-1.Sous");
+    assert_eq!(rule_target(3), ("imap:3:INBOX.Accus&AOk-s 2026&ICQ-1".into(), "Accusés 2026\u{2024}1".into()));
+    assert_eq!(rule_target(4).0, "imap:4:INBOX.Accus&AOk-s", "l'autre compte n'est pas touché");
+    assert_eq!(imap(other).1, "INBOX.Accus&AOk-s");
+    assert_eq!(
+        pending(),
+        vec![
+            r#"mkdir INBOX.Accus&AOk-s.Sous {}"#.to_string(),
+            r#"rename INBOX.Accus&AOk-s {"to":"INBOX.Accus&AOk-s 2026&ICQ-1"}"#.into(),
+        ]
+    );
+
+    // Annuler : retour au nom d'origine, sur le serveur aussi.
+    mb.undo().unwrap();
+    assert_eq!(imap(target).1, "INBOX.Accus&AOk-s");
+    assert_eq!(rule_target(3).0, "imap:3:INBOX.Accus&AOk-s");
+    assert_eq!(pending().last().unwrap(), r#"rename INBOX.Accus&AOk-s 2026&ICQ-1 {"to":"INBOX.Accus&AOk-s"}"#);
+
+    // Supprimer : comme dans l'interface (et Outlook), le dossier va dans « Éléments supprimés ».
+    mb.folder_op(&FolderOp::Delete { id: format!("f{target}") }).unwrap();
+    assert_eq!(imap(target).1, "INBOX.Trash.Accus&AOk-s");
+    assert_eq!(imap(sub_id).1, "INBOX.Trash.Accus&AOk-s.Sous");
+    assert_eq!(rule_target(3).0, "imap:3:INBOX.Trash.Accus&AOk-s");
+    assert_eq!(pending().last().unwrap(), r#"rename INBOX.Accus&AOk-s {"to":"INBOX.Trash.Accus&AOk-s"}"#);
+
+    // Supprimer dans « Éléments supprimés » : définitif, sous-dossiers d'abord.
+    mb.folder_op(&FolderOp::Delete { id: format!("f{target}") }).unwrap();
+    let p = pending();
+    assert_eq!(&p[p.len() - 2..], [r#"rmdir INBOX.Trash.Accus&AOk-s.Sous {}"#, r#"rmdir INBOX.Trash.Accus&AOk-s {}"#]);
+    assert_eq!(imap(other).1, "INBOX.Accus&AOk-s");
+
+    // Création annulée avant d'atteindre le serveur : ni mkdir ni rmdir.
+    let inbox: i64 = c.query_row("SELECT id FROM folder WHERE source_id = 3 AND role = 'inbox'", [], |r| r.get(0)).unwrap();
+    mb.folder_op(&FolderOp::Create { parent_id: format!("f{inbox}"), name: "Éphémère".into() }).unwrap();
+    let before = pending().len();
+    mb.undo().unwrap();
+    let p = pending();
+    assert_eq!(p.len(), before - 1);
+    assert!(!p.iter().any(|x| x.contains("&AMk-ph")), "{p:?}");
+    drop((c, mb));
+    let _ = fs::remove_dir_all(&dir);
+}

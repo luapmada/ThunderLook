@@ -98,6 +98,58 @@ async fn attach(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current
     Ok(())
 }
 
+/// Quitte la boîte sélectionnée avant de la renommer ou de la supprimer, sans CLOSE (qui effacerait les messages
+/// marqués « supprimé » par un autre client) : EXAMINE de la Boîte de réception, en lecture seule.
+async fn leave(s: &mut ImapSession, current: &mut Option<String>) -> Result<()> {
+    if current.take().is_some() {
+        s.examine("INBOX").await.map_err(e)?;
+    }
+    Ok(())
+}
+
+/// Boîte `mailbox` sur le serveur : son séparateur (`Some("")` sans hiérarchie), `None` si elle n'existe pas.
+async fn listed(s: &mut ImapSession, mailbox: &str) -> Result<Option<String>> {
+    let names: Vec<_> = s.list(Some(""), Some(mailbox)).await.map_err(e)?.try_collect().await.map_err(e)?;
+    Ok(names.iter().find(|n| n.name() == mailbox).map(|n| n.delimiter().unwrap_or("").to_string()))
+}
+
+/// Abonnements de `mailbox` et de ses sous-dossiers : (nom complet, partie qui suit `mailbox`).
+async fn subscribed_under(s: &mut ImapSession, mailbox: &str) -> Result<Vec<(String, String)>> {
+    let names: Vec<_> = s.lsub(Some(""), Some(&format!("{mailbox}*"))).await.map_err(e)?.try_collect().await.map_err(e)?;
+    Ok(names
+        .iter()
+        .filter_map(|n| {
+            let delimiter = n.delimiter().unwrap_or("");
+            thunderlook_mailbox::imap_under(n.name(), mailbox, delimiter).map(|rest| (n.name().to_string(), rest.to_string()))
+        })
+        .collect())
+}
+
+/// Après un `RENAME` : les opérations antérieures encore en attente (en échec) suivent le nouveau nom.
+pub fn retarget_pending(conn: &Connection, account: i64, before: i64, old: &str, new: &str, delimiter: &str) -> Result<()> {
+    let rows: Vec<(i64, String, String)> = conn
+        .prepare("SELECT id, mailbox, arg FROM imap_pending WHERE account_id = ?1 AND id < ?2")
+        .map_err(e)?
+        .query_map(params![account, before], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(e)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(e)?;
+    let renamed = |name: &str| thunderlook_mailbox::imap_under(name, old, delimiter).map(|rest| format!("{new}{rest}"));
+    for (id, mailbox, arg) in rows {
+        let mut value: serde_json::Value = serde_json::from_str(&arg).unwrap_or(serde_json::Value::Null);
+        let to = value.get("to").and_then(|v| v.as_str()).and_then(renamed);
+        if let Some(to) = &to {
+            value["to"] = serde_json::Value::String(to.clone());
+        }
+        let mb = renamed(&mailbox);
+        if mb.is_some() || to.is_some() {
+            conn.execute("UPDATE imap_pending SET mailbox = ?2, arg = ?3 WHERE id = ?1", params![id, mb.unwrap_or(mailbox), value.to_string()])
+                .map_err(e)?;
+        }
+    }
+    Ok(())
+}
+
 /// Rejoue une opération ; `Ok(false)` : à différer sans compter de tentative (suppression qui attend un dépôt).
 async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &mut Option<String>, account: &Account, p: &Pending) -> Result<bool> {
     let target = p.arg.get("to").and_then(|v| v.as_str()).map(str::to_string);
@@ -165,6 +217,40 @@ async fn run(s: &mut ImapSession, conn: &Connection, data_dir: &Path, current: &
             s.create(&p.mailbox).await.map_err(e)?;
             // Abonnement : Outlook n'affiche en IMAP que les dossiers abonnés.
             s.subscribe(&p.mailbox).await.map_err(e)?;
+        }
+        "rename" => {
+            let to = target.ok_or("nouveau nom manquant")?;
+            // Le dossier sélectionné peut être celui qu'on renomme (ou l'un de ses sous-dossiers).
+            leave(s, current).await?;
+            // Noms abonnés du dossier et de ses sous-dossiers, avant (le serveur renomme les sous-dossiers avec lui).
+            let subscribed = subscribed_under(s, &p.mailbox).await?;
+            if let Err(x) = s.rename(&p.mailbox, &to).await {
+                // Déjà fait (relance après une coupure) : l'ancien nom n'existe plus, le nouveau si.
+                if !(listed(s, &to).await?.is_some() && listed(s, &p.mailbox).await?.is_none()) {
+                    return Err(format!("{} → {to} : {x}", p.mailbox));
+                }
+            }
+            // Abonnements : Outlook n'affiche en IMAP que les dossiers abonnés, et tous les serveurs ne les déplacent pas.
+            for (old, rest) in &subscribed {
+                let _ = s.unsubscribe(old).await;
+                let _ = s.subscribe(format!("{to}{rest}")).await;
+            }
+            if subscribed.is_empty() {
+                let _ = s.subscribe(&to).await;
+            }
+            // Opérations plus anciennes restées en échec : elles visent désormais le nouveau nom.
+            let delimiter = listed(s, &to).await?.unwrap_or_default();
+            retarget_pending(conn, account.id, p.id, &p.mailbox, &to, &delimiter)?;
+        }
+        "rmdir" => {
+            leave(s, current).await?;
+            let _ = s.unsubscribe(&p.mailbox).await;
+            if let Err(x) = s.delete(&p.mailbox).await {
+                // Déjà supprimé : rien à faire.
+                if listed(s, &p.mailbox).await?.is_some() {
+                    return Err(format!("{} : {x}", p.mailbox));
+                }
+            }
         }
         other => return Err(format!("opération « {other} » non prise en charge")),
     }
