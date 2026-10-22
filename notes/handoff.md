@@ -8,6 +8,7 @@
    « répondu », `open-item` sélectionne le message, champs Port/Chiffrement d'« Ajouter un compte »). Correctif de la
    fusion : un compte retiré pendant que son dossier est affiché laissait une liste vide (`77bcc14`).
    Script de vérification : `target/tl-scripts/verify_v092.mjs` (coupe puis rétablit « marquer comme lu »).
+- 23/10 : molette validée par CDP (d371b3d) ; palette des 25 couleurs d'Outlook appliquée et rendez-vous remplis de la couleur de leur catégorie ; clic droit du calendrier (créneau : Nouveau rendez-vous / journée entière ; rendez-vous : Privé, Afficher en tant que, Classer, Supprimer ; Transférer et réunions/périodiques inactifs). Écriture du calendrier déjà faite (8eb2371). REA : RT_MENU absents d'OUTLOOK.EXE, menus du calendrier = barre Office (voir REA-LIMITES.md). Reste : drapeaux/indicateurs de la liste de courrier (relevé à faire, demander l'accord avant de piloter la vue d'Outlook), tester Privé/Afficher en tant que/Classer sur un rendez-vous de test (écrit dans Outlook ; non testé), non publié (pas de version). Test d'interface : instance unique, fermer ThunderLook avant ; compiler avec CARGO_TARGET_DIR séparé.
 2. **22/10 nuit — demande de Paul en cours** : couleurs du calendrier comme Outlook (catégories, disponibilité,
    drapeaux, indicateurs), menus clic droit d'Outlook (Paul choisit lesquels intégrer), défilement à la roulette.
    - Relevés faits : `notes/outlook-couleurs-menus.md` (palette des 25 couleurs, menus exacts). **Faits sans REA** :
