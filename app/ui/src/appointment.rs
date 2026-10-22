@@ -40,17 +40,46 @@ fn target_calendar(ui: Ui) -> Option<String> {
 
 /// Nouveau rendez-vous (Ctrl+N, ruban), le jour affiché.
 pub fn open_new(ui: Ui) {
-    let Some(calendar) = target_calendar(ui) else {
-        ui.error.set(Some("Aucun calendrier commun avec Outlook : ouvrez Outlook, puis le calendrier de ThunderLook.".into()));
-        return;
-    };
     // Jour affiché (vide : aujourd'hui), à l'heure pleine suivante ; le cœur complète.
     let day = ui.cal_anchor.get_untracked();
     let now = js_sys::Date::new_0();
     let start = (!day.is_empty()).then(|| format!("{day}T{:02}:00", (now.get_hours() + 1).min(23)));
+    open_new_at(ui, start, false);
+}
+
+/// Nouveau rendez-vous à un créneau (`AAAA-MM-JJ` ou `AAAA-MM-JJTHH:MM`), éventuellement sur la journée entière.
+pub fn open_new_at(ui: Ui, start: Option<String>, all_day: bool) {
+    let Some(calendar) = target_calendar(ui) else {
+        ui.error.set(Some("Aucun calendrier commun avec Outlook : ouvrez Outlook, puis le calendrier de ThunderLook.".into()));
+        return;
+    };
+    let start = start.map(|s| if s.contains('T') { s } else { format!("{s}T09:00") });
     spawn_local(async move {
         match ipc::appointment_form(None, Some(&calendar), start.as_deref()).await {
-            Ok(f) => ui.appointment.set(Some(f)),
+            Ok(mut f) => {
+                f.all_day = all_day;
+                ui.appointment.set(Some(f));
+            }
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
+/// Modifie un champ d'un rendez-vous existant sans ouvrir la boîte (clic droit : Privé, Afficher en tant que, Classer).
+pub fn update(ui: Ui, id: String, change: impl FnOnce(&mut AppointmentForm) + 'static) {
+    spawn_local(async move {
+        let result = match ipc::appointment_form(Some(&id), None, None).await {
+            Ok(mut f) => {
+                change(&mut f);
+                ipc::appointment_save(&f).await
+            }
+            Err(e) => Err(e),
+        };
+        match result {
+            Ok(m) => {
+                ui.cal_selected.set(None);
+                ui.status.set(Some(m));
+            }
             Err(e) => ui.error.set(Some(e)),
         }
     });

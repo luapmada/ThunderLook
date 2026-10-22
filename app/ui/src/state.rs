@@ -134,6 +134,10 @@ pub enum ContextTarget {
     Flag,
     /// Clic droit sur les catégories d'une ligne : menu « Catégoriser » directement.
     Categories,
+    /// Clic droit sur un rendez-vous du calendrier (identifiant de l'occurrence).
+    CalEvent(String),
+    /// Clic droit sur un créneau vide : `AAAA-MM-JJ` ou `AAAA-MM-JJTHH:00`.
+    CalSlot(String),
 }
 
 /// Points d'arrêt du cycle F6 / Maj+F6.

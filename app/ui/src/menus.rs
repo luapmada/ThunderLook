@@ -7,6 +7,7 @@ use wasm_bindgen::JsCast;
 
 use crate::{
     actions::{self, folder_name, real_folder},
+    appointment,
     ipc,
     menu::{MenuEntry, entry_body, items, move_focus},
     state::{ConfirmAction, ContextTarget, Dialog, PickPurpose, Ui, use_ui},
@@ -42,6 +43,71 @@ pub fn category_entries(ui: Ui) -> Vec<MenuEntry> {
     v.push(MenuEntry::action("Effacer toutes les catégories", move || actions::run(ui, MessageOp::ClearCategories)).separated());
     v.push(MenuEntry::action("Nouvelle catégorie…", move || ui.dialog.set(Some(Dialog::NewCategory))));
     v
+}
+
+/// Clic droit sur un rendez-vous (libellés relevés dans Outlook). Les changements passent par la boîte de rendez-vous
+/// enregistrée dans Outlook, donc seuls les rendez-vous du calendrier commun sont modifiables.
+fn calendar_event_context(ui: Ui, id: String) -> Vec<MenuEntry> {
+    let Some(ev) = ui.cal_selected.get_untracked().filter(|e| e.id == id) else { return Vec::new() };
+    let shared = ui.cal_view.with_untracked(|v| v.as_ref().is_some_and(|v| v.calendars.iter().any(|c| c.id == ev.calendar_id && c.shared)));
+    let editable = move |e: MenuEntry| if shared { e } else { MenuEntry::pending(e.label) };
+    let busy_choices = [("Disponible", 0, "free"), ("Provisoire", 1, "tentative"), ("Occupé(e)", 2, "busy"), ("Absent(e)", 3, "oof"), ("Travaille ailleurs", 4, "elsewhere")];
+    let busy: Vec<MenuEntry> = busy_choices
+        .iter()
+        .map(|&(label, code, key)| {
+            let id = id.clone();
+            editable(MenuEntry::radio(label, ev.busy == key, move || appointment::update(ui, id.clone(), move |f| f.busy = code)))
+        })
+        .collect();
+    let current: Vec<String> = ev.categories.clone();
+    let mut cats: Vec<MenuEntry> = ui
+        .categories
+        .get()
+        .into_iter()
+        .map(|c| {
+            let on = current.iter().any(|n| n.eq_ignore_ascii_case(&c.name));
+            let (id, name) = (id.clone(), c.name.clone());
+            editable(
+                MenuEntry::radio(c.name, on, move || {
+                    let name = name.clone();
+                    appointment::update(ui, id.clone(), move |f| {
+                        let mut list: Vec<String> = f.categories.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                        if on {
+                            list.retain(|n| !n.eq_ignore_ascii_case(&name));
+                        } else {
+                            list.push(name);
+                        }
+                        f.categories = list.join(", ");
+                    })
+                })
+                .with_swatch(c.color),
+            )
+        })
+        .collect();
+    let clear_id = id.clone();
+    cats.push(editable(MenuEntry::action("Effacer toutes les catégories", move || appointment::update(ui, clear_id.clone(), |f| f.categories.clear()))).separated());
+    let (private_id, delete_id) = (id.clone(), id.clone());
+    let private = ev.private;
+    vec![
+        MenuEntry::pending("Transférer"),
+        editable(MenuEntry::radio("Privé", private, move || appointment::update(ui, private_id.clone(), move |f| f.private = !private))).separated(),
+        MenuEntry::submenu("Afficher en tant que", busy),
+        MenuEntry::submenu("Classer", cats),
+        editable(MenuEntry::action("Supprimer", move || appointment::delete(ui, delete_id.clone(), false))).separated(),
+    ]
+}
+
+/// Clic droit sur un créneau vide.
+fn calendar_slot_context(ui: Ui, start: String) -> Vec<MenuEntry> {
+    let (a, b) = (start.clone(), start);
+    vec![
+        MenuEntry::action("Nouveau rendez-vous", move || appointment::open_new_at(ui, Some(a.clone()), false)),
+        MenuEntry::action("Nouvel événement d'une journée entière", move || appointment::open_new_at(ui, Some(b.clone()), true)),
+        MenuEntry::pending("Nouvelle demande de réunion"),
+        MenuEntry::pending("Nouveau rendez-vous périodique").separated(),
+        MenuEntry::pending("Nouvel événement périodique"),
+        MenuEntry::pending("Nouvelle réunion périodique"),
+    ]
 }
 
 pub fn move_entries(ui: Ui) -> Vec<MenuEntry> {
@@ -239,6 +305,8 @@ pub fn ContextMenu() -> impl IntoView {
                 ContextTarget::Folder(id) => folder_context(ui, id),
                 ContextTarget::Flag => flag_entries(ui),
                 ContextTarget::Categories => category_entries(ui),
+                ContextTarget::CalEvent(id) => calendar_event_context(ui, id),
+                ContextTarget::CalSlot(start) => calendar_slot_context(ui, start),
             },
             None => Vec::new(),
         };

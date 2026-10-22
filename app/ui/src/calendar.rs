@@ -2,12 +2,13 @@
 //! l'affiche : navigateur de dates et calendriers dans le volet de gauche, période au centre, détail en bas.
 
 use leptos::{html, prelude::*, task::spawn_local};
+use wasm_bindgen::JsCast;
 use thunderlook_model::calendar::{CalendarDay, CalendarEvent, CalendarQuery, CalendarView, CalendarViewKind, TimedEvent, WEEKDAYS_SHORT};
 
 use crate::{
     icons::*,
     ipc,
-    state::{Module, Ui, use_ui},
+    state::{ContextMenuAt, ContextTarget, Module, Ui, use_ui},
 };
 
 /// Hauteur d'une heure dans la grille (px), comme la référence en zoom normal.
@@ -165,6 +166,7 @@ fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool) -> impl Into
     };
     let label = format!("{}, {}{}", event.subject, event.when, event.location.as_ref().map(|l| format!(", {l}")).unwrap_or_default());
     let ev = event.clone();
+    let ctx_ev = event.clone();
     let open_id = event.id.clone();
     let shared = ui.cal_view.with_untracked(|v| v.as_ref().is_some_and(|v| v.calendars.iter().any(|c| c.id == event.calendar_id && c.shared)));
     // Comme Outlook : un rendez-vous classé prend la couleur de sa première catégorie.
@@ -186,6 +188,12 @@ fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool) -> impl Into
             on:click=move |e| {
                 e.stop_propagation();
                 ui.cal_selected.set(Some(ev.clone()));
+            }
+            on:contextmenu=move |e: leptos::ev::MouseEvent| {
+                e.prevent_default();
+                e.stop_propagation();
+                ui.cal_selected.set(Some(ctx_ev.clone()));
+                ui.context_menu.set(Some(ContextMenuAt { x: f64::from(e.client_x()), y: f64::from(e.client_y()), target: ContextTarget::CalEvent(ctx_ev.id.clone()) }));
             }
             // Double clic : ouvrir le rendez-vous (calendrier commun avec Outlook).
             on:dblclick=move |e| {
@@ -216,6 +224,20 @@ fn Timed(item: TimedEvent) -> impl IntoView {
     }
 }
 
+/// Clic droit sur un créneau vide : menu « Nouveau… » à la date (et à l'heure, dans la grille horaire) cliquée.
+fn slot_menu(ui: Ui, e: &leptos::ev::MouseEvent, date: &str) {
+    e.prevent_default();
+    e.stop_propagation();
+    let mut start = date.to_string();
+    if let Some(el) = e.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+        let h = ((f64::from(e.client_y()) - el.get_bounding_client_rect().top()) / HOUR_PX).floor();
+        if (0.0..24.0).contains(&h) && el.class_list().contains("cal-col") {
+            start = format!("{date}T{:02}:00", h as u32);
+        }
+    }
+    ui.context_menu.set(Some(ContextMenuAt { x: f64::from(e.client_x()), y: f64::from(e.client_y()), target: ContextTarget::CalSlot(start) }));
+}
+
 #[component]
 fn TimeGrid(view: CalendarView) -> impl IntoView {
     let scroller = NodeRef::<html::Div>::new();
@@ -227,6 +249,7 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
             el.set_scroll_top((FIRST_HOUR * HOUR_PX) as i32);
         }
     });
+    let ui = use_ui();
     let now = view.now_min;
     let days = view.days.clone();
     view! {
@@ -259,8 +282,9 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
                     {days
                         .into_iter()
                         .map(|d: CalendarDay| {
+                            let date = d.date.clone();
                             view! {
-                                <div class="cal-col" class:today=d.today role="group" aria-label=d.label.clone()>
+                                <div class="cal-col" class:today=d.today role="group" aria-label=d.label.clone() on:contextmenu=move |e: leptos::ev::MouseEvent| slot_menu(ui, &e, &date)>
                                     {d.timed.into_iter().map(|t| view! { <Timed item=t /> }).collect_view()}
                                     {(d.today).then(|| now.map(|m| view! { <div class="cal-now" style=format!("top:{}px", f64::from(m) * HOUR_PX / 60.0)></div> }))}
                                 </div>
@@ -297,8 +321,9 @@ fn MonthGrid(view: CalendarView) -> impl IntoView {
                         let mut items: Vec<CalendarEvent> = d.all_day.clone();
                         items.extend(d.timed.iter().map(|t| t.event.clone()));
                         let extra = items.len().saturating_sub(SHOWN);
+                        let cell_date = d.date.clone();
                         view! {
-                            <div class="cal-cell" class:today=d.today class:other=!d.in_month role="group" aria-label=d.date.clone()>
+                            <div class="cal-cell" class:today=d.today class:other=!d.in_month role="group" aria-label=d.date.clone() on:contextmenu=move |e: leptos::ev::MouseEvent| slot_menu(ui, &e, &cell_date)>
                                 <button
                                     class="cal-cell-day"
                                     title="Afficher ce jour"
