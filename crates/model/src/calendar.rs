@@ -56,6 +56,12 @@ pub struct CalendarInfo {
     pub color: u8,
     pub count: u32,
     pub shown: bool,
+    /// Calendrier commun avec Outlook : modifiable dans ThunderLook (écrit par Outlook).
+    #[serde(default)]
+    pub shared: bool,
+    /// Calendrier par défaut d'Outlook : proposé pour un nouveau rendez-vous.
+    #[serde(default)]
+    pub outlook_default: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -153,3 +159,28 @@ pub const WEEKDAYS_SHORT: [&str; 7] = ["lun.", "mar.", "mer.", "jeu.", "ven.", "
 pub const WEEKDAYS: [&str; 7] = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
 pub const MONTHS: [&str; 12] = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 pub const MONTHS_SHORT: [&str; 12] = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+
+/// Rendez-vous dans la boîte « Rendez-vous » (créer, modifier). Dates locales `AAAA-MM-JJTHH:MM`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppointmentForm {
+    /// `a<id>` ; absent pour un nouveau rendez-vous.
+    pub id: Option<String>,
+    /// Calendrier (`c<dossier>`).
+    pub calendar_id: String,
+    pub subject: String,
+    pub location: String,
+    pub start: String,
+    pub end: String,
+    pub all_day: bool,
+    /// Minutes avant le début ; `None` : aucun rappel.
+    pub reminder: Option<i32>,
+    /// 0 disponible, 1 provisoire, 2 occupé(e), 3 absent(e) du bureau, 4 travail ailleurs.
+    pub busy: i32,
+    pub body: String,
+    /// Catégories séparées par des virgules.
+    pub categories: String,
+    pub private: bool,
+    /// Série périodique : heures et périodicité restent celles d'Outlook.
+    pub recurring: bool,
+}

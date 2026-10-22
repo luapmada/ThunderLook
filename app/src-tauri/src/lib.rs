@@ -3,6 +3,7 @@
 //! Dossier de données, par ordre de priorité : variable d'environnement `THUNDERLOOK_DATA`,
 //! `dataDir` dans `config.json` (dossier de configuration de l'application), sinon `<données locales>\data`.
 
+mod shared_calendar;
 mod toast;
 
 use std::{
@@ -124,8 +125,10 @@ fn start_scheduler(app: &AppHandle) {
             start_sync(&app);
             start_watchers(&app);
         }
+        shared_calendar::start(&app);
         loop {
             std::thread::sleep(std::time::Duration::from_secs(60));
+            shared_calendar::tick(&app);
             let last = app.state::<Syncer>().last_run.load(Ordering::SeqCst);
             if now_ms() - last >= POLL_MINUTES * 60_000 && has_accounts(&app) {
                 start_sync(&app);
@@ -952,6 +955,7 @@ fn all_calendars(app: &AppHandle, conn: &thunderlook_store::rusqlite::Connection
     }));
     let shown = shown_calendars(app).unwrap_or_else(|| thunderlook_calendar::view::default_shown(&calendars));
     calendars.iter_mut().for_each(|c| c.shown = shown.contains(&c.id));
+    shared_calendar::mark_shared(app, conn, &mut calendars);
     Ok(calendars)
 }
 
@@ -1019,7 +1023,14 @@ fn calendar_view(app: AppHandle, cache: State<CalendarCache>, query: CalendarQue
         let unreadable: Vec<String> = cal.issues.iter().filter(|i| i.id == 0).map(|i| i.detail.clone()).collect();
         (thunderlook_calendar::view::build(cal, calendars, &query, thunderlook_calendar::view::local_now(now_ms())), unreadable)
     })?;
-    view.source_note = thunderlook_calendar::view::source_note(&conn, &view.calendars)?;
+    // Calendriers communs avec Outlook : état de la synchronisation ; les autres (copies de PST) : leur source.
+    let copies: Vec<thunderlook_model::calendar::CalendarInfo> = view.calendars.iter().filter(|c| !c.shared).cloned().collect();
+    let copy_note = thunderlook_calendar::view::source_note(&conn, &copies)?;
+    let shared_note = view.calendars.iter().any(|c| c.shown && c.shared).then(|| shared_calendar::note(&app));
+    view.source_note = match (shared_note, copy_note) {
+        (Some(a), Some(b)) => Some(format!("{a} {b}")),
+        (a, b) => a.or(b),
+    };
     if !unreadable.is_empty() {
         let note = format!("Calendrier importé illisible : {}", unreadable.join(" ; "));
         view.source_note = Some(match view.source_note {
@@ -1166,6 +1177,7 @@ pub fn run() {
         .manage(Indexer::default())
         .manage(Syncer::default())
         .manage(CalendarCache::default())
+        .manage(shared_calendar::OutlookStatus::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -1251,6 +1263,10 @@ pub fn run() {
             save_quick_steps,
             perf_mark,
             calendar_view,
+            shared_calendar::appointment_form,
+            shared_calendar::appointment_save,
+            shared_calendar::appointment_delete,
+            shared_calendar::outlook_sync,
             contact_folders,
             contact_list,
             contact_card,

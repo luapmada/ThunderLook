@@ -3,6 +3,7 @@
 mod accounts;
 mod actions;
 mod app;
+mod appointment;
 mod autoreply;
 mod calendar;
 mod commandbar;

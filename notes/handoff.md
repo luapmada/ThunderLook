@@ -8,12 +8,15 @@
    « répondu », `open-item` sélectionne le message, champs Port/Chiffrement d'« Ajouter un compte »). Correctif de la
    fusion : un compte retiré pendant que son dossier est affiché laissait une liste vide (`77bcc14`).
    Script de vérification : `target/tl-scripts/verify_v092.mjs` (coupe puis rétablit « marquer comme lu »).
-2. **J10 Contacts en cours** (22/10, `notes/j10-plan.md`) : lecture et module Contacts faits et vérifiés (COM et
-   `ui_check` J10). Paul a demandé « contacts d'abord » ; il demande si le calendrier peut être **le même** pour
-   Outlook et ThunderLook : réponse donnée = oui, en écrivant dans Outlook par COM (Outlook reste le stockage, MPE
-   inchangé, Outlook doit tourner). Attendre sa décision avant de coder l'écriture (calendrier et contacts).
-   Reste au J10 : rechargement des contacts depuis une copie fraîche, listes de distribution, vCard.
-   Demandé aussi par Paul : clic depuis le Centre de notifications (activation COM, AUMID + ToastActivatorCLSID).
+2. **22/10 soir** :
+   - J10 Contacts (lecture) fait (`notes/j10-plan.md`). Paul : les contacts manquants arriveront par MPE — en fait
+     ils sont déjà dans Outlook ; ThunderLook lit une copie du 15/10. Suite logique : contacts lus en direct par
+     Outlook, comme le calendrier (même crate `crates/outlook`).
+   - **Calendrier commun avec Outlook** fait (accord de Paul, « ok pour 1 ») : `notes/j9-plan.md` § étape 4.
+   - Notifications : identité ThunderLook + lien `thunderlook:` (clic actif même depuis le Centre de notifications),
+     `app/src-tauri/src/toast.rs`. **Les notifications Windows sont coupées sur le poste de Paul**
+     (`ToastEnabled = 0`) : rien ne s'affiche tant qu'il ne les rallume pas (Paramètres › Système › Notifications).
+   - Signalé à Paul : 209 rendez-vous ont perdu leur rappel dans Outlook le 21/10 à 16 h 42.
 3. **Quand se passer d'Outlook** (réponse donnée à Paul le 22/10) : après 1) points J7 ; 2) écriture du calendrier
    dans ThunderLook (créer/modifier/supprimer, rappels — étape 4 du J9, sans objet en option A) ; 3) Contacts, Tâches,
    Notes (J10+) ; 4) synchro du téléphone par MPE sur fichiers vCard/iCal/vNote (MPE ne parle qu'à Outlook ou à des

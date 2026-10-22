@@ -17,6 +17,15 @@ const FIRST_HOUR: f64 = 7.5;
 
 /// Recharge la vue quand le module, le type de vue, la date ou les calendriers affichés changent.
 pub fn watch(ui: Ui) {
+    // Calendrier commun avec Outlook : relu à chaque ouverture du module ; « calendar-changed » recharge la vue.
+    ipc::on_calendar_changed(move || ui.cal_epoch.update(|e| *e += 1));
+    Effect::new(move |_| {
+        if ui.module.get() == Module::Calendar {
+            spawn_local(async move {
+                let _ = ipc::outlook_sync().await;
+            });
+        }
+    });
     Effect::new(move |_| {
         if ui.module.get() != Module::Calendar || !ui.settings_loaded.get() {
             return;
@@ -104,6 +113,10 @@ pub fn key(ui: Ui, ev: &web_sys::KeyboardEvent) -> bool {
         set_kind(ui, k);
         return true;
     }
+    if ctrl && !alt && !shift && ev.key().eq_ignore_ascii_case("n") {
+        crate::appointment::open_new(ui);
+        return true;
+    }
     false
 }
 
@@ -117,6 +130,8 @@ fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool) -> impl Into
     };
     let label = format!("{}, {}{}", event.subject, event.when, event.location.as_ref().map(|l| format!(", {l}")).unwrap_or_default());
     let ev = event.clone();
+    let open_id = event.id.clone();
+    let shared = ui.cal_view.with_untracked(|v| v.as_ref().is_some_and(|v| v.calendars.iter().any(|c| c.id == event.calendar_id && c.shared)));
     view! {
         <button
             class=format!("cal-ev cal-c{} busy-{}", event.color, event.busy)
@@ -127,6 +142,13 @@ fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool) -> impl Into
             on:click=move |e| {
                 e.stop_propagation();
                 ui.cal_selected.set(Some(ev.clone()));
+            }
+            // Double clic : ouvrir le rendez-vous (calendrier commun avec Outlook).
+            on:dblclick=move |e| {
+                e.stop_propagation();
+                if shared {
+                    crate::appointment::open_edit(ui, open_id.clone());
+                }
             }
         >
             {(month && !event.start_label.is_empty()).then(|| view! { <span class="cal-time">{event.start_label.clone()}</span> })}
@@ -249,6 +271,7 @@ fn MonthGrid(view: CalendarView) -> impl IntoView {
 #[component]
 fn Details() -> impl IntoView {
     let ui = use_ui();
+    let shared = move |id: &str| ui.cal_view.with(|v| v.as_ref().is_some_and(|v| v.calendars.iter().any(|c| c.id == id && c.shared)));
     let calendar_name = move |id: &str| {
         ui.cal_view.with(|v| v.as_ref().and_then(|v| v.calendars.iter().find(|c| c.id == id).map(|c| c.name.clone())).unwrap_or_default())
     };
@@ -285,6 +308,32 @@ fn Details() -> impl IntoView {
                             <dt>"Participants"</dt><dd>{e.attendees.clone()}</dd>
                         })}
                     </dl>
+                    {shared(&e.calendar_id).then(|| {
+                        let (edit_id, del_id, series_id) = (e.id.clone(), e.id.clone(), e.id.clone());
+                        let confirm = RwSignal::new(false);
+                        let recurring = e.recurring;
+                        view! {
+                            <div class="cal-details-actions">
+                                <button class="btn" on:click=move |_| crate::appointment::open_edit(ui, edit_id.clone())>"Ouvrir"</button>
+                                <Show when=move || !confirm.get() fallback=move || {
+                                    let (del_id, series_id) = (del_id.clone(), series_id.clone());
+                                    view! {
+                                        <span class="confirm-text">{if recurring { "Supprimer dans Outlook :" } else { "Supprimer dans Outlook ?" }}</span>
+                                        <button class="btn danger" on:click=move |_| crate::appointment::delete(ui, del_id.clone(), false)>
+                                            {if recurring { "Cette occurrence" } else { "Supprimer" }}
+                                        </button>
+                                        {recurring.then(|| {
+                                            let series_id = series_id.clone();
+                                            view! { <button class="btn danger" on:click=move |_| crate::appointment::delete(ui, series_id.clone(), true)>"Toute la série"</button> }
+                                        })}
+                                        <button class="btn" on:click=move |_| confirm.set(false)>"Annuler"</button>
+                                    }
+                                }>
+                                    <button class="btn" on:click=move |_| confirm.set(true)>"Supprimer…"</button>
+                                </Show>
+                            </div>
+                        }
+                    })}
                 </section>
             }
         })

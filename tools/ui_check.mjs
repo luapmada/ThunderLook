@@ -575,6 +575,34 @@ CHECKS.push(['Clic droit : les actions des sous-menus s\'exécutent (Règles ›
   }
 }]);
 
+// Calendrier commun avec Outlook : sans écriture (la création, la modification et la suppression dans Outlook se
+// vérifient par target/tl-scripts/appt_test.mjs, volontairement). Outlook fermé : le cas le dit et passe.
+CHECKS.push(['J9b : calendrier commun avec Outlook (mention, boîte Rendez-vous ouverte puis annulée)', async (log) => {
+  const press = (k, mods = {}) => js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, ctrlKey: ${!!mods.ctrl}, altKey: ${!!mods.alt}, bubbles: true }))`);
+  try {
+    await press('2', { ctrl: true });
+    await until(`/Calendrier commun avec Outlook/.test(document.querySelector('.cal-note')?.textContent ?? '')`, 'mention du calendrier commun');
+    // La synchronisation lancée à l'ouverture du module se termine (« synchronisé le … » ou l'erreur d'Outlook).
+    await until(`!/en cours/.test(document.querySelector('.cal-note').textContent)`, 'fin de la synchronisation', 60000);
+    const note = await js(`document.querySelector('.cal-note').textContent`);
+    log(`mention : ${note}`);
+    if (!/synchronisé le/.test(note)) {
+      log('Outlook indisponible : boîte Rendez-vous non vérifiée');
+      return;
+    }
+    await press('n', { ctrl: true });
+    await until(`!!document.querySelector('.dialog.appt input[aria-label="Objet"]')`, 'boîte Nouveau rendez-vous (Ctrl+N)');
+    const f = await js(`JSON.stringify({ cal: document.querySelector('.dialog.appt select[aria-label="Calendrier"]').selectedOptions[0]?.textContent, debut: document.querySelector('.dialog.appt input[aria-label="Début (heure)"]').value, fin: document.querySelector('.dialog.appt input[aria-label="Fin (heure)"]').value, rappel: document.querySelector('.dialog.appt select[aria-label="Rappel"]').selectedOptions[0]?.textContent })`);
+    log(`Ctrl+N : boîte Nouveau rendez-vous ${f}`);
+    await js(`[...document.querySelectorAll('.dialog.appt button')].find(b => b.textContent === 'Annuler').click()`);
+    await until(`!document.querySelector('.dialog.appt')`, 'fermeture sans enregistrer');
+    log('Annuler : rien n\'est écrit dans Outlook');
+  } finally {
+    await press('1', { ctrl: true });
+    await sleep(300);
+  }
+}]);
+
 CHECKS.push(['J10 : contacts (dossiers, liste triée, fiche, filtre)', async (log) => {
   const press = (k, mods = {}) => js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, ctrlKey: ${!!mods.ctrl}, altKey: ${!!mods.alt}, bubbles: true }))`);
   try {

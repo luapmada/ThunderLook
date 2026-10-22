@@ -33,7 +33,7 @@ pub fn calendars(conn: &Connection) -> crate::Result<Vec<CalendarInfo>> {
     let mut out = Vec::new();
     for (i, r) in rows.enumerate() {
         let (id, name, section, count) = r.map_err(e)?;
-        out.push(CalendarInfo { id: format!("c{id}"), name, section, color: (i % 8) as u8, count: count as u32, shown: false });
+        out.push(CalendarInfo { id: format!("c{id}"), name, section, color: (i % 8) as u8, count: count as u32, shown: false, shared: false, outlook_default: false });
     }
     Ok(out)
 }

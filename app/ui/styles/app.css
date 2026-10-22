@@ -2171,3 +2171,60 @@ input {
 .contact-nav .cal-item.selected {
   background: var(--selected);
 }
+
+/* ---------- J9 étape 4 : calendrier commun avec Outlook (boîte « Rendez-vous », actions du détail) ---------- */
+.dialog.appt {
+  max-width: 640px;
+}
+
+.appt-when {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  margin: calc(var(--u) * 2) 0;
+}
+
+.appt-label {
+  width: 64px;
+  color: var(--text-2);
+}
+
+.appt-when input,
+.appt-row select,
+.appt-row input[type="text"] {
+  min-height: var(--target);
+  padding: 0 calc(var(--u) * 2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.appt-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: calc(var(--u) * 3);
+}
+
+.appt-row .grow {
+  flex: 1;
+}
+
+.cal-details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  margin-top: calc(var(--u) * 3);
+}
+
+.btn.danger {
+  border-color: var(--cat-red);
+  color: var(--cat-red);
+}
+
+.confirm-text {
+  color: var(--text-2);
+}

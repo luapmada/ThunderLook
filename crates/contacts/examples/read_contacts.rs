@@ -1,5 +1,5 @@
 //! Étape 1 du J10 : lecture des contacts d'un dossier de données, couverture des champs et échecs.
-//! Usage : `cargo run -p thunderlook-contacts --example read_all -- <dossier de données> [id du dossier]`
+//! Usage : `cargo run -p thunderlook-contacts --example read_contacts -- <dossier de données> [id du dossier]`
 
 use std::{collections::BTreeMap, path::Path};
 

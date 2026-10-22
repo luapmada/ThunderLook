@@ -71,6 +71,8 @@ pub enum Action {
     // J9 : calendrier.
     CalView(thunderlook_model::calendar::CalendarViewKind),
     CalToday,
+    /// Nouveau rendez-vous dans le calendrier commun avec Outlook.
+    CalNew,
     CalImport,
     CalExportIcs,
     CalExportCsv,
@@ -147,6 +149,7 @@ fn perform(ui: Ui, action: Action) {
         Action::ManageQuickSteps => ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false })),
         Action::CalView(kind) => crate::calendar::set_kind(ui, kind),
         Action::CalToday => crate::calendar::go_today(ui),
+        Action::CalNew => crate::appointment::open_new(ui),
         Action::CalImport => crate::calendar::import(ui),
         Action::CalExportIcs => crate::calendar::export(ui, false),
         Action::CalExportCsv => crate::calendar::export(ui, true),
@@ -437,7 +440,7 @@ const CALENDAR_HOME: &[Group] = &[
     Group {
         label: "Nouveau",
         cmds: &[
-            cmd("Nouveau rendez-vous", CALENDAR_PLUS, Some("Ctrl+N"), false, true, true),
+            wired("Nouveau rendez-vous", CALENDAR_PLUS, Some("Ctrl+N"), true, true, Action::CalNew),
             cmd("Nouvelle réunion", USERS, Some("Ctrl+Maj+Q"), true, true, true),
         ],
     },

@@ -15,7 +15,7 @@
   (pièce jointe `ContactPicture.jpg`).
 
 ## Avancement
-- Étape 1 faite le 22/10 : crate `crates/contacts` ; `examples/read_all` : 10 649 lus, 0 échec.
+- Étape 1 faite le 22/10 : crate `crates/contacts` ; `examples/read_contacts` : 10 649 lus, 0 échec.
 - Comparaison avec Outlook (COM, lecture seule : `target/tl-scripts/outlook_contacts.ps1`, `compare_contacts.py`) sur
   le dossier Contacts, 14 champs (nom, Classer sous, société, 3 courriers, mobile, bureau, domicile, villes,
   catégories, anniversaire, photo) : 2 137 fiches identiques ; 1 écart (Vandé, modifiée après la copie du 15/10) ;

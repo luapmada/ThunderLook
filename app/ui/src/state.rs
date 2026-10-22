@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use leptos::{html, prelude::*};
 use thunderlook_model::{
-    CategoryInfo, Draft, calendar::{CalendarEvent, CalendarView}, contacts::{ContactCard, ContactFolder, ContactList}, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, quicksteps::QuickStep, settings::Settings,
+    CategoryInfo, Draft, calendar::{AppointmentForm, CalendarEvent, CalendarView}, contacts::{ContactCard, ContactFolder, ContactList}, FolderTree, IndexStatus, ListView, MessageSummary, SearchScope, SortField, quicksteps::QuickStep, settings::Settings,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,6 +209,8 @@ pub struct Ui {
     pub cal_anchor: RwSignal<String>,
     pub cal_epoch: RwSignal<u64>,
     pub cal_selected: RwSignal<Option<CalendarEvent>>,
+    /// Boîte « Rendez-vous » ouverte (calendrier commun avec Outlook).
+    pub appointment: RwSignal<Option<AppointmentForm>>,
     /// Contacts (J10) : dossiers, dossier affiché (`k<id>`), liste, contact sélectionné (`p<id>`), sa fiche, filtre.
     pub contact_folders: RwSignal<Vec<ContactFolder>>,
     pub contact_folder: RwSignal<String>,
@@ -264,6 +266,7 @@ impl Ui {
             cal_anchor: RwSignal::new(String::new()),
             cal_epoch: RwSignal::new(0),
             cal_selected: RwSignal::new(None),
+            appointment: RwSignal::new(None),
             contact_folders: RwSignal::new(Vec::new()),
             contact_folder: RwSignal::new(String::new()),
             contact_list: RwSignal::new(None),

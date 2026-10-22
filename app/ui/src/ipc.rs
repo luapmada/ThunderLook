@@ -5,7 +5,7 @@ use thunderlook_model::{
     CategoryInfo, ComposeKind, Draft, DraftAttachment, FolderOp, FolderTree, IndexStatus, ListQuery, ListView, MessageOp,
     AccountSummary, AutoReply, JunkLists, JunkMark, MessageSummary, MessageView, NewRule, OpResult, OpenItem, RuleDraft, SyncEvent, RuleRunReport, RuleRunRequest, RuleSummary, SearchQuery, Selection, Signature, SortField,
     quicksteps::QuickStep,
-    calendar::{CalendarQuery, CalendarView},
+    calendar::{AppointmentForm, CalendarQuery, CalendarView},
     contacts::{ContactCard, ContactFolder, ContactList},
     settings::Settings,
 };
@@ -149,6 +149,52 @@ struct CalendarArg<'a> {
 
 pub async fn calendar_view(query: &CalendarQuery) -> Result<CalendarView, String> {
     call("calendar_view", &CalendarArg { query }).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FormArg<'a> {
+    id: Option<&'a str>,
+    calendar_id: Option<&'a str>,
+    start: Option<&'a str>,
+}
+
+/// Boîte « Rendez-vous » : rendez-vous existant, ou nouveau.
+pub async fn appointment_form(id: Option<&str>, calendar_id: Option<&str>, start: Option<&str>) -> Result<AppointmentForm, String> {
+    call("appointment_form", &FormArg { id, calendar_id, start }).await
+}
+
+#[derive(Serialize)]
+struct SaveArg<'a> {
+    form: &'a AppointmentForm,
+}
+
+pub async fn appointment_save(form: &AppointmentForm) -> Result<String, String> {
+    call("appointment_save", &SaveArg { form }).await
+}
+
+#[derive(Serialize)]
+struct DeleteArg<'a> {
+    id: &'a str,
+    series: bool,
+}
+
+pub async fn appointment_delete(id: &str, series: bool) -> Result<String, String> {
+    call("appointment_delete", &DeleteArg { id, series }).await
+}
+
+/// Synchronisation du calendrier commun avec Outlook (le résultat arrive par « calendar-changed »).
+pub async fn outlook_sync() -> Result<(), String> {
+    call("outlook_sync", &NoArgs {}).await
+}
+
+/// Suit l'événement « calendar-changed » du cœur (calendrier commun relu).
+pub fn on_calendar_changed(f: impl Fn() + 'static) {
+    let handler = Closure::<dyn FnMut(JsValue)>::new(move |_: JsValue| f());
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = tauri_listen("calendar-changed", &handler).await;
+        handler.forget();
+    });
 }
 
 pub async fn contact_folders() -> Result<Vec<ContactFolder>, String> {

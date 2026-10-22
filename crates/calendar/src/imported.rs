@@ -41,7 +41,7 @@ pub fn load(data_dir: &Path) -> (Vec<(CalendarInfo, Vec<Appointment>)>, Vec<Stri
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         match fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| ics::parse(&t, folder, folder * 1_000_000)) {
             Ok((name, items)) => out.push((
-                CalendarInfo { id: format!("c{folder}"), name: name.unwrap_or(stem), section: SECTION.into(), color: 0, count: items.len() as u32, shown: false },
+                CalendarInfo { id: format!("c{folder}"), name: name.unwrap_or(stem), section: SECTION.into(), color: 0, count: items.len() as u32, shown: false, shared: false, outlook_default: false },
                 items,
             )),
             Err(e) => errors.push(format!("{} : {e}", path.display())),

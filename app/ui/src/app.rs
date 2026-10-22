@@ -15,6 +15,7 @@ use crate::{
     compose::ComposePane,
     create_rule::CreateRuleDialog,
     accounts::AccountsDialog,
+    appointment::AppointmentDialog,
     autoreply::AutoReplyDialog,
     junk::JunkOptionsDialog,
     calendar::{self, CalendarPane},
@@ -479,6 +480,7 @@ pub fn App() -> impl IntoView {
             <QuickStepsDialog />
             <AccountsDialog />
             <AutoReplyDialog />
+            <AppointmentDialog />
             <JunkOptionsDialog />
         </div>
     }

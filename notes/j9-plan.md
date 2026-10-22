@@ -28,6 +28,9 @@ calendriers multiples et superposition ; import/export `.ics` et CSV ; catégori
 
 ## Décision
 - 21/10 : **option A** (Outlook fait foi, ThunderLook en lecture seule pendant la transition).
+- 22/10 : Paul veut **le même calendrier** dans Outlook et ThunderLook → **calendrier commun par Outlook** : Outlook
+  garde les rendez-vous (son PST, que MPE synchronise avec le téléphone) ; ThunderLook les lit en direct et y écrit
+  par le modèle objet d'Outlook (COM). Outlook doit être ouvert ; fermé, ThunderLook montre la dernière synchro.
 
 ## Avancement
 - Étape 1 faite le 21/10 : crate `crates/calendar` (sac MAPI, propriétés nommées, `PidLidTimeZoneStruct`,
@@ -51,7 +54,29 @@ calendriers multiples et superposition ; import/export `.ics` et CSV ; catégori
 - Rechargement (option A) fait le 21/10 (`72577ac`) : `tl-import <pst> <données> --calendars <source>` remplace les
   éléments des dossiers de rendez-vous (retrouvés par NID) depuis une copie plus récente du PST ; source 1 rechargée
   depuis la sauvegarde du 21/10 16 h 38 → occurrences identiques à Outlook sur 2023-2026 (410/410 en 2026).
-- Étape 4 (création, modification, suppression) : sans objet tant qu'Outlook fait foi (option A).
+- Étape 4 faite le 22/10 (calendrier commun, crate `crates/outlook`) :
+  - Liaison : PST ouvert dans Outlook dont le nom commence celui du fichier d'origine d'une source
+    (`Outlook_300923.pst` ↔ source 1) et dont le calendrier par défaut est connu de la source sous le même NID. Les
+    807 rendez-vous des 4 calendriers ont les mêmes NID (fin de l'EntryID) dans Outlook et dans la base.
+  - Lecture : table d'Outlook (EntryID, date de modification) ; rendez-vous nouveaux ou modifiés enregistrés en `.msg`
+    temporaire (`SaveAs`, olMSGUnicode) et lus par `msg.rs` ([MS-OXMSG]) : `PropertyAccessor` refuse la périodicité
+    (0x8216) et le fuseau (0x8233) (« L'objet ne prend pas en charge la propriété »). L'export `.msg` date l'élément
+    de l'export et omet les identifiants globaux (0x0003, 0x0023) : ceux-là viennent de `PropertyAccessor` (dates en
+    UTC). Pour un rendez-vous déjà en base, seules les propriétés lues par le calendrier sont fusionnées dans le sac
+    (`bag::merge`). Disparus d'Outlook : retirés de la base. État : `outlook-link.json` du dossier de données
+    (dates de modification en millisecondes : un réel ne survit pas à l'aller-retour JSON).
+  - Essai à blanc (`examples/calendar_sync -- <données> --dry-run`) : après correction, seuls des écarts réels ;
+    occurrences 2023 et 2026 identiques à celles d'Outlook après synchronisation (`outlook_occ.ps1`).
+  - Constat : 209 rendez-vous modifiés dans Outlook le 21/10 à 16 h 42 (4 min après la sauvegarde de la bascule de
+    profil) ont depuis « pas de rappel » ; cause inconnue ; la sauvegarde `Outlook_300923_BACKUP_2026-10-21_1638.pst`
+    a encore leurs rappels. Signalé à Paul le 22/10.
+  - Écriture : boîte « Rendez-vous » (Ctrl+N, ruban, double clic, « Ouvrir » du détail) ; « Supprimer… » : le
+    rendez-vous, ou pour une série l'occurrence (heure du motif d'Outlook) ou toute la série. Série : heures et
+    périodicité restent à modifier dans Outlook. Vérifié dans Outlook (COM) : création, modification, suppression,
+    suppression d'une occurrence (exception supprimée) puis de la série (`target/tl-scripts/appt_test.mjs`,
+    `outlook_test_series.ps1`, `outlook_series_check.ps1`) ; les éléments de test sont dans les Éléments supprimés.
+  - Synchronisation : au démarrage, toutes les 5 min, à l'ouverture du module ; événement `calendar-changed`.
+    Mention : « Calendrier commun avec Outlook — synchronisé le … ». Cas `ui_check` J9b (sans écriture).
 - Étape 5 faite le 22/10 : `src/ics.rs` (export comme Outlook : VTIMEZONE « Romance Standard Time », RRULE, EXDATE,
   occurrences modifiées en RECURRENCE-ID, VALARM ; import : RRULE → périodicité [MS-OXOCAL], expansion réutilisée),
   `src/csv.rs` (format d'export d'Outlook en français, 22 colonnes), `src/imported.rs` (calendriers importés en lecture
