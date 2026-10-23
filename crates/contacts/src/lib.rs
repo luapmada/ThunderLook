@@ -1,6 +1,9 @@
 //! Contacts (J10) : éléments `IPM.Contact` importés, dont le sac MAPI complet est conservé dans `message.props`.
 //! Comme le calendrier (option A), Outlook fait foi : lecture seule ici. Propriétés d'après [MS-OXOCNTC].
 
+#[allow(dead_code)]
+mod textfmt;
+pub mod vcard;
 pub mod view;
 pub mod write;
 

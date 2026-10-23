@@ -3,6 +3,11 @@
 
 use std::{collections::HashMap, path::Path};
 
+#[allow(dead_code)]
+mod textfmt;
+pub mod vnote;
+pub mod vtodo;
+
 use thunderlook_calendar::{
     bag::{self, Bag, Value},
     named::{Named, PS_PUBLIC_STRINGS},
