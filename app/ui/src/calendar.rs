@@ -2,7 +2,8 @@
 //! l'affiche : navigateur de dates et calendriers dans le volet de gauche, période au centre, détail en bas.
 
 use leptos::{html, prelude::*, task::spawn_local};
-use wasm_bindgen::JsCast;
+use serde::Serialize;
+use wasm_bindgen::{JsCast, prelude::*};
 use thunderlook_model::calendar::{CalendarDay, CalendarEvent, CalendarQuery, CalendarView, CalendarViewKind, TimedEvent, WEEKDAYS_SHORT};
 
 use crate::{
@@ -13,6 +14,12 @@ use crate::{
 
 /// Hauteur d'une heure dans la grille (px), comme la référence en zoom normal.
 const HOUR_PX: f64 = 44.0;
+/// Largeur de la colonne des heures (px), comme `grid-template-columns` de la grille.
+const HOURS_W: f64 = 56.0;
+/// Pas d'arrondi des gestes à la souris (minutes).
+const SNAP: i64 = 15;
+/// Déplacement minimal du pointeur (px) avant qu'un appui devienne un glissement.
+const DRAG_PX: f64 = 4.0;
 /// Heure affichée en haut de la grille à l'ouverture.
 const FIRST_HOUR: f64 = 7.5;
 
@@ -211,15 +218,165 @@ fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool) -> impl Into
     }
 }
 
+/// Geste à la souris dans la grille horaire : tirer dans une colonne vide (créer), glisser un rendez-vous (déplacer) ou
+/// sa poignée du bas (redimensionner).
+#[derive(Clone)]
+enum Gesture {
+    Create,
+    Move { id: String, subject: String, start: i64, end: i64 },
+    Resize { id: String, subject: String, start: i64, end: i64 },
+}
+
+#[derive(Clone)]
+struct Drag {
+    gesture: Gesture,
+    /// Le pointeur a assez bougé : sinon c'est un simple clic.
+    active: bool,
+    x0: f64,
+    y0: f64,
+    col0: usize,
+    /// Minute du jour sous le pointeur à l'appui, puis maintenant.
+    m0: f64,
+    col: usize,
+    m: f64,
+}
+
+/// Ce que donnerait le geste s'il s'arrêtait ici : colonne, début et fin (minutes dans la journée), décalages à écrire.
+struct Outcome {
+    col: usize,
+    start: i64,
+    end: i64,
+    shift_start: i64,
+    shift_end: i64,
+}
+
+fn snap(m: f64) -> i64 {
+    (m / SNAP as f64).round() as i64 * SNAP
+}
+
+fn outcome(d: &Drag) -> Outcome {
+    match &d.gesture {
+        Gesture::Create => {
+            let floor = |m: f64| (m.min(1439.0) / SNAP as f64).floor() as i64 * SNAP;
+            let (a, b) = (floor(d.m0), floor(d.m));
+            Outcome { col: d.col0, start: a.min(b), end: (a.max(b) + SNAP).min(1440), shift_start: 0, shift_end: 0 }
+        }
+        Gesture::Move { start, end, .. } => {
+            let dur = end - start;
+            let new_start = snap(*start as f64 + d.m - d.m0).clamp(0, (1440 - dur).max(0));
+            let shift = (d.col as i64 - d.col0 as i64) * 1440 + new_start - start;
+            Outcome { col: d.col, start: new_start, end: new_start + dur, shift_start: shift, shift_end: shift }
+        }
+        Gesture::Resize { start, end, .. } => {
+            let new_end = snap(d.m).clamp(start + SNAP, 1440);
+            Outcome { col: d.col0, start: *start, end: new_end, shift_start: 0, shift_end: new_end - end }
+        }
+    }
+}
+
+/// Colonne et minute du jour sous le pointeur, dans le corps de la grille (défilement compris).
+fn locate(body: &web_sys::Element, columns: usize, x: f64, y: f64) -> (usize, f64) {
+    let r = body.get_bounding_client_rect();
+    let w = ((r.width() - HOURS_W) / columns as f64).max(1.0);
+    let col = (((x - r.left() - HOURS_W) / w).floor().max(0.0) as usize).min(columns.saturating_sub(1));
+    (col, ((y - r.top()) / HOUR_PX * 60.0).clamp(0.0, 1440.0))
+}
+
+fn clock(min: i64) -> String {
+    format!("{:02}:{:02}", min / 60, min % 60)
+}
+
+/// `AAAA-MM-JJTHH:MM` ; 24:00 devient minuit du lendemain.
+fn stamp(date: &str, min: i64) -> String {
+    if min >= 1440 { format!("{}T00:00", shift_days(date, 1)) } else { format!("{date}T{}", clock(min)) }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShiftArg<'a> {
+    id: &'a str,
+    start_shift_min: i64,
+    end_shift_min: i64,
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], catch, js_name = invoke)]
+    async fn tauri_invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
+}
+
+/// Déplace ou redimensionne (`calendar_cmds::appointment_shift`) ; la vue se recharge sur « calendar-changed ».
+fn shift(ui: Ui, id: String, start_shift_min: i64, end_shift_min: i64) {
+    spawn_local(async move {
+        let args = match serde_wasm_bindgen::to_value(&ShiftArg { id: &id, start_shift_min, end_shift_min }) {
+            Ok(a) => a,
+            Err(e) => return ui.error.set(Some(e.to_string())),
+        };
+        match tauri_invoke("appointment_shift", args).await {
+            Ok(m) => {
+                if let Some(m) = m.as_string() {
+                    ui.status.set(Some(m));
+                }
+                ui.cal_selected.set(None);
+            }
+            Err(e) => ui.error.set(Some(e.as_string().unwrap_or_else(|| "déplacement impossible".into()))),
+        }
+    });
+}
+
+/// Nouveau rendez-vous sur un créneau tiré à la souris (début et fin `AAAA-MM-JJTHH:MM`).
+fn open_new_range(ui: Ui, start: String, end: String) {
+    let calendar = ui.cal_view.with_untracked(|v| {
+        let v = v.as_ref()?;
+        v.calendars.iter().find(|c| c.outlook_default).or_else(|| v.calendars.iter().find(|c| c.shown && c.shared)).or_else(|| v.calendars.iter().find(|c| c.shared)).map(|c| c.id.clone())
+    });
+    let Some(calendar) = calendar else {
+        ui.error.set(Some("Aucun calendrier modifiable.".into()));
+        return;
+    };
+    spawn_local(async move {
+        match ipc::appointment_form(None, Some(&calendar), Some(&start)).await {
+            Ok(mut f) => {
+                f.end = end;
+                ui.appointment.set(Some(f));
+            }
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
 #[component]
-fn Timed(item: TimedEvent) -> impl IntoView {
+fn Timed(item: TimedEvent, col: usize, drag: RwSignal<Option<Drag>>, body: NodeRef<html::Div>, columns: usize) -> impl IntoView {
+    let ui = use_ui();
     let top = f64::from(item.start_min) * HOUR_PX / 60.0;
-    let height = (f64::from(item.end_min.saturating_sub(item.start_min)) * HOUR_PX / 60.0).max(18.0);
+    // Au moins un quart d'heure, comme la mise en colonnes du cœur : deux rendez-vous d'une même colonne ne se recouvrent pas.
+    let height = (f64::from(item.end_min.saturating_sub(item.start_min)) * HOUR_PX / 60.0).max(HOUR_PX / 4.0);
     let width = 100.0 / f64::from(item.columns.max(1));
     let style = format!("top:{top}px;height:{height}px;left:calc({}% + 1px);width:calc({width}% - 3px)", f64::from(item.column) * width);
+    let (start, end) = (i64::from(item.start_min), i64::from(item.end_min));
+    let writable = ui.cal_view.with_untracked(|v| v.as_ref().is_some_and(|v| v.calendars.iter().any(|c| c.id == item.event.calendar_id && c.shared)));
+    // Une suite d'un rendez-vous de la veille ou un rendez-vous qui passe minuit se règle dans la boîte « Rendez-vous ».
+    let movable = writable && !item.event.continued && end < 1440;
+    let (id, subject) = (item.event.id.clone(), item.event.subject.clone());
+    let begin = move |e: web_sys::PointerEvent, gesture: Gesture| {
+        if e.button() != 0 || !movable {
+            return;
+        }
+        e.stop_propagation();
+        let Some(body) = body.get_untracked() else { return };
+        let (x, y) = (f64::from(e.client_x()), f64::from(e.client_y()));
+        let (_, m) = locate(&body, columns, x, y);
+        drag.set(Some(Drag { gesture, active: false, x0: x, y0: y, col0: col, m0: m, col, m }));
+    };
+    let (move_id, move_subject) = (id.clone(), subject.clone());
+    let on_down = move |e: web_sys::PointerEvent| begin(e, Gesture::Move { id: move_id.clone(), subject: move_subject.clone(), start, end });
+    let (resize_id, resize_subject) = (id.clone(), subject.clone());
+    let on_resize = move |e: web_sys::PointerEvent| begin(e, Gesture::Resize { id: resize_id.clone(), subject: resize_subject.clone(), start, end });
+    let dragged = move || drag.with(|d| d.as_ref().is_some_and(|d| d.active && matches!(&d.gesture, Gesture::Move { id: i, .. } | Gesture::Resize { id: i, .. } if *i == id)));
     view! {
-        <div class="cal-timed" style=style>
+        <div class="cal-timed" class:short=height < 22.0 class:dragging=dragged style=style on:pointerdown=on_down>
             <Chip event=item.event />
+            {movable.then(|| view! { <div class="cal-resize" title="Changer l'heure de fin" on:pointerdown=on_resize></div> })}
         </div>
     }
 }
@@ -252,6 +409,72 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
     let ui = use_ui();
     let now = view.now_min;
     let days = view.days.clone();
+    let columns = n;
+    let dates: Vec<String> = days.iter().map(|d| d.date.clone()).collect();
+    let body = NodeRef::<html::Div>::new();
+    let drag = RwSignal::new(None::<Drag>);
+    // Appui dans une colonne vide : début d'un créneau à tirer.
+    let on_down = move |e: web_sys::PointerEvent| {
+        if e.button() != 0 {
+            return;
+        }
+        let on_event = e.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).is_some_and(|t| t.closest(".cal-timed").ok().flatten().is_some());
+        let Some(body) = body.get_untracked() else { return };
+        let (x, y) = (f64::from(e.client_x()), f64::from(e.client_y()));
+        if on_event || x - body.get_bounding_client_rect().left() < HOURS_W {
+            return;
+        }
+        let (col, m) = locate(&body, columns, x, y);
+        drag.set(Some(Drag { gesture: Gesture::Create, active: false, x0: x, y0: y, col0: col, m0: m, col, m }));
+    };
+    let handles = [
+        window_event_listener(leptos::ev::pointermove, move |e| {
+            let Some(mut d) = drag.get_untracked() else { return };
+            let (x, y) = (f64::from(e.client_x()), f64::from(e.client_y()));
+            if !d.active && (x - d.x0).hypot(y - d.y0) < DRAG_PX {
+                return;
+            }
+            let Some(body) = body.get_untracked() else { return };
+            let (col, m) = locate(&body, columns, x, y);
+            d.active = true;
+            d.m = m;
+            // Seul un déplacement change de jour ; créer et redimensionner restent dans leur colonne.
+            d.col = if matches!(d.gesture, Gesture::Move { .. }) { col } else { d.col0 };
+            drag.set(Some(d));
+        }),
+        window_event_listener(leptos::ev::pointerup, {
+            let dates = dates.clone();
+            move |_| {
+                let Some(d) = drag.get_untracked() else { return };
+                drag.set(None);
+                if !d.active {
+                    return;
+                }
+                let o = outcome(&d);
+                match d.gesture {
+                    Gesture::Create => {
+                        if let Some(date) = dates.get(o.col) {
+                            open_new_range(ui, stamp(date, o.start), stamp(date, o.end));
+                        }
+                    }
+                    Gesture::Move { id, .. } | Gesture::Resize { id, .. } => {
+                        if o.shift_start != 0 || o.shift_end != 0 {
+                            shift(ui, id, o.shift_start, o.shift_end);
+                        }
+                    }
+                }
+            }
+        }),
+        window_event_listener(leptos::ev::pointercancel, move |_| drag.set(None)),
+        // Échap annule le geste en cours (le détail du rendez-vous reste affiché).
+        window_event_listener(leptos::ev::keydown, move |e| {
+            if e.key() == "Escape" && drag.get_untracked().is_some() {
+                drag.set(None);
+                e.stop_propagation();
+            }
+        }),
+    ];
+    on_cleanup(move || handles.into_iter().for_each(|h| h.remove()));
     view! {
         <div class="cal-grid">
             <div class="cal-dayheads" style=cols.clone()>
@@ -275,17 +498,30 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
                     .collect_view()}
             </div>
             <div class="cal-scroll" node_ref=scroller>
-                <div class="cal-body" style=format!("{cols};height:{}px", 24.0 * HOUR_PX)>
+                <div class="cal-body" class:dragging=move || drag.with(|d| d.as_ref().is_some_and(|d| d.active)) node_ref=body style=format!("{cols};height:{}px", 24.0 * HOUR_PX) on:pointerdown=on_down>
                     <div class="cal-hours">
                         {(0..24).map(|h| view! { <div class="cal-hour" style=format!("top:{}px", f64::from(h) * HOUR_PX)>{format!("{h:02}:00")}</div> }).collect_view()}
                     </div>
                     {days
                         .into_iter()
-                        .map(|d: CalendarDay| {
+                        .enumerate()
+                        .map(|(idx, d): (usize, CalendarDay)| {
                             let date = d.date.clone();
                             view! {
                                 <div class="cal-col" class:today=d.today role="group" aria-label=d.label.clone() on:contextmenu=move |e: leptos::ev::MouseEvent| slot_menu(ui, &e, &date)>
-                                    {d.timed.into_iter().map(|t| view! { <Timed item=t /> }).collect_view()}
+                                    {d.timed.into_iter().map(|t| view! { <Timed item=t col=idx drag=drag body=body columns=columns /> }).collect_view()}
+                                    {move || {
+                                        let d = drag.get().filter(|d| d.active)?;
+                                        let o = outcome(&d);
+                                        (o.col == idx).then(|| {
+                                            let label = match &d.gesture {
+                                                Gesture::Create => String::new(),
+                                                Gesture::Move { subject, .. } | Gesture::Resize { subject, .. } => subject.clone(),
+                                            };
+                                            let style = format!("top:{}px;height:{}px", o.start as f64 * HOUR_PX / 60.0, (o.end - o.start) as f64 * HOUR_PX / 60.0);
+                                            view! { <div class="cal-ghost" style=style><span class="cal-time">{format!("{} – {}", clock(o.start), clock(o.end))}</span>{label}</div> }
+                                        })
+                                    }}
                                     {(d.today).then(|| now.map(|m| view! { <div class="cal-now" style=format!("top:{}px", f64::from(m) * HOUR_PX / 60.0)></div> }))}
                                 </div>
                             }
@@ -322,8 +558,19 @@ fn MonthGrid(view: CalendarView) -> impl IntoView {
                         items.extend(d.timed.iter().map(|t| t.event.clone()));
                         let extra = items.len().saturating_sub(SHOWN);
                         let cell_date = d.date.clone();
+                        let new_date = d.date.clone();
+                        let more_date = d.date.clone();
                         view! {
-                            <div class="cal-cell" class:today=d.today class:other=!d.in_month role="group" aria-label=d.date.clone() on:contextmenu=move |e: leptos::ev::MouseEvent| slot_menu(ui, &e, &cell_date)>
+                            <div
+                                class="cal-cell"
+                                class:today=d.today
+                                class:other=!d.in_month
+                                role="group"
+                                aria-label=d.date.clone()
+                                on:contextmenu=move |e: leptos::ev::MouseEvent| slot_menu(ui, &e, &cell_date)
+                                // Double clic sur un jour (hors rendez-vous) : nouveau rendez-vous ce jour-là.
+                                on:dblclick=move |_| crate::appointment::open_new_at(ui, Some(new_date.clone()), false)
+                            >
                                 <button
                                     class="cal-cell-day"
                                     title="Afficher ce jour"
@@ -335,7 +582,19 @@ fn MonthGrid(view: CalendarView) -> impl IntoView {
                                     {d.label.clone()}
                                 </button>
                                 {items.into_iter().take(SHOWN).map(|e| view! { <Chip event=e month=true /> }).collect_view()}
-                                {(extra > 0).then(|| view! { <span class="cal-more">{format!("+ {extra} autre{}", if extra > 1 { "s" } else { "" })}</span> })}
+                                {(extra > 0).then(|| view! {
+                                    <button
+                                        class="cal-more"
+                                        title="Afficher ce jour"
+                                        on:click=move |e| {
+                                            e.stop_propagation();
+                                            ui.cal_anchor.set(more_date.clone());
+                                            set_kind(ui, CalendarViewKind::Day);
+                                        }
+                                    >
+                                        {format!("+ {extra} autre{}", if extra > 1 { "s" } else { "" })}
+                                    </button>
+                                })}
                             </div>
                         }
                     })

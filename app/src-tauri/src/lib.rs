@@ -3,6 +3,7 @@
 //! Dossier de données, par ordre de priorité : variable d'environnement `THUNDERLOOK_DATA`,
 //! `dataDir` dans `config.json` (dossier de configuration de l'application), sinon `<données locales>\data`.
 
+mod calendar_cmds;
 mod contacts_cmds;
 mod exchange_cmds;
 mod items_cmds;
@@ -1547,6 +1548,7 @@ pub fn run() {
             shared_calendar::appointment_save,
             shared_calendar::appointment_delete,
             shared_calendar::outlook_sync,
+            calendar_cmds::appointment_shift,
             reminders_cmds::reminders_due,
             reminders_cmds::reminder_dismiss,
             reminders_cmds::reminder_snooze,

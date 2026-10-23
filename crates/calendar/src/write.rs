@@ -455,6 +455,38 @@ pub fn update_occurrence(conn: &mut Connection, _data_dir: &Path, message_id: i6
     Ok(())
 }
 
+/// Déplace un rendez-vous simple (glisser-déposer, poignée de fin) : nouveaux début et fin, heure de Paris
+/// `AAAA-MM-JJTHH:MM`. Le reste du rendez-vous est inchangé. Refuse une série (une occurrence se déplace par
+/// `update_occurrence`).
+pub fn move_appointment(conn: &mut Connection, message_id: i64, start_local: &str, end_local: &str) -> Result<()> {
+    let row: Option<(i64, Vec<u8>)> = conn
+        .query_row("SELECT f.source_id, m.props FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id = ?1", [message_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()
+        .map_err(e)?;
+    let (source_id, old) = row.ok_or("rendez-vous introuvable")?;
+    let named = named_of(conn, source_id)?;
+    let a = |lid| named.id(PSETID_APPOINTMENT, lid);
+    if a(0x8223).and_then(|id| bag::Bag::parse(&old).ok().and_then(|b| b.bool(id))).unwrap_or(false) {
+        return Err("Ce rendez-vous est une série : déplacez une occurrence.".into());
+    }
+    let (start, end) = (utc_ms(start_local)?, utc_ms(end_local)?);
+    if end < start {
+        return Err("La fin est avant le début.".into());
+    }
+    let (Some(start_id), Some(end_id)) = (a(0x820D), a(0x820E)) else {
+        return Err("ce calendrier n'a pas les propriétés d'un rendez-vous (source sans table de noms)".into());
+    };
+    let set = [
+        (start_id, Some(Value::time_ms(start))),
+        (end_id, Some(Value::time_ms(end))),
+        (0x0060, Some(Value::time_ms(start))),
+        (0x0061, Some(Value::time_ms(end))),
+    ];
+    let props = bag::merge(&old, &set)?;
+    conn.execute("UPDATE message SET props = ?2, modified_at = ?3, indexed = 0 WHERE id = ?1", params![message_id, props, now_ms()]).map_err(e)?;
+    Ok(())
+}
+
 /// Suppression d'un rendez-vous (toute la série pour un rendez-vous périodique).
 pub fn delete(conn: &mut Connection, message_id: i64) -> Result<()> {
     conn.execute("DELETE FROM message_fts WHERE rowid = ?1", [message_id]).map_err(e)?;
@@ -618,6 +650,28 @@ mod tests {
         assert_eq!(l, ["10-23 10-23 15:00 → 10-23 16:00 Point d'équipe", "11-06 11-06 15:00 → 11-06 16:00 Point d'équipe", "11-20 11-20 15:00 → 11-20 16:00 Point d'équipe"]);
         let r = recurrence(&conn, id);
         assert_eq!((r.exceptions.len(), r.deleted.len(), r.modified.len()), (0, 0, 0));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn move_appointment_changes_times_only() {
+        let (dir, mut conn, folder) = fixture("move");
+        let single = Edit { subject: "Dentiste".into(), location: "Cabinet".into(), start: "2026-10-23T14:00".into(), end: "2026-10-23T15:00".into(), busy: 2, reminder: Some(15), ..Default::default() };
+        let id = create(&mut conn, &dir, folder, &single).unwrap();
+        move_appointment(&mut conn, id, "2026-10-24T09:15", "2026-10-24T10:15").unwrap();
+        let l = listing(&conn, id);
+        assert_eq!(l.len(), 1, "{l:?}");
+        assert!(l[0].ends_with("10-24 09:15 → 10-24 10:15 Dentiste"), "{l:?}");
+        // Le reste est intact : redimensionner garde le début.
+        move_appointment(&mut conn, id, "2026-10-24T09:15", "2026-10-24T11:00").unwrap();
+        assert!(listing(&conn, id)[0].ends_with("10-24 09:15 → 10-24 11:00 Dentiste"));
+        let a = crate::load(&conn).unwrap().appointments.into_iter().find(|a| a.id == id).unwrap();
+        assert_eq!((a.location.as_deref(), a.reminder_minutes), (Some("Cabinet"), Some(15)));
+        assert!(move_appointment(&mut conn, id, "2026-10-24T12:00", "2026-10-24T11:00").is_err(), "fin avant début");
+        // Une série se déplace par occurrence.
+        let series = weekly(&mut conn, &dir, folder);
+        assert!(move_appointment(&mut conn, series, "2026-10-24T09:00", "2026-10-24T10:00").is_err());
+        assert!(move_appointment(&mut conn, 9_999, "2026-10-24T09:00", "2026-10-24T10:00").is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 
