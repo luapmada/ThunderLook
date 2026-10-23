@@ -12,15 +12,15 @@ use crate::{CalendarCache, clear_calendar, data_dir};
 pub fn start(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
-        // Après le chargement de l'interface : la sauvegarde lit toute la base et ne doit pas gêner le démarrage.
+        // Après le chargement de l'interface. La sauvegarde est légère (incrémentale, lecture seule, par paquets, pauses) mais
+        // reste différée : le démarrage a la priorité.
         std::thread::sleep(std::time::Duration::from_secs(240));
         let Ok(dir) = data_dir(&app) else { return };
-        let Ok(conn) = thunderlook_store::open(&dir) else { return };
         let purged = thunderlook_safety::purge(&dir, TRASH_DAYS);
         if purged > 0 {
             log::info!("corbeille interne : {purged} instantané(s) de plus de {TRASH_DAYS} jours supprimé(s)");
         }
-        match thunderlook_safety::backup(&conn, &dir, KEEP_DAILY) {
+        match thunderlook_safety::backup(&dir, KEEP_DAILY) {
             Ok(Some(file)) => log::info!("sauvegarde du jour : {}", file.display()),
             Ok(None) => {}
             Err(e) => log::warn!("sauvegarde du jour impossible : {e}"),
@@ -70,8 +70,9 @@ pub fn backups_list(app: AppHandle) -> Result<Vec<BackupRow>, String> {
 #[tauri::command(async)]
 pub fn backup_now(app: AppHandle) -> Result<String, String> {
     let dir = data_dir(&app)?;
-    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
-    Ok(match thunderlook_safety::backup(&conn, &dir, KEEP_DAILY)? {
+    // Dans un fil à part (lecture seule, basse priorité) : la commande attend sa fin pour répondre, l'interface non.
+    let done = thunderlook_safety::spawn_backup(dir, KEEP_DAILY).join().map_err(|_| "la sauvegarde s'est arrêtée brutalement".to_string())?;
+    Ok(match done? {
         Some(_) => "Sauvegarde faite".to_string(),
         None => "La sauvegarde d'aujourd'hui existe déjà".to_string(),
     })
