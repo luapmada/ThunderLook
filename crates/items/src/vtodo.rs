@@ -22,6 +22,57 @@ fn ical_date(day: &str) -> Option<String> {
     (d.len() == 8).then_some(d)
 }
 
+const FREQS: [(&str, &str); 4] = [("daily", "DAILY"), ("weekly", "WEEKLY"), ("monthly", "MONTHLY"), ("yearly", "YEARLY")];
+
+/// Périodicité : `RRULE` pour une série fixe ; « recommencer après la fin » n'a pas d'équivalent iCalendar, écrit
+/// `X-THUNDERLOOK-REGEN:<DAILY|…>;<N>`. Une périodicité « personnalisée » n'est pas exportée.
+fn push_repeat(f: &TaskForm, push: &mut impl FnMut(String)) {
+    let every = f.repeat_every.max(1);
+    if let Some(freq) = f.repeat.strip_prefix(crate::trecur::REGEN).and_then(|r| FREQS.iter().find(|(k, _)| *k == r)) {
+        push(format!("X-THUNDERLOOK-REGEN:{};{every}", freq.1));
+    } else if let Some((_, freq)) = FREQS.iter().find(|(k, _)| *k == f.repeat) {
+        let end = match f.repeat_end.as_str() {
+            "count" => format!(";COUNT={}", f.repeat_count.max(1)),
+            "until" => ical_date(&f.repeat_until).map(|d| format!(";UNTIL={d}")).unwrap_or_default(),
+            _ => String::new(),
+        };
+        push(format!("RRULE:FREQ={freq};INTERVAL={every}{end}"));
+    }
+}
+
+/// `RRULE` ou `X-THUNDERLOOK-REGEN` → champs de périodicité du formulaire.
+fn read_repeat(f: &mut TaskForm, name: &str, v: &str, w: &mut Vec<String>) {
+    let freq = |t: &str| FREQS.iter().find(|(_, k)| k.eq_ignore_ascii_case(t.trim())).map(|(k, _)| *k);
+    if name == "X-THUNDERLOOK-REGEN" {
+        let (kind, n) = v.split_once(';').unwrap_or((v, "1"));
+        match freq(kind) {
+            Some(k) => (f.repeat, f.repeat_every, f.repeat_end) = (format!("{}{k}", crate::trecur::REGEN), n.trim().parse().unwrap_or(1), "never".into()),
+            None => w.push(format!("X-THUNDERLOOK-REGEN illisible ({}), ignoré", v.trim())),
+        }
+        return;
+    }
+    let mut found = None;
+    let (mut every, mut end, mut count, mut until) = (1, "never", 0, String::new());
+    for part in v.split(';') {
+        let Some((k, x)) = part.split_once('=') else { continue };
+        match k.trim().to_uppercase().as_str() {
+            "FREQ" => found = freq(x),
+            "INTERVAL" => every = x.trim().parse().unwrap_or(1),
+            "COUNT" => (end, count) = ("count", x.trim().parse().unwrap_or(1)),
+            "UNTIL" => match day_of(x) {
+                Some(d) => (end, until) = ("until", d),
+                None => w.push(format!("RRULE UNTIL illisible ({}), série sans fin", x.trim())),
+            },
+            "BYDAY" | "BYMONTHDAY" | "BYMONTH" | "BYSETPOS" | "BYYEARDAY" | "BYWEEKNO" => w.push(format!("RRULE {k} non pris en charge : ignoré")),
+            _ => {}
+        }
+    }
+    match found {
+        Some(k) => (f.repeat, f.repeat_every, f.repeat_end, f.repeat_count, f.repeat_until) = (k.into(), every, end.into(), count, until),
+        None => w.push(format!("RRULE non prise en charge ({}), ignorée", v.trim())),
+    }
+}
+
 pub fn export(forms: &[TaskForm]) -> String {
     let mut out = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//ThunderLook//vtodo//FR\r\n");
     let mut push = |s: String| {
@@ -51,6 +102,7 @@ pub fn export(forms: &[TaskForm]) -> String {
         if status == 3 || status == 4 {
             push(format!("X-THUNDERLOOK-STATUS:{status}"));
         }
+        push_repeat(f, &mut push);
         push(format!("PERCENT-COMPLETE:{}", if status == 2 { 100 } else { 0 }));
         push(format!("PRIORITY:{}", match f.importance.clamp(0, 2) { 2 => 1, 0 => 9, _ => 5 }));
         if !f.body.is_empty() {
@@ -179,6 +231,7 @@ fn record(n: usize, props: Vec<Prop>, truncated: bool) -> Parsed {
                 Ok(6..=9) => f.importance = 0,
                 _ => w.push(format!("PRIORITY illisible ({}), normale", v.trim())),
             },
+            "RRULE" | "X-THUNDERLOOK-REGEN" => read_repeat(&mut f, &p.name, &v, &mut w),
             "CATEGORIES" => {
                 for c in textfmt::split_unescaped(&v, ',') {
                     let c = textfmt::unescape(&c).trim().to_string();
@@ -247,6 +300,30 @@ mod tests {
         assert!(out.lines().all(|l| l.len() <= 75));
         let back: Vec<TaskForm> = parse(&out).unwrap().into_iter().map(|p| p.form).collect();
         assert_eq!(back, forms);
+    }
+
+    #[test]
+    fn periodicite_aller_retour() {
+        let base = |repeat: &str, end: &str| TaskForm {
+            subject: "Série".into(),
+            importance: 1,
+            start: "2026-10-23".into(),
+            repeat: repeat.into(),
+            repeat_every: 2,
+            repeat_end: end.into(),
+            repeat_count: if end == "count" { 4 } else { 0 },
+            repeat_until: if end == "until" { "2027-01-31".into() } else { String::new() },
+            ..TaskForm::default()
+        };
+        let forms = vec![base("weekly", "count"), base("monthly", "until"), base("daily", "never"), base("regen_yearly", "never")];
+        let out = export(&forms);
+        assert!(out.contains("RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4") && out.contains("UNTIL=20270131") && out.contains("X-THUNDERLOOK-REGEN:YEARLY;2"));
+        assert_eq!(out.matches("RRULE").count(), 3);
+        let back: Vec<TaskForm> = parse(&out).unwrap().into_iter().map(|p| p.form).collect();
+        assert_eq!(back, forms);
+        let ext = parse("BEGIN:VTODO\nSUMMARY:x\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE\nEND:VTODO").unwrap();
+        assert_eq!(ext[0].form.repeat, "weekly");
+        assert!(ext[0].warnings.iter().any(|w| w.contains("BYDAY")));
     }
 
     #[test]
