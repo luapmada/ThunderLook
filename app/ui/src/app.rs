@@ -92,7 +92,12 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
     let key = ev.key();
     let (ctrl, alt, shift) = (ev.ctrl_key(), ev.alt_key(), ev.shift_key());
     // Une boîte de dialogue ou un menu contextuel garde ses touches.
-    if ui.dialog.get_untracked().is_some() || ui.context_menu.get_untracked().is_some() || ui.phone_exchange.get_untracked() || ui.backups.get_untracked() {
+    if ui.dialog.get_untracked().is_some() || ui.context_menu.get_untracked().is_some() || ui.phone_exchange.get_untracked() || ui.backups.get_untracked() || ui.help.with_untracked(Option::is_some) {
+        return;
+    }
+    if key == "F1" && !ctrl && !alt && !shift {
+        ev.prevent_default();
+        crate::help::open(ui, "");
         return;
     }
     // Échange avec le téléphone (fichiers vCard, iCalendar, vNote).
@@ -509,6 +514,7 @@ pub fn App() -> impl IntoView {
             <crate::options::OptionsDialog />
             <crate::options::OptionsEffects />
             <crate::safety::BackupsDialog />
+            <crate::help::HelpDialog />
         </div>
     }
 }

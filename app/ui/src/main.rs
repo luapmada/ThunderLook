@@ -17,6 +17,7 @@ mod exchange;
 mod folders;
 mod from_mail;
 mod global_search;
+mod help;
 mod icons;
 mod item_folders;
 mod junk;

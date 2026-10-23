@@ -91,6 +91,8 @@ pub enum Action {
     Print(&'static str),
     /// Annule la dernière suppression ou modification (hors courrier).
     Undo,
+    /// Aide intégrée, à la rubrique donnée (vide : en haut).
+    Help(&'static str),
 }
 
 impl Action {
@@ -174,6 +176,7 @@ fn perform(ui: Ui, action: Action) {
         Action::Exchange(kind, import) => crate::contact_form::exchange(ui, kind, import),
         Action::NoteDelete => crate::notes::delete_selected(ui),
         Action::Undo => crate::safety::undo(ui),
+        Action::Help(anchor) => crate::help::open(ui, anchor),
         Action::ContactDelete => {
             if let Some(id) = ui.contact_selected.get_untracked() {
                 crate::contact_form::delete(ui, id);
@@ -462,7 +465,11 @@ const SEARCH_TAB: &[Group] = &[
 
 const HELP: &[Group] = &[Group {
     label: "Aide",
-    cmds: &[cmd("Aide", HELP_ICON, Some("F1"), false, true, true), cmd("Raccourcis clavier", INFO, None, false, true, true)],
+    cmds: &[
+        wired("Aide", HELP_ICON, Some("F1"), true, true, Action::Help("")),
+        wired("Raccourcis clavier", INFO, None, true, true, Action::Help("raccourcis-clavier")),
+        wired("À propos", INFO, None, true, true, Action::Help("a-propos")),
+    ],
 }];
 
 use crate::icons::HELP as HELP_ICON;
