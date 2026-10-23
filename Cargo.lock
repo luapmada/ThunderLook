@@ -5182,6 +5182,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "thunderlook-search"
+version = "0.10.0"
+dependencies = [
+ "chrono",
+ "mail-parser",
+ "serde",
+ "thunderlook-calendar",
+ "thunderlook-contacts",
+ "thunderlook-items",
+ "thunderlook-model",
+ "thunderlook-store",
+]
+
+[[package]]
 name = "thunderlook-store"
 version = "0.10.0"
 dependencies = [
