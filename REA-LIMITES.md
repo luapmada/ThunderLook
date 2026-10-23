@@ -199,3 +199,20 @@ Non vérifié sur un blob réel (pas de fixture avec objet ou lieu d'exception) 
   recréer ou réclamer ce message à l'ouverture : à voir.
 - **Changement de périodicité** (`update_series`) : exceptions et suppressions abandonnées (comptées dans le retour).
   « Même périodicité » = fréquence, motif, période, fin et dates de début/fin identiques.
+
+## À vérifier avec REA/Outlook — rappels (`crates/reminders`, lot D)
+
+- **Rappels manqués (ThunderLook fermé plusieurs jours)** : comportement d'Outlook non vérifié. Plafond **proposé** :
+  `Window::default()` = 24 h en arrière ; au-delà, un rappel manqué n'est plus rendu (ni notifié). À confirmer : faut-il
+  plutôt tout lister jusqu'à ce que l'utilisateur l'ignore (Outlook affichait « Rappels : 171 »), ou plafonner à N jours ?
+- **Rappel reporté** : revient à l'heure du report, même si l'heure d'origine est plus ancienne que la plage arrière
+  (14 jours au plus, plafond de report que je suppose proche d'Outlook, non vérifié).
+- **Ignorer** : définitif pour l'identifiant. Une tâche ignorée (`t<id>`) le reste même si son heure de rappel change
+  ensuite ; une occurrence de série est identifiée par son jour local d'origine (`a<id>@AAAA-MM-JJ`).
+- **Tâche sans heure de rappel** : échéance à 8 h (heure de Paris) ; une tâche sans `PidLidReminderSet` n'a pas de rappel
+  (hypothèse : Outlook n'en crée pas sans cette case cochée). Non vérifié : tâche récurrente (non traitée : une seule échéance).
+- **Rappel de rendez-vous** : `Appointment.reminder_minutes` tel que lu (15 min si `PidLidReminderDelta` absent) ; l'heure du
+  rappel d'une exception de série (rappel propre à l'occurrence) n'est pas relue, c'est celui de la série. Rendez-vous
+  d'une journée entière : rappel compté depuis minuit.
+- **Notification** : le clic ramène seulement ThunderLook au premier plan (pas de lien d'ouverture dédié). Le thread Tauri
+  (`app/src-tauri/src/reminders_cmds.rs`) n'a pas pu être compilé en cloud (gdk absent, Windows seulement).

@@ -3,6 +3,7 @@
 //! Dossier de données, par ordre de priorité : variable d'environnement `THUNDERLOOK_DATA`,
 //! `dataDir` dans `config.json` (dossier de configuration de l'application), sinon `<données locales>\data`.
 
+mod reminders_cmds;
 mod shared_calendar;
 mod toast;
 
@@ -1462,6 +1463,7 @@ pub fn run() {
                 });
             }
             start_scheduler(app.handle());
+            reminders_cmds::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1511,6 +1513,9 @@ pub fn run() {
             shared_calendar::appointment_save,
             shared_calendar::appointment_delete,
             shared_calendar::outlook_sync,
+            reminders_cmds::reminders_due,
+            reminders_cmds::reminder_dismiss,
+            reminders_cmds::reminder_snooze,
             contact_folders,
             contact_list,
             contact_card,
