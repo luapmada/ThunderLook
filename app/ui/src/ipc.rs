@@ -380,6 +380,11 @@ pub async fn save_attachment(id: &str, index: u32) -> Result<bool, String> {
     call("save_attachment", &AttachmentArg { id, index }).await
 }
 
+/// Enregistre toutes les pièces jointes dans un dossier choisi ; renvoie le nombre de fichiers (0 : annulé).
+pub async fn save_all_attachments(id: &str) -> Result<u32, String> {
+    call("save_all_attachments", &IdArg { id }).await
+}
+
 pub async fn load_settings() -> Result<Settings, String> {
     call("load_settings", &NoArgs {}).await
 }

@@ -5,6 +5,7 @@
 
 mod contacts_cmds;
 mod items_cmds;
+mod mail_cmds;
 mod reminders_cmds;
 mod shared_calendar;
 mod toast;
@@ -1505,6 +1506,7 @@ pub fn run() {
             run_rules,
             open_attachment,
             save_attachment,
+            mail_cmds::save_all_attachments,
             load_settings,
             save_settings,
             load_quick_steps,

@@ -31,6 +31,28 @@ pub fn is_blocked(name: &str) -> bool {
     ext.is_some_and(|e| BLOCKED_EXTENSIONS.contains(&e.as_str()))
 }
 
+/// Noms de fichiers distincts pour enregistrer plusieurs pièces jointes dans un même dossier :
+/// un doublon (sans tenir compte de la casse, comme Windows) devient « nom (2).ext », « nom (3).ext »…
+pub fn unique_names(names: &[String]) -> Vec<String> {
+    let mut used = std::collections::HashSet::new();
+    names
+        .iter()
+        .map(|name| {
+            let (stem, ext) = match name.rsplit_once('.') {
+                Some((s, e)) if !s.is_empty() => (s, format!(".{e}")),
+                _ => (name.as_str(), String::new()),
+            };
+            let mut candidate = name.clone();
+            let mut n = 1;
+            while !used.insert(candidate.to_lowercase()) {
+                n += 1;
+                candidate = format!("{stem} ({n}){ext}");
+            }
+            candidate
+        })
+        .collect()
+}
+
 /// Pièce jointe extraite du `.eml`.
 pub struct AttachmentData {
     pub name: String,
@@ -394,5 +416,11 @@ Content-Transfer-Encoding: base64\r\n\r\nJVBERi0xLjQK\r\n\
         assert!(has_remote("<td background='http://x/y.gif'>"));
         assert_eq!(item_kind("IPM.Note.SMIME"), None);
         assert_eq!(item_kind("IPM.Contact").as_deref(), Some("Contact"));
+    }
+
+    #[test]
+    fn duplicate_names_get_a_counter() {
+        let names: Vec<String> = ["a.pdf", "A.PDF", "b", "b", "a.pdf", ".bashrc"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(super::unique_names(&names), ["a.pdf", "A (2).PDF", "b", "b (2)", "a (3).pdf", ".bashrc"]);
     }
 }

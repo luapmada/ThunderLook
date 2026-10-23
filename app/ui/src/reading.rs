@@ -10,6 +10,12 @@ use wasm_bindgen::{JsCast, closure::Closure};
 
 use crate::{actions, app::global_key, icons::*, ipc, state::use_ui};
 
+/// Impression de la page entière (repli quand le corps n'est pas un cadre) : on ne garde que le volet de lecture.
+const PRINT_CSS: &str = "@media print { body * { visibility: hidden !important; } \
+.pane.reading, .pane.reading * { visibility: visible !important; } \
+.pane.reading { position: absolute !important; left: 0; top: 0; width: 100% !important; height: auto !important; overflow: visible !important; } \
+.reading-actions { display: none !important; } }";
+
 /// Ajuste la hauteur de l'iframe à son document et y relaie les raccourcis globaux.
 fn wire_frame(frame: &web_sys::HtmlIFrameElement, relay: &js_sys::Function) {
     let Some(doc) = frame.content_document() else { return };
@@ -80,7 +86,28 @@ pub fn ReadingPane() -> impl IntoView {
         })
     };
 
+    let save_all = move |id: String| {
+        spawn_local(async move {
+            if let Err(e) = ipc::save_all_attachments(&id).await {
+                ui.error.set(Some(e));
+            }
+        })
+    };
+    // Impression par le navigateur de la page : le corps HTML (cadre isolé) seul, sinon le volet de lecture
+    // (les règles `@media print` ci-dessous ne gardent que lui).
+    let print = move |_| {
+        let body_frame = frame.get_untracked().and_then(|f| f.content_window());
+        let result = match body_frame {
+            Some(w) => w.print(),
+            None => window().print(),
+        };
+        if let Err(e) = result {
+            ui.error.set(Some(format!("Impression impossible : {e:?}")));
+        }
+    };
+
     view! {
+        <style>{PRINT_CSS}</style>
         <section class="pane reading" aria-label="Volet de lecture" tabindex="-1" node_ref=ui.refs.reading>
             {move || match message.get() {
                 None if ui.selected.get().is_none() => view! { <p class="reading-empty">"Sélectionnez un élément à lire."</p> }.into_any(),
@@ -94,6 +121,19 @@ pub fn ReadingPane() -> impl IntoView {
                                 {action("Répondre", REPLY, "Ctrl+R", ComposeKind::Reply)}
                                 {action("Répondre à tous", REPLY_ALL, "Ctrl+Maj+R", ComposeKind::ReplyAll)}
                                 {action("Transférer", FORWARD, "Ctrl+F", ComposeKind::Forward)}
+                                <button class="cmd" title="Imprimer ce message" on:click=print>
+                                    <Svg icon=FILE />
+                                    <span>"Imprimer"</span>
+                                </button>
+                                {(m.attachments.len() > 1).then(|| {
+                                    let id = m.id.clone();
+                                    view! {
+                                        <button class="cmd" title="Enregistrer toutes les pièces jointes dans un dossier" on:click=move |_| save_all(id.clone())>
+                                            <Svg icon=SAVE />
+                                            <span>"Tout enregistrer"</span>
+                                        </button>
+                                    }
+                                })}
                                 {m.remote_blocked.then(|| {
                                     let id = m.id.clone();
                                     view! {

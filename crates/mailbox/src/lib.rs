@@ -31,7 +31,7 @@ pub use index::{body_text, index_pending};
 pub use oft::draft_from_oft;
 pub use remote::{file_message, under as imap_under};
 pub use rules::{FolderMatch, FolderResolver};
-pub use message::{AttachmentData, BLOCKED_EXTENSIONS, is_blocked};
+pub use message::{AttachmentData, BLOCKED_EXTENSIONS, is_blocked, unique_names};
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -151,6 +151,14 @@ pub fn fold(s: &str) -> String {
             c => c,
         })
         .collect()
+}
+
+/// Premier destinataire d'une ligne « À » (nom, sinon adresse), pour trier et grouper.
+pub fn first_recipient(to_line: &str) -> String {
+    let first = to_line.split(';').next().unwrap_or("").trim();
+    let name = first.split('<').next().unwrap_or("").trim().trim_matches('"').trim();
+    let label = if name.is_empty() { first.trim_matches(['<', '>']).trim() } else { name };
+    if label.is_empty() { "(aucun destinataire)".to_string() } else { label.to_string() }
 }
 
 /// Objet sans préfixes de réponse et de transfert (« RE: », « TR : », « Fwd: »…), pour regrouper.
@@ -527,7 +535,7 @@ impl Mailbox {
         let mut stmt = self
             .conn
             .prepare_cached(&format!(
-                "SELECT m.id, IFNULL(m.received_at, 0), m.from_name, m.from_addr, m.subject, m.size, m.flag_status,
+                "SELECT m.id, IFNULL(m.received_at, 0), m.from_name, m.from_addr, m.subject, m.size, m.flag_status, m.to_line, m.importance,
                         EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0)
                  FROM {from_where}"
             ))
@@ -542,12 +550,15 @@ impl Mailbox {
                     r.get::<_, String>(4)?,
                     r.get::<_, i64>(5)?,
                     r.get::<_, i64>(6)?,
-                    r.get::<_, bool>(7)?,
+                    r.get::<_, bool>(9)?,
+                    r.get::<_, String>(7)?,
+                    r.get::<_, i64>(8)?,
                 ))
             })
             .map_err(err)?;
+        let mut to_labels: HashMap<String, String> = HashMap::new();
         for row in rows {
-            let (id, date, from_name, from_addr, subject, size, flag, attached) = row.map_err(err)?;
+            let (id, date, from_name, from_addr, subject, size, flag, attached, to_line, importance) = row.map_err(err)?;
             let (key, label) = match sort {
                 SortField::From => {
                     let label = if from_name.trim().is_empty() { from_addr } else { from_name };
@@ -564,6 +575,18 @@ impl Mailbox {
                     2 => ("0".into(), "Avec suivi".into()),
                     1 => ("1".into(), "Terminé".into()),
                     _ => ("2".into(), "Sans indicateur".into()),
+                },
+                SortField::To => {
+                    // Un seul libellé par destinataire, quelle que soit la casse (le premier rencontré).
+                    let key = fold(&first_recipient(&to_line));
+                    let label = to_labels.entry(key.clone()).or_insert_with(|| first_recipient(&to_line)).clone();
+                    (key, label)
+                }
+                // Clés d'un caractère : haute d'abord en ordre croissant.
+                SortField::Importance => match importance {
+                    2 => ("0".into(), "Importance haute".into()),
+                    0 => ("2".into(), "Importance faible".into()),
+                    _ => ("1".into(), "Importance normale".into()),
                 },
                 SortField::Attachments if attached => ("0".into(), "Avec pièce jointe".into()),
                 SortField::Attachments => ("1".into(), "Sans pièce jointe".into()),
@@ -978,6 +1001,14 @@ mod tests {
         assert_eq!(normalized_subject("Réunion : ordre du jour"), "Réunion : ordre du jour");
         assert_eq!(normalized_subject("Facture: 2026-104"), "Facture: 2026-104");
         assert_eq!(fold("  Éléonore ÇA "), "eleonore ca");
+    }
+
+    #[test]
+    fn recipients() {
+        assert_eq!(first_recipient("Camille Roux <c@example.org>; d@example.org"), "Camille Roux");
+        assert_eq!(first_recipient("\"Roux, C.\" <c@example.org>"), "Roux, C.");
+        assert_eq!(first_recipient("<c@example.org>"), "c@example.org");
+        assert_eq!(first_recipient("  "), "(aucun destinataire)");
     }
 
     #[test]
