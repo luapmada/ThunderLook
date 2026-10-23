@@ -321,3 +321,14 @@ Testé sous Linux sur une base fabriquée uniquement ; **aucune écriture dans O
 - Couleurs : les 25 couleurs de la palette des catégories ; Outlook n'en propose que 9 + Automatique pour un calendrier.
 - Nom unique comparé sans casse sur tout le fichier de données, pas seulement parmi les dossiers de même parent : règle plus
   stricte que celle d'Outlook (non vérifiée).
+
+## À vérifier avec REA/Outlook — tâches périodiques (`crates/items`, lot V)
+- « Recommencer N jours après la fin » : écrit comme `PidLidTaskRecurrence` (RecurrencePattern) avec `SlidingFlag` = 1 (octets 18-21,
+  [MS-OXOCAL] 2.2.1.44.1), sans fin, motif Jour/Semaine/Mois/An. Le drapeau est établi par la spécification, PAS relevé sur une
+  tâche créée par Outlook : à comparer avec une tâche « Régénérer » réelle (blob identique ? `PatternType`/`Period` pour mois et années).
+- Série « régénérée » : prochaine échéance = jour de la fin (Paris) + N unités, écart début/échéance et rappel conservés ; fin de
+  mois ramenée au dernier jour (31 janv. + 1 mois = 28/29 févr.). Comportement d'Outlook sur ces deux points non relevé.
+- Supprimer UNE occurrence crée la suivante puis supprime celle-ci (Outlook : même effet supposé, non relevé). Ctrl+Z ne restaure que
+  l'occurrence supprimée : la suivante créée reste.
+- Export `.ics` : `RRULE` (FREQ/INTERVAL/COUNT/UNTIL) pour les séries fixes ; « après la fin » → `X-THUNDERLOOK-REGEN` (aucun équivalent iCalendar).
+- Rappels : aucune modification de `crates/reminders` ; chaque occurrence suivante est une vraie tâche avec son propre rappel décalé.

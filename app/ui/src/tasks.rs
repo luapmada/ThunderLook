@@ -33,7 +33,17 @@ struct QueryArg<'a> {
 
 const VIEWS: [(&str, &str); 5] = [("all", "Toutes"), ("today", "Aujourd'hui"), ("overdue", "En retard"), ("week", "Cette semaine"), ("done", "Terminées")];
 const SORTS: [(&str, &str); 3] = [("due", "Échéance"), ("importance", "Importance"), ("title", "Titre")];
-const REPEATS: [(&str, &str); 5] = [("", "Jamais"), ("daily", "Chaque jour"), ("weekly", "Chaque semaine"), ("monthly", "Chaque mois"), ("yearly", "Chaque année")];
+const REPEATS: [(&str, &str); 9] = [
+    ("", "Jamais"),
+    ("daily", "Chaque jour"),
+    ("weekly", "Chaque semaine"),
+    ("monthly", "Chaque mois"),
+    ("yearly", "Chaque année"),
+    ("regen_daily", "N jours après la fin"),
+    ("regen_weekly", "N semaines après la fin"),
+    ("regen_monthly", "N mois après la fin"),
+    ("regen_yearly", "N ans après la fin"),
+];
 const REPEAT_ENDS: [(&str, &str); 3] = [("never", "Sans fin"), ("count", "Après N fois"), ("until", "Jusqu'au")];
 
 const STATUSES: [(i32, &str); 5] = [(0, "Pas commencée"), (1, "En cours"), (2, "Terminée"), (3, "En attente de quelqu'un d'autre"), (4, "Reportée")];
@@ -95,11 +105,18 @@ pub fn toggle_selected(ui: Ui) {
 
 pub fn delete_selected(ui: Ui) {
     let Some(id) = ui.task_selected.get_untracked() else { return };
+    // Tâche périodique en cours : seule cette occurrence est supprimée, la suivante est créée.
+    let occurrence = ui.tasks.with_untracked(|l| l.as_ref().and_then(|l| l.rows.iter().find(|r| r.id == id)).is_some_and(|r| r.recurring && !r.complete));
     spawn_local(async move {
-        match ipc::task_delete(&id).await {
-            Ok(()) => {
+        let done = if occurrence {
+            ipc::task_delete_occurrence(&id).await.map(|next| if next.is_some() { "Occurrence supprimée, la suivante est créée" } else { "Tâche supprimée" })
+        } else {
+            ipc::task_delete(&id).await.map(|()| "Tâche supprimée")
+        };
+        match done {
+            Ok(msg) => {
                 ui.task_selected.set(None);
-                ui.status.set(Some("Tâche supprimée".into()));
+                ui.status.set(Some(msg.into()));
                 changed(ui);
             }
             Err(e) => ui.error.set(Some(e)),
@@ -330,6 +347,7 @@ pub fn TaskDialog() -> impl IntoView {
                                 <input type="number" min="1" max="999" aria-label="Intervalle" prop:value=move || form().map(|f| f.repeat_every.max(1)).unwrap_or(1)
                                     on:input=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(1); set(&|f| f.repeat_every = v); } />
                             </label>
+                            <Show when=move || form().is_some_and(|f| !f.repeat.starts_with("regen_"))>
                             <label class="field">
                                 <span>"Fin"</span>
                                 <select aria-label="Fin de la répétition" on:change=move |ev| { let v = event_target_value(&ev); set(&|f| f.repeat_end = v.clone()); }>
@@ -349,6 +367,7 @@ pub fn TaskDialog() -> impl IntoView {
                                     <input type="date" aria-label="Dernier jour" prop:value=move || form().map(|f| f.repeat_until).unwrap_or_default()
                                         on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.repeat_until = v.clone()); } />
                                 </label>
+                            </Show>
                             </Show>
                         </div>
                     </Show>

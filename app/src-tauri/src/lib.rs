@@ -16,6 +16,7 @@ mod reminders_cmds;
 mod safety_cmds;
 mod search_cmds;
 mod shared_calendar;
+mod tasks_recur_cmds;
 mod toast;
 
 use std::{
@@ -1602,6 +1603,8 @@ pub fn run() {
             task_save,
             task_complete,
             task_delete,
+            tasks_recur_cmds::task_delete_occurrence,
+            tasks_recur_cmds::task_delete_series,
             notes_list,
             note_form,
             note_save,

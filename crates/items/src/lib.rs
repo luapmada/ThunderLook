@@ -259,7 +259,7 @@ pub fn task_form(conn: &Connection, data_dir: &Path, id: i64) -> Result<TaskForm
     let recurring = ids.f_recurring.and_then(|i| bag.bool(i)).unwrap_or(false);
     if let (true, Some(blob)) = (recurring, ids.recur.and_then(|i| bag.binary(i))) {
         // Périodicité illisible : affichée « personnalisée », donc conservée telle quelle à l'enregistrement.
-        let f = trecur::decode(blob).map(|r| trecur::fields(&r));
+        let f = trecur::decode(blob).map(|r| trecur::fields(&r, trecur::is_regen(blob)));
         form.repeat = f.as_ref().map_or("custom", |f| f.repeat).to_string();
         if let Ok(f) = f {
             (form.repeat_every, form.repeat_end, form.repeat_count, form.repeat_until) = (f.every, f.end.to_string(), f.count, f.until);
@@ -299,8 +299,11 @@ fn task_props(n: &Named, f: &TaskForm, custom: Option<&[u8]>) -> Result<Vec<(u16
             Some(freq) => {
                 let anchor = [&f.start, &f.due].into_iter().find_map(|d| day_ms(d).ok().flatten()).ok_or("Indiquez un début ou une échéance pour une tâche périodique.")?;
                 let anchor = chrono::DateTime::from_timestamp_millis(anchor).unwrap_or_default().date_naive();
-                let rec = trecur::build(freq, f.repeat_every, &f.repeat_end, f.repeat_count, &f.repeat_until, anchor)?;
-                put(ids.recur, Some(Value::Binary(trecur::encode(&rec))));
+                let regen = kind.starts_with(trecur::REGEN);
+                // Une tâche qui recommence après sa fin n'a pas de fin de série (comme dans Outlook).
+                let (end, count, until) = if regen { ("never", 0, "") } else { (f.repeat_end.as_str(), f.repeat_count, f.repeat_until.as_str()) };
+                let rec = trecur::build(freq, f.repeat_every, end, count, until, anchor)?;
+                put(ids.recur, Some(Value::Binary(if regen { trecur::encode_regen(&rec) } else { trecur::encode(&rec) })));
                 put(ids.f_recurring, Some(Value::Bool(true)));
             }
             None => {
@@ -344,11 +347,19 @@ fn spawn_next(conn: &mut Connection, data_dir: &Path, id: i64) -> Result<Option<
         return Ok(None);
     }
     let Some(blob) = ids.recur.and_then(|i| bag.binary(i)) else { return Ok(None) };
-    let rec = trecur::decode(blob)?;
     let form = task_form(conn, data_dir, id)?;
     let date = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok();
-    let Some(anchor) = date(&form.start).or_else(|| date(&form.due)) else { return Ok(None) };
-    let Some(next) = trecur::next_after(&rec, anchor) else { return Ok(None) };
+    let regen = trecur::is_regen(blob);
+    // Série fixe : ancrée sur le début ; « recommencer après la fin » : sur l'échéance, et décalée depuis aujourd'hui.
+    let Some(anchor) = (if regen { date(&form.due).or_else(|| date(&form.start)) } else { date(&form.start).or_else(|| date(&form.due)) }) else { return Ok(None) };
+    let next = if regen {
+        let Some(freq) = trecur::frequency(&form.repeat) else { return Ok(None) };
+        let utc = chrono::DateTime::from_timestamp_millis(now_ms()).unwrap_or_default().naive_utc();
+        trecur::next_regen(freq, form.repeat_every, TimeZone::PARIS.to_local(utc).date())
+    } else {
+        trecur::next_after(&trecur::decode(blob)?, anchor)
+    };
+    let Some(next) = next else { return Ok(None) };
     let shift = next - anchor;
     let moved = |s: &str| date(s).map(|d| (d + shift).format("%Y-%m-%d").to_string()).unwrap_or_default();
     let mut nf = TaskForm { id: None, status: 0, start: moved(&form.start), due: moved(&form.due), ..form.clone() };
@@ -432,8 +443,18 @@ fn delete_message(conn: &mut Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Supprime la tâche et toute sa série : aucune occurrence suivante n'est créée.
 pub fn task_delete(conn: &mut Connection, id: i64) -> Result<()> {
     delete_message(conn, id)
+}
+
+/// Supprime UNE occurrence d'une tâche périodique non terminée : l'occurrence suivante est créée (comme à la fin de la
+/// tâche) puis celle-ci est supprimée. Rend l'identifiant de la suivante, `None` si la tâche n'est pas périodique ou si la
+/// série se termine là (alors simple suppression).
+pub fn task_delete_occurrence(conn: &mut Connection, data_dir: &Path, id: i64) -> Result<Option<String>> {
+    let next = spawn_next(conn, data_dir, id)?;
+    delete_message(conn, id)?;
+    Ok(next)
 }
 
 // --- Notes ----------------------------------------------------------------------------------------------------------
@@ -681,6 +702,88 @@ mod tests {
         // La dernière occurrence (N = 1) ne génère rien.
         task_complete(&mut conn, &dir, next.id[1..].parse().unwrap(), true).unwrap();
         assert_eq!(tasks(&conn).unwrap().rows.len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn regenerating_task_restarts_from_the_completion_day() {
+        let (mut conn, dir) = db("regen", &TASK_LIDS);
+        let f = TaskForm {
+            start: "2026-01-01".into(),
+            due: "2026-01-05".into(),
+            reminder: Some("2026-01-04T09:00".into()),
+            repeat: "regen_daily".into(),
+            repeat_every: 10,
+            repeat_end: "count".into(), // ignorée : pas de fin pour ce type de série
+            repeat_count: 2,
+            ..form("Arroser")
+        };
+        let id = task_save(&mut conn, &dir, &f).unwrap();
+        let n: i64 = id[1..].parse().unwrap();
+        let read = task_form(&conn, &dir, n).unwrap();
+        assert_eq!((read.repeat.as_str(), read.repeat_every, read.repeat_end.as_str()), ("regen_daily", 10, "never"));
+        task_complete(&mut conn, &dir, n, true).unwrap();
+        let rows = tasks(&conn).unwrap().rows;
+        assert_eq!(rows.len(), 2);
+        let next = rows.iter().find(|r| !r.complete).unwrap();
+        let today = {
+            let utc = chrono::DateTime::from_timestamp_millis(now_ms()).unwrap().naive_utc();
+            TimeZone::PARIS.to_local(utc).date()
+        };
+        let due = today + chrono::Duration::days(10);
+        assert_eq!(next.due, due.format("%Y-%m-%d").to_string());
+        // L'écart début/échéance (4 jours) et le rappel (1 jour avant l'échéance) sont conservés.
+        assert_eq!(next.start, (due - chrono::Duration::days(4)).format("%Y-%m-%d").to_string());
+        let nf = task_form(&conn, &dir, next.id[1..].parse().unwrap()).unwrap();
+        assert_eq!(nf.reminder, Some(format!("{}T09:00", (due - chrono::Duration::days(1)).format("%Y-%m-%d"))));
+        assert_eq!(nf.repeat, "regen_daily");
+        // La suivante est elle aussi périodique : terminée, elle en crée une troisième.
+        task_complete(&mut conn, &dir, next.id[1..].parse().unwrap(), true).unwrap();
+        assert_eq!(tasks(&conn).unwrap().rows.len(), 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn deleting_one_occurrence_keeps_the_series() {
+        let (mut conn, dir) = db("delocc", &TASK_LIDS);
+        let f = TaskForm {
+            start: "2026-10-23".into(),
+            repeat: "weekly".into(),
+            repeat_every: 1,
+            repeat_end: "count".into(),
+            repeat_count: 3,
+            ..form("Sauvegarde")
+        };
+        let n: i64 = task_save(&mut conn, &dir, &f).unwrap()[1..].parse().unwrap();
+        let next = task_delete_occurrence(&mut conn, &dir, n).unwrap().expect("la suivante est créée");
+        let rows = tasks(&conn).unwrap().rows;
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].id.as_str(), rows[0].start.as_str(), rows[0].recurring), (next.as_str(), "2026-10-30", true));
+        // « N fois » : 3 → 2 restantes ; supprimer la dernière ne crée rien.
+        let last = task_delete_occurrence(&mut conn, &dir, next[1..].parse().unwrap()).unwrap().unwrap();
+        assert_eq!(task_delete_occurrence(&mut conn, &dir, last[1..].parse().unwrap()).unwrap(), None);
+        assert!(tasks(&conn).unwrap().rows.is_empty());
+        // Tâche simple : simple suppression.
+        let p: i64 = task_save(&mut conn, &dir, &form("Simple")).unwrap()[1..].parse().unwrap();
+        assert_eq!(task_delete_occurrence(&mut conn, &dir, p).unwrap(), None);
+        assert!(tasks(&conn).unwrap().rows.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn monthly_task_on_the_31st_stays_one_per_month() {
+        let (mut conn, dir) = db("eom", &TASK_LIDS);
+        let f = TaskForm { due: "2026-01-31".into(), repeat: "monthly".into(), repeat_every: 1, repeat_end: "never".into(), ..form("Loyer") };
+        let mut n: i64 = task_save(&mut conn, &dir, &f).unwrap()[1..].parse().unwrap();
+        let mut prev = "2026-01-31".to_string();
+        for _ in 0..4 {
+            task_complete(&mut conn, &dir, n, true).unwrap();
+            let rows = tasks(&conn).unwrap().rows;
+            let open = rows.iter().find(|r| !r.complete).unwrap();
+            assert!(open.due > prev, "{} après {prev}", open.due);
+            prev = open.due.clone();
+            n = open.id[1..].parse().unwrap();
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 

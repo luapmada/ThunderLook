@@ -306,6 +306,11 @@ pub async fn task_delete(id: &str) -> Result<(), String> {
     call("task_delete", &IdArg { id }).await
 }
 
+/// Supprime UNE occurrence d'une tâche périodique ; rend la suivante, si elle existe.
+pub async fn task_delete_occurrence(id: &str) -> Result<Option<String>, String> {
+    call("task_delete_occurrence", &IdArg { id }).await
+}
+
 pub async fn notes_list() -> Result<thunderlook_model::items::NoteList, String> {
     call("notes_list", &NoArgs {}).await
 }
