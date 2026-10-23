@@ -1,0 +1,29 @@
+{
+ "exported_at": "2026-10-23T10:00:00Z",
+ "files": [
+  {
+   "name": "calendrier.ics",
+   "count": 0,
+   "sha256": "4d183432b3b77d55719eccea2c25380b78e13ea0e1da0df6b5059bcdece7cdfa",
+   "ids": [],
+   "uids": {},
+   "values": {}
+  },
+  {
+   "name": "contacts.vcf",
+   "count": 0,
+   "sha256": "47fd2367fe78135aaf4f7d887002a3094dd1c3d7a248dba35f3fff9e2e886e63",
+   "ids": [],
+   "uids": {},
+   "values": {}
+  },
+  {
+   "name": "notes.vnt",
+   "count": 0,
+   "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "ids": [],
+   "uids": {},
+   "values": {}
+  }
+ ]
+}
