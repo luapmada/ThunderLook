@@ -5,6 +5,7 @@
 
 mod calendar_cmds;
 mod contacts_cmds;
+mod dedupe_cmds;
 mod exchange_cmds;
 mod items_cmds;
 mod mail_cmds;
@@ -1568,6 +1569,12 @@ pub fn run() {
             contact_list,
             contact_card,
             contacts_cmds::contact_dist_lists,
+            dedupe_cmds::dedupe_scan,
+            dedupe_cmds::dedupe_detail,
+            dedupe_cmds::dedupe_preview,
+            dedupe_cmds::dedupe_merge,
+            dedupe_cmds::dedupe_ignore,
+            dedupe_cmds::dedupe_merge_safe,
             exchange_export,
             exchange_import,
             exchange_cmds::phone_exchange_state,

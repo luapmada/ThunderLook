@@ -79,6 +79,8 @@ pub enum Action {
     CalExportCsv,
     ContactNew,
     ContactDelete,
+    /// « Nettoyer les doublons » (Contacts).
+    DedupeOpen,
     TaskNew,
     TaskComplete,
     TaskDelete,
@@ -164,6 +166,7 @@ fn perform(ui: Ui, action: Action) {
         Action::CalToday => crate::calendar::go_today(ui),
         Action::CalNew => crate::appointment::open_new(ui),
         Action::ContactNew => crate::contact_form::open_new(ui),
+        Action::DedupeOpen => crate::dedupe::open(ui),
         Action::TaskNew => crate::tasks::open_new(ui),
         Action::TaskComplete => crate::tasks::toggle_selected(ui),
         Action::TaskDelete => crate::tasks::delete_selected(ui),
@@ -503,6 +506,7 @@ const CONTACTS_HOME: &[Group] = &[
     Group { label: "Nouveau", cmds: &[wired("Nouveau contact", PLUS, Some("Ctrl+N"), true, true, Action::ContactNew)] },
     Group { label: "Supprimer", cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::ContactDelete)] },
     Group { label: "Annuler", cmds: &[wired("Annuler", UNDO, Some("Ctrl+Z"), true, true, Action::Undo)] },
+    Group { label: "Nettoyer", cmds: &[wired("Nettoyer les doublons", TRASH, None, true, true, Action::DedupeOpen)] },
     Group {
         label: "Imprimer",
         cmds: &[wired("Imprimer la fiche", PRINTER, None, true, true, Action::Print("card")), wired("Imprimer la liste", PRINTER, None, true, true, Action::Print("list"))],

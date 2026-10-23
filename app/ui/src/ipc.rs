@@ -228,6 +228,47 @@ pub async fn contact_delete(id: &str) -> Result<(), String> {
     call("contact_delete", &IdArg { id }).await
 }
 
+#[derive(Serialize)]
+struct DedupeScanArg<'a> {
+    folder: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct DedupeIdsArg<'a> {
+    ids: &'a [String],
+}
+
+#[derive(Serialize)]
+struct DedupeMergeArg<'a> {
+    ids: &'a [String],
+    keep: &'a str,
+    choices: &'a std::collections::BTreeMap<String, String>,
+}
+
+pub async fn dedupe_scan(folder: Option<&str>) -> Result<Vec<crate::dedupe::GroupSummary>, String> {
+    call("dedupe_scan", &DedupeScanArg { folder }).await
+}
+
+pub async fn dedupe_detail(ids: &[String]) -> Result<crate::dedupe::Detail, String> {
+    call("dedupe_detail", &DedupeIdsArg { ids }).await
+}
+
+pub async fn dedupe_preview(ids: &[String], keep: &str, choices: &std::collections::BTreeMap<String, String>) -> Result<thunderlook_model::contacts::ContactForm, String> {
+    call("dedupe_preview", &DedupeMergeArg { ids, keep, choices }).await
+}
+
+pub async fn dedupe_merge(ids: &[String], keep: &str, choices: &std::collections::BTreeMap<String, String>) -> Result<usize, String> {
+    call("dedupe_merge", &DedupeMergeArg { ids, keep, choices }).await
+}
+
+pub async fn dedupe_ignore(ids: &[String]) -> Result<(), String> {
+    call("dedupe_ignore", &DedupeIdsArg { ids }).await
+}
+
+pub async fn dedupe_merge_safe(folder: Option<&str>) -> Result<crate::dedupe::Bulk, String> {
+    call("dedupe_merge_safe", &DedupeScanArg { folder }).await
+}
+
 pub async fn tasks_list() -> Result<thunderlook_model::items::TaskList, String> {
     call("tasks_list", &NoArgs {}).await
 }

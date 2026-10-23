@@ -11,6 +11,7 @@ mod contact_form;
 mod contacts;
 mod compose;
 mod create_rule;
+mod dedupe;
 mod dialogs;
 mod exchange;
 mod folders;
