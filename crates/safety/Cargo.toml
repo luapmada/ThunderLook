@@ -7,6 +7,7 @@ description = "Sécurité des données de ThunderLook : corbeille interne, annul
 
 [dependencies]
 thunderlook-store = { path = "../store" }
+rusqlite = { version = "0.40.2", features = ["backup"] }
 serde_json = "1.0"
 base64 = "0.22.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }

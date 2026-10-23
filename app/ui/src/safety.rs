@@ -19,6 +19,8 @@ pub struct BackupRow {
     pub size: u64,
     pub count: usize,
     pub created: String,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// Les listes des quatre modules se rechargent.
@@ -135,14 +137,21 @@ pub fn BackupsDialog() -> impl IntoView {
                         }
                     }>
                     <h2 id="bk-title">"Sauvegardes"</h2>
-                    <p class="dialog-note">"Une sauvegarde par jour au lancement (14 gardées) et une par semaine (8 gardées) : rendez-vous, contacts, tâches et notes, jamais le courrier. Une suppression ou une modification se défait aussi avec Ctrl+Z pendant 60 jours."</p>
-                    <Show when=move || rows.with(Vec::is_empty)>
-                        <p class="dialog-note">"Aucune sauvegarde pour l'instant."</p>
-                    </Show>
+                    <p class="dialog-note">"Une sauvegarde par jour, lancée quand l'ordinateur est au repos (14 gardées), un plein par semaine (8 gardés) : rendez-vous, contacts, tâches et notes, jamais le courrier. Une copie contrôlée de toute la base est aussi faite chaque semaine (2 gardées, dans le sous-dossier « base »). Une suppression ou une modification se défait aussi avec Ctrl+Z pendant 60 jours."</p>
+                    {move || {
+                        rows.with(|r| r.iter().find_map(|b| b.error.clone())).map(|e| view! { <p class="dialog-note" role="alert" style="font-weight: 600;">{format!("Dernière sauvegarde en échec : {e}")}</p> })
+                    }}
+                    <p class="dialog-note">
+                        {move || {
+                            rows.with(|r| r.iter().find(|b| !b.name.is_empty()).map(|b| format!("Dernière sauvegarde : {} ({})", b.created.replace('T', " "), size(b.size))))
+                                .unwrap_or_else(|| "Aucune sauvegarde pour l'instant.".to_string())
+                        }}
+                    </p>
                     <ul role="listbox" aria-label="Sauvegardes" style="max-height: 16em; overflow: auto; list-style: none; padding: 0; margin: 0.5em 0;">
                         {move || {
                             rows.get()
                                 .into_iter()
+                                .filter(|b| !b.name.is_empty())
                                 .map(|b| {
                                     let pick = b.name.clone();
                                     let name = b.name.clone();

@@ -9,6 +9,9 @@
 //!
 //! Aucune fonction d'ici ne supprime ni ne réécrit une ligne de la base sans en avoir enregistré l'ancien contenu avant.
 
+mod dbcopy;
+pub use dbcopy::{DbCopy, KEEP_DB, backup_db, backup_db_on, db_dir, last_failure, list_db_copies, record_failure, restore_db, verify_db, wait_idle};
+
 use std::{
     fs,
     io::{BufRead, BufReader, BufWriter, Write},
@@ -36,11 +39,11 @@ const FORMAT_VERSION: i64 = 1;
 /// Classes des éléments protégés (`message_class LIKE`).
 const CLASSES: [&str; 5] = ["IPM.Appointment%", "IPM.Contact%", "IPM.DistList%", "IPM.Task%", "IPM.StickyNote%"];
 
-fn e(x: rusqlite::Error) -> String {
+pub(crate) fn e(x: rusqlite::Error) -> String {
     x.to_string()
 }
 
-fn io(path: &Path, x: std::io::Error) -> String {
+pub(crate) fn io(path: &Path, x: std::io::Error) -> String {
     format!("{} : {x}", path.display())
 }
 
@@ -592,8 +595,15 @@ fn parse_name(name: &str) -> Option<(NaiveDate, bool)> {
 }
 
 /// Sauvegarde du jour (une fois par jour), en lecture seule et par paquets. Rend le fichier écrit, `None` si celle d'aujourd'hui existe déjà.
+///
+/// Un échec est consigné (`last_failure`, affiché dans l'écran « Sauvegardes ») jusqu'à la prochaine réussite.
 pub fn backup(data_dir: &Path, keep: usize) -> Result<Option<PathBuf>> {
-    backup_on(data_dir, keep, Local::now().date_naive())
+    let r = backup_on(data_dir, keep, Local::now().date_naive());
+    match &r {
+        Ok(_) => dbcopy::set_failure(data_dir, None),
+        Err(x) => dbcopy::set_failure(data_dir, Some(x)),
+    }
+    r
 }
 
 /// Comme [`backup`], dans un fil à part (le lancement n'attend pas).
@@ -1243,5 +1253,70 @@ mod tests {
         let t = std::time::Instant::now();
         let inc = backup_on(&dir, KEEP_DAILY, d(2026, 2, 7)).unwrap().unwrap();
         println!("incrément (rien) : {} octets en {:?}", fs::metadata(&inc).unwrap().len(), t.elapsed());
+    }
+
+    fn d_(y: i32, m: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, day).unwrap()
+    }
+
+    #[test]
+    fn db_copy_is_checked_rotated_and_weekly() {
+        let (dir, conn) = fixture("dbcopy");
+        add(&conn, &dir, "IPM.Contact", "A");
+        let first = backup_db_on(&dir, 2, d_(2026, 4, 1)).unwrap().unwrap();
+        verify_db(&first).unwrap();
+        assert!(backup_db_on(&dir, 2, d_(2026, 4, 5)).unwrap().is_none(), "une par semaine");
+        backup_db_on(&dir, 2, d_(2026, 4, 8)).unwrap().unwrap();
+        backup_db_on(&dir, 2, d_(2026, 4, 15)).unwrap().unwrap();
+        let names: Vec<String> = list_db_copies(&dir).iter().map(|c| c.path.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["base-2026-04-15.sqlite", "base-2026-04-08.sqlite"]);
+        assert!(!first.exists());
+        assert!(!db_dir(&dir).join("base-2026-04-15.tmp").exists());
+    }
+
+    #[test]
+    fn db_copy_restores_and_refuses_a_corrupted_copy() {
+        let (dir, mut conn) = fixture("dbrestore");
+        add(&conn, &dir, "IPM.Contact", "A");
+        add(&conn, &dir, "IPM.Task", "B");
+        let before = subjects(&conn);
+        let copy = backup_db_on(&dir, 2, d_(2026, 5, 1)).unwrap().unwrap();
+        // Modifier : supprimer une ligne, en ajouter une.
+        conn.execute("DELETE FROM message WHERE subject = 'A'", []).unwrap();
+        add(&conn, &dir, "IPM.Contact", "Z");
+        assert_ne!(subjects(&conn), before);
+        restore_db(&mut conn, &dir, &copy).unwrap();
+        assert_eq!(subjects(&conn), before);
+        assert_eq!(conn.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)).unwrap(), "ok");
+        assert!(db_dir(&dir).join("avant-restauration.sqlite").exists());
+        // Corrompre la copie : contrôle et restauration refusés, la base reste intacte.
+        let mut bytes = fs::read(&copy).unwrap();
+        for b in bytes.iter_mut().skip(4096).take(8192) {
+            *b = 0xA5;
+        }
+        fs::write(&copy, &bytes).unwrap();
+        assert!(verify_db(&copy).is_err());
+        conn.execute("DELETE FROM message WHERE subject = 'B'", []).unwrap();
+        assert!(restore_db(&mut conn, &dir, &copy).is_err());
+        assert_eq!(subjects(&conn), ["A"]);
+    }
+
+    #[test]
+    fn failure_is_recorded_until_next_success() {
+        let (dir, _conn) = fixture("failure");
+        assert!(last_failure(&dir).is_none());
+        fs::create_dir_all(backups_dir(&dir)).unwrap();
+        dbcopy::set_failure(&dir, Some("disque plein"));
+        assert!(last_failure(&dir).unwrap().ends_with("disque plein"));
+        backup(&dir, KEEP_DAILY).unwrap();
+        assert!(last_failure(&dir).is_none());
+    }
+
+    #[test]
+    fn wait_idle_returns_when_quiet_or_after_max() {
+        let (dir, _conn) = fixture("idle");
+        let t = std::time::Instant::now();
+        wait_idle(&dir, std::time::Duration::ZERO, std::time::Duration::from_secs(1), std::time::Duration::from_secs(10));
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
     }
 }
