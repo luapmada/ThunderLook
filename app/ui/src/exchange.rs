@@ -87,7 +87,7 @@ pub struct ApplySummary {
     pub warnings: Vec<String>,
 }
 
-fn kind_label(kind: &str) -> &'static str {
+pub(crate) fn kind_label(kind: &str) -> &'static str {
     match kind {
         "new" => "Nouveau",
         "modified" => "Modifié",
@@ -95,7 +95,7 @@ fn kind_label(kind: &str) -> &'static str {
     }
 }
 
-fn item_label(item: &str) -> &'static str {
+pub(crate) fn item_label(item: &str) -> &'static str {
     match item {
         "contact" => "Contact",
         "task" => "Tâche",
@@ -108,7 +108,7 @@ fn item_label(item: &str) -> &'static str {
 const MODULES: [(&str, &str); 4] = [("contact", "Contacts"), ("event", "Rendez-vous"), ("note", "Notes"), ("task", "Tâches")];
 
 /// Ancienne et nouvelle valeur de chaque champ qui change.
-fn fields_view(fields: &[FieldDiff]) -> impl IntoView + use<> {
+pub(crate) fn fields_view(fields: &[FieldDiff]) -> impl IntoView + use<> {
     let items = fields
         .iter()
         .map(|f| {
@@ -524,6 +524,7 @@ pub fn ExchangeDialog() -> impl IntoView {
                             } />
                     </label>
                     <p class="dialog-note" aria-live="polite">{move || note.get()}</p>
+                    <crate::mpe_import::MpeImport />
                     <div class="dialog-buttons">
                         <button class="btn" on:click=move |_| close()>"Fermer"</button>
                     </div>

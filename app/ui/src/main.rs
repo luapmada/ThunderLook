@@ -14,6 +14,7 @@ mod create_rule;
 mod dedupe;
 mod dialogs;
 mod exchange;
+mod mpe_import;
 mod folders;
 mod from_mail;
 mod global_search;

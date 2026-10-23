@@ -12,6 +12,7 @@
 
 mod conflict;
 mod import;
+pub mod mpe_files;
 mod sha256;
 pub mod vcal10;
 

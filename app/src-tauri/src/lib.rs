@@ -11,6 +11,7 @@ mod from_mail_cmds;
 mod folders_cmds;
 mod items_cmds;
 mod mail_cmds;
+mod mpe_import_cmds;
 mod options_cmds;
 mod reminders_cmds;
 mod safety_cmds;
@@ -1597,6 +1598,10 @@ pub fn run() {
             exchange_cmds::phone_exchange_undo,
             exchange_cmds::phone_exchange_check_detail,
             exchange_cmds::phone_exchange_apply_detail,
+            mpe_import_cmds::mpe_import_devices,
+            mpe_import_cmds::mpe_import_pick,
+            mpe_import_cmds::mpe_import_check,
+            mpe_import_cmds::mpe_import_apply,
             tasks_list,
             items_cmds::tasks_query,
             items_cmds::notes_query,
