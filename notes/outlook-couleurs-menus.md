@@ -43,3 +43,10 @@ Ordre preset0 → preset24 (OlCategoryColor COM = preset + 1) ; 15 valeurs recou
 - Créneau vide : Nouveau rendez-vous ; Nouvel événement d'une journée entière ; Nouvelle demande de réunion ; Nouveau
   rendez-vous périodique ; Nouvel événement périodique ; Nouvelle réunion périodique ; Couleur › (palette ci-dessus).
 - Non relevés : drapeaux et indicateurs de la liste de courrier ; menu du navigateur de dates et des calendriers.
+
+## Liste de courrier (relevé du 23/10, capture PrintWindow de la fenêtre d'Outlook seule, thème sombre)
+- Non lu : barre verticale bleue à gauche de la ligne, expéditeur en blanc, objet en gras bleu (#4DA3FF environ), date en gras bleu.
+- Pièce jointe : trombone à droite, au-dessus de la date.
+- Au survol : drapeau (contour) et corbeille à droite, sous le trombone ; ligne survolée plus claire.
+- En-têtes de groupe (Aujourd'hui, Hier) : bandeau gris, chevron à gauche.
+- Non relevés (aucun message correspondant visible) : drapeau actif ou terminé, icône « répondu / transféré », importance haute.
