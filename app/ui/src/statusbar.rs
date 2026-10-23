@@ -61,15 +61,15 @@ pub fn StatusBar() -> impl IntoView {
             {move || (ui.error.get().is_none()).then(|| ui.status.get()).flatten().map(|m| view! { <span class="status-msg" role="status">{m}</span> })}
             <crate::reminders::StatusCount />
             <div class="end">
-                <button class="cmd" aria-disabled="true" tabindex="-1" title="Réglages de l'affichage — pas encore disponible">
+                <button class="cmd" title="Options" on:click=move |_| crate::options::open(ui)>
                     <Svg icon=SETTINGS size=14 />
                     <span>"Réglages de l'affichage"</span>
                 </button>
-                <button class="icon-btn" aria-disabled="true" tabindex="-1" aria-label="Zoom arrière">
+                <button class="icon-btn" aria-label="Zoom arrière" on:click=move |_| crate::options::zoom_by(ui, -10)>
                     <Svg icon=MINUS size=14 />
                 </button>
-                <span aria-label="Zoom">"100 %"</span>
-                <button class="icon-btn" aria-disabled="true" tabindex="-1" aria-label="Zoom avant">
+                <span aria-label="Zoom">{move || format!("{} %", ui.settings.with(|s| s.zoom))}</span>
+                <button class="icon-btn" aria-label="Zoom avant" on:click=move |_| crate::options::zoom_by(ui, 10)>
                     <Svg icon=PLUS size=14 />
                 </button>
             </div>

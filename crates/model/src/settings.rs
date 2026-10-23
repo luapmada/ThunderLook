@@ -33,6 +33,16 @@ pub enum Density {
     Compact,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Theme {
+    /// Suit le système (comportement d'origine).
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -49,6 +59,34 @@ pub struct Settings {
     pub conversations: bool,
     /// Vue du calendrier (J9).
     pub calendar_view: CalendarViewKind,
+    /// Thème clair, sombre ou celui du système.
+    pub theme: Theme,
+    /// Zoom de l'interface, en pour cent.
+    pub zoom: u32,
+    /// Premier jour de la semaine : 0 dimanche, 1 lundi… 6 samedi.
+    pub first_day_of_week: u8,
+    /// Jours ouvrés : un bit par jour, bit 0 lundi … bit 6 dimanche.
+    pub work_days: u8,
+    /// Début et fin de la journée de travail, en minutes depuis minuit.
+    pub work_start: u16,
+    pub work_end: u16,
+    /// Durée d'un nouveau rendez-vous, en minutes.
+    pub default_duration: u32,
+    /// Rappel d'un nouveau rendez-vous, en minutes avant le début ; `None` : aucun.
+    pub default_reminder: Option<i32>,
+    /// Pas de la grille du calendrier (déplacement, création), en minutes : 15, 30 ou 60.
+    pub snap_minutes: u32,
+    pub show_week_numbers: bool,
+    /// Marquer comme lu après ce nombre de secondes d'affichage ; 0 : pas de minuterie.
+    pub mark_read_delay: u32,
+    /// Couleur des nouvelles notes (numéro de couleur du module Notes ; 3 : jaune).
+    pub default_note_color: i32,
+    /// Heure de rappel d'une nouvelle tâche avec échéance, en minutes depuis minuit ; `None` : aucun rappel.
+    pub default_task_reminder: Option<u16>,
+    /// Notifications Windows des rappels.
+    pub notifications: bool,
+    /// Son à l'arrivée d'un rappel.
+    pub reminder_sound: bool,
 }
 
 impl Default for Settings {
@@ -64,6 +102,21 @@ impl Default for Settings {
             mark_read_on_leave: true,
             conversations: false,
             calendar_view: CalendarViewKind::Week,
+            theme: Theme::System,
+            zoom: 100,
+            first_day_of_week: 1,
+            work_days: 0b001_1111,
+            work_start: 450,
+            work_end: 1080,
+            default_duration: 30,
+            default_reminder: Some(15),
+            snap_minutes: 15,
+            show_week_numbers: false,
+            mark_read_delay: 0,
+            default_note_color: 3,
+            default_task_reminder: None,
+            notifications: true,
+            reminder_sound: false,
         }
     }
 }
@@ -73,12 +126,78 @@ impl Settings {
     pub const FOLDER_MAX: u32 = 480;
     pub const LIST_MIN: u32 = 300;
     pub const LIST_MAX: u32 = 900;
+    pub const ZOOM_MIN: u32 = 70;
+    pub const ZOOM_MAX: u32 = 200;
 
     /// Ramène les dimensions dans des bornes utilisables (fichier édité à la main, écran plus petit…).
     pub fn clamped(mut self) -> Self {
         self.folder_pane_width = self.folder_pane_width.clamp(Self::FOLDER_MIN, Self::FOLDER_MAX);
         self.list_width = self.list_width.clamp(Self::LIST_MIN, Self::LIST_MAX);
         self.list_height = self.list_height.clamp(160, 900);
+        self.zoom = self.zoom.clamp(Self::ZOOM_MIN, Self::ZOOM_MAX);
+        self.first_day_of_week %= 7;
+        self.work_days &= 0b111_1111;
+        self.work_start = self.work_start.min(1380);
+        self.work_end = self.work_end.clamp(self.work_start + 60, 1440);
+        self.default_duration = self.default_duration.clamp(5, 1440);
+        self.default_reminder = self.default_reminder.map(|m| m.clamp(0, 20_160));
+        if !matches!(self.snap_minutes, 15 | 30 | 60) {
+            self.snap_minutes = 15;
+        }
+        self.mark_read_delay = self.mark_read_delay.min(600);
+        self.default_note_color = self.default_note_color.clamp(0, 4);
+        self.default_task_reminder = self.default_task_reminder.map(|m| m.min(1439));
         self
+    }
+
+    /// Le jour (0 lundi … 6 dimanche) est-il ouvré ?
+    pub fn is_work_day(&self, monday_based: u32) -> bool {
+        self.work_days >> (monday_based % 7) & 1 == 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fichier écrit avant le lot M : aucun des nouveaux champs.
+    const OLD: &str = r#"{"barMode":"full","readingPane":"bottom","density":"compact","folderPaneWidth":300,
+        "folderPaneCollapsed":true,"listWidth":500,"listHeight":400,"markReadOnLeave":false,"conversations":true,"calendarView":"week"}"#;
+
+    #[test]
+    fn old_file_keeps_values_and_gets_defaults() {
+        let s: Settings = serde_json::from_str(OLD).unwrap();
+        let d = Settings::default();
+        assert_eq!((s.bar_mode, s.reading_pane, s.density, s.folder_pane_width), (BarMode::Full, ReadingPane::Bottom, Density::Compact, 300));
+        assert!(!s.mark_read_on_leave && s.conversations);
+        assert_eq!((s.theme, s.zoom, s.first_day_of_week, s.work_days), (d.theme, d.zoom, d.first_day_of_week, d.work_days));
+        assert_eq!((s.default_duration, s.default_reminder, s.snap_minutes), (30, Some(15), 15));
+        assert_eq!((s.work_start, s.work_end, s.notifications), (450, 1080, true));
+    }
+
+    #[test]
+    fn empty_file_is_default() {
+        assert_eq!(serde_json::from_str::<Settings>("{}").unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn round_trip() {
+        let s = Settings { theme: Theme::Dark, zoom: 125, default_reminder: None, default_task_reminder: Some(540), ..Settings::default() };
+        assert_eq!(serde_json::from_str::<Settings>(&serde_json::to_string(&s).unwrap()).unwrap(), s);
+    }
+
+    #[test]
+    fn clamped_repairs_hand_edited_values() {
+        let s = Settings { zoom: 900, first_day_of_week: 9, work_start: 2000, work_end: 10, default_duration: 0, snap_minutes: 7, mark_read_delay: 99_999, default_note_color: 42, default_task_reminder: Some(5000), ..Settings::default() }.clamped();
+        assert_eq!((s.zoom, s.first_day_of_week, s.default_duration, s.snap_minutes, s.mark_read_delay), (Settings::ZOOM_MAX, 2, 5, 15, 600));
+        assert!(s.work_start < s.work_end && s.work_end <= 1440);
+        assert_eq!((s.default_note_color, s.default_task_reminder), (4, Some(1439)));
+        assert_eq!(Settings::default().clamped(), Settings::default());
+    }
+
+    #[test]
+    fn work_days_default_is_monday_to_friday() {
+        let s = Settings::default();
+        assert!((0..5).all(|d| s.is_work_day(d)) && !s.is_work_day(5) && !s.is_work_day(6));
     }
 }

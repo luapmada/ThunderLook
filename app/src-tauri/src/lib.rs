@@ -8,6 +8,7 @@ mod contacts_cmds;
 mod exchange_cmds;
 mod items_cmds;
 mod mail_cmds;
+mod options_cmds;
 mod reminders_cmds;
 mod search_cmds;
 mod shared_calendar;

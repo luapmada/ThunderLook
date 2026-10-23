@@ -744,7 +744,7 @@ pub fn CommandBar() -> impl IntoView {
     view! {
         <div class="commandbar">
             <div class="tabs">
-                <button class="tab file" aria-disabled="true" title="Fichier — pas encore disponible" tabindex="-1">
+                <button class="tab file" title="Options" on:click=move |_| crate::options::open(ui)>
                     "Fichier"
                 </button>
                 <div role="tablist" aria-label="Barre de commandes" class="tablist" node_ref=ui.refs.tabs on:keydown=on_tabs_key>

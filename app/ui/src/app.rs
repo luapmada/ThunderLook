@@ -499,6 +499,8 @@ pub fn App() -> impl IntoView {
             <crate::global_search::GlobalSearchPanel />
             <crate::reminders::RemindersPanel />
             <crate::exchange::ExchangeDialog />
+            <crate::options::OptionsDialog />
+            <crate::options::OptionsEffects />
         </div>
     }
 }
