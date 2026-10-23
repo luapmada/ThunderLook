@@ -10,3 +10,4 @@ thunderlook-store = { path = "../store" }
 thunderlook-calendar = { path = "../calendar" }
 thunderlook-model = { path = "../model" }
 mail-parser = "0.11.9"
+base64 = "0.22.1"

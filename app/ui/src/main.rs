@@ -7,6 +7,7 @@ mod appointment;
 mod autoreply;
 mod calendar;
 mod commandbar;
+mod contact_form;
 mod contacts;
 mod compose;
 mod create_rule;

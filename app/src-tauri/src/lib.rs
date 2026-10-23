@@ -1001,6 +1001,50 @@ fn contact_list(app: AppHandle, folder: String) -> Result<thunderlook_model::con
     Ok(list)
 }
 
+/// Boîte « Contact » : contact existant (`id`), ou nouveau dans le dossier `folder`.
+#[tauri::command(async)]
+fn contact_form(app: AppHandle, id: Option<String>, folder: Option<String>) -> Result<thunderlook_model::contacts::ContactForm, String> {
+    let dir = data_dir(&app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    match id {
+        Some(id) => {
+            let n: i64 = id.strip_prefix('p').and_then(|f| f.parse().ok()).ok_or("contact inconnu")?;
+            thunderlook_contacts::write::form_of(&conn, &dir, n)
+        }
+        None => Ok(thunderlook_model::contacts::ContactForm { folder_id: folder.unwrap_or_default(), ..Default::default() }),
+    }
+}
+
+/// Enregistre un contact (création ou modification) ; rend son identifiant.
+#[tauri::command(async)]
+fn contact_save(app: AppHandle, form: thunderlook_model::contacts::ContactForm) -> Result<String, String> {
+    let dir = data_dir(&app)?;
+    let mut conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    let id = match &form.id {
+        Some(id) => {
+            let n: i64 = id.strip_prefix('p').and_then(|f| f.parse().ok()).ok_or("contact inconnu")?;
+            thunderlook_contacts::write::update(&mut conn, &dir, n, &form)?;
+            n
+        }
+        None => {
+            let folder: i64 = form.folder_id.strip_prefix('k').and_then(|f| f.parse().ok()).ok_or("choisissez un dossier de contacts")?;
+            thunderlook_contacts::write::create(&mut conn, &dir, folder, &form)?
+        }
+    };
+    let _ = app.emit("contacts-changed", ());
+    Ok(format!("p{id}"))
+}
+
+/// Supprime un contact (`p<id>`).
+#[tauri::command(async)]
+fn contact_delete(app: AppHandle, id: String) -> Result<(), String> {
+    let n: i64 = id.strip_prefix('p').and_then(|f| f.parse().ok()).ok_or("contact inconnu")?;
+    let mut conn = thunderlook_store::open(&data_dir(&app)?).map_err(|e| e.to_string())?;
+    thunderlook_contacts::write::delete(&mut conn, n)?;
+    let _ = app.emit("contacts-changed", ());
+    Ok(())
+}
+
 /// Fiche d'un contact (`p<id>`), avec ses notes et sa photo.
 #[tauri::command(async)]
 fn contact_card(app: AppHandle, id: String) -> Result<thunderlook_model::contacts::ContactCard, String> {
@@ -1270,6 +1314,9 @@ pub fn run() {
             contact_folders,
             contact_list,
             contact_card,
+            contact_form,
+            contact_save,
+            contact_delete,
             set_calendar_shown,
             calendar_import,
             calendar_export,

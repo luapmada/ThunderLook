@@ -245,6 +245,9 @@ fn Card(card: ContactCard) -> impl IntoView {
                     None => view! { <span class="avatar large" aria-hidden="true">{card.initials.clone()}</span> }.into_any(),
                 }}
                 <div>
+                    <div class="contact-actions">
+                        <button class="btn" on:click={ let id = card.id.clone(); move |_| crate::contact_form::open_edit(ui, id.clone()) }>"Modifier"</button>
+                    </div>
                     <h2>{card.full_name.clone()}</h2>
                     {(!card.job.is_empty()).then(|| view! { <p class="contact-job">{card.job.clone()}</p> })}
                     {(!card.categories.is_empty()).then(|| view! { <p class="contact-cats">{card.categories.join(", ")}</p> })}

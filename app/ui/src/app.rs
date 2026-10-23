@@ -481,6 +481,7 @@ pub fn App() -> impl IntoView {
             <AccountsDialog />
             <AutoReplyDialog />
             <AppointmentDialog />
+            <crate::contact_form::ContactDialog />
             <JunkOptionsDialog />
         </div>
     }

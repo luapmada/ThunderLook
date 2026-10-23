@@ -76,3 +76,36 @@ pub struct ContactCard {
     pub categories: Vec<String>,
     pub notes: Option<String>,
 }
+
+/// Contact saisi dans la boîte « Contact » (création ou modification).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ContactForm {
+    /// `p<message>` ; absent pour un nouveau contact.
+    pub id: Option<String>,
+    /// Dossier `k<id>`.
+    pub folder_id: String,
+    pub given_name: String,
+    pub surname: String,
+    pub company: String,
+    pub job_title: String,
+    pub department: String,
+    pub email1: String,
+    pub email2: String,
+    pub email3: String,
+    pub mobile: String,
+    pub business: String,
+    pub home_phone: String,
+    pub work_street: String,
+    pub work_city: String,
+    pub work_postal: String,
+    pub work_country: String,
+    pub home_street: String,
+    pub home_city: String,
+    pub home_postal: String,
+    pub home_country: String,
+    pub web_page: String,
+    /// `AAAA-MM-JJ`, vide si inconnu.
+    pub birthday: String,
+    pub notes: String,
+}

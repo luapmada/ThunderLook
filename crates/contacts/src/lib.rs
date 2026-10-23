@@ -2,6 +2,7 @@
 //! Comme le calendrier (option A), Outlook fait foi : lecture seule ici. Propriétés d'après [MS-OXOCNTC].
 
 pub mod view;
+pub mod write;
 
 use std::collections::HashMap;
 

@@ -76,6 +76,8 @@ pub enum Action {
     CalImport,
     CalExportIcs,
     CalExportCsv,
+    ContactNew,
+    ContactDelete,
 }
 
 impl Action {
@@ -150,6 +152,12 @@ fn perform(ui: Ui, action: Action) {
         Action::CalView(kind) => crate::calendar::set_kind(ui, kind),
         Action::CalToday => crate::calendar::go_today(ui),
         Action::CalNew => crate::appointment::open_new(ui),
+        Action::ContactNew => crate::contact_form::open_new(ui),
+        Action::ContactDelete => {
+            if let Some(id) = ui.contact_selected.get_untracked() {
+                crate::contact_form::delete(ui, id);
+            }
+        }
         Action::CalImport => crate::calendar::import(ui),
         Action::CalExportIcs => crate::calendar::export(ui, false),
         Action::CalExportCsv => crate::calendar::export(ui, true),
@@ -471,8 +479,8 @@ const CALENDAR_HOME: &[Group] = &[
 ];
 
 const CONTACTS_HOME: &[Group] = &[
-    Group { label: "Nouveau", cmds: &[cmd("Nouveau contact", PLUS, Some("Ctrl+N"), true, true, true)] },
-    Group { label: "Supprimer", cmds: &[cmd("Supprimer", TRASH, Some("Suppr"), false, true, true)] },
+    Group { label: "Nouveau", cmds: &[wired("Nouveau contact", PLUS, Some("Ctrl+N"), true, true, Action::ContactNew)] },
+    Group { label: "Supprimer", cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::ContactDelete)] },
     Group { label: "Communiquer", cmds: &[cmd("Nouveau message", MAIL_PLUS, None, false, true, true)] },
     Group { label: "Indicateurs", cmds: &[cmd("Catégories", TAGS, None, true, true, false), cmd("Suivi", FLAG, None, true, true, false)] },
 ];

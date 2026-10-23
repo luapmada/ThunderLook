@@ -205,6 +205,29 @@ pub fn on_contacts_changed(f: impl Fn() + 'static) {
     });
 }
 
+#[derive(Serialize)]
+struct ContactFormArg<'a> {
+    id: Option<&'a str>,
+    folder: Option<&'a str>,
+}
+
+pub async fn contact_form(id: Option<&str>, folder: Option<&str>) -> Result<thunderlook_model::contacts::ContactForm, String> {
+    call("contact_form", &ContactFormArg { id, folder }).await
+}
+
+#[derive(Serialize)]
+struct ContactSaveArg<'a> {
+    form: &'a thunderlook_model::contacts::ContactForm,
+}
+
+pub async fn contact_save(form: &thunderlook_model::contacts::ContactForm) -> Result<String, String> {
+    call("contact_save", &ContactSaveArg { form }).await
+}
+
+pub async fn contact_delete(id: &str) -> Result<(), String> {
+    call("contact_delete", &IdArg { id }).await
+}
+
 pub async fn contact_folders() -> Result<Vec<ContactFolder>, String> {
     call("contact_folders", &NoArgs {}).await
 }

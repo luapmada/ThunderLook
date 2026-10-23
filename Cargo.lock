@@ -5093,6 +5093,7 @@ dependencies = [
 name = "thunderlook-contacts"
 version = "0.10.0"
 dependencies = [
+ "base64 0.22.1",
  "mail-parser",
  "thunderlook-calendar",
  "thunderlook-model",

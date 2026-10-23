@@ -225,6 +225,8 @@ pub struct Ui {
     pub contact_list: RwSignal<Option<ContactList>>,
     pub contact_selected: RwSignal<Option<String>>,
     pub contact_card: RwSignal<Option<ContactCard>>,
+    /// Boîte « Contact » ouverte (création ou modification).
+    pub contact_form: RwSignal<Option<thunderlook_model::contacts::ContactForm>>,
     pub contact_filter: RwSignal<String>,
     pub refs: Refs,
 }
@@ -282,6 +284,7 @@ impl Ui {
             contact_list: RwSignal::new(None),
             contact_selected: RwSignal::new(None),
             contact_card: RwSignal::new(None),
+            contact_form: RwSignal::new(None),
             contact_filter: RwSignal::new(String::new()),
             refs: Refs {
                 search: NodeRef::new(),
