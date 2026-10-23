@@ -10,6 +10,7 @@ mod items_cmds;
 mod mail_cmds;
 mod options_cmds;
 mod reminders_cmds;
+mod safety_cmds;
 mod search_cmds;
 mod shared_calendar;
 mod toast;
@@ -1077,12 +1078,16 @@ fn task_form(app: AppHandle, id: Option<String>, folder: Option<String>) -> Resu
 #[tauri::command(async)]
 fn task_save(app: AppHandle, form: thunderlook_model::items::TaskForm) -> Result<String, String> {
     let (dir, mut conn) = items_conn(&app)?;
+    if let Some(n) = form.id.as_deref().and_then(|id| task_num(id).ok()) {
+        thunderlook_safety::snapshot_edit(&conn, &dir, n)?;
+    }
     thunderlook_items::task_save(&mut conn, &dir, &form)
 }
 
 #[tauri::command(async)]
 fn task_complete(app: AppHandle, id: String, done: bool) -> Result<(), String> {
     let (dir, mut conn) = items_conn(&app)?;
+    thunderlook_safety::snapshot_edit(&conn, &dir, task_num(&id)?)?;
     thunderlook_items::task_complete(&mut conn, &dir, task_num(&id)?, done)
 }
 
@@ -1114,6 +1119,9 @@ fn note_form(app: AppHandle, id: Option<String>) -> Result<thunderlook_model::it
 #[tauri::command(async)]
 fn note_save(app: AppHandle, form: thunderlook_model::items::NoteForm) -> Result<String, String> {
     let (dir, mut conn) = items_conn(&app)?;
+    if let Some(n) = form.id.as_deref().and_then(|id| note_num(id).ok()) {
+        thunderlook_safety::snapshot_edit(&conn, &dir, n)?;
+    }
     thunderlook_items::note_save(&mut conn, &dir, &form)
 }
 
@@ -1258,6 +1266,7 @@ fn contact_save(app: AppHandle, form: thunderlook_model::contacts::ContactForm) 
     let id = match &form.id {
         Some(id) => {
             let n: i64 = id.strip_prefix('p').and_then(|f| f.parse().ok()).ok_or("contact inconnu")?;
+            thunderlook_safety::snapshot_edit(&conn, &dir, n)?;
             thunderlook_contacts::write::update(&mut conn, &dir, n, &form)?;
             n
         }
@@ -1499,6 +1508,7 @@ pub fn run() {
             start_scheduler(app.handle());
             reminders_cmds::start(app.handle());
             exchange_cmds::start(app.handle());
+            safety_cmds::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1587,7 +1597,12 @@ pub fn run() {
             calendar_remove,
             junk_lists,
             set_junk_lists,
-            junk_mark
+            junk_mark,
+            safety_cmds::safety_undo,
+            safety_cmds::backups_list,
+            safety_cmds::backup_now,
+            safety_cmds::backup_restore,
+            safety_cmds::backups_open_folder
         ])
         .run(tauri::generate_context!())
         .expect("échec du démarrage de ThunderLook");

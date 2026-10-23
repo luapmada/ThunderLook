@@ -288,6 +288,7 @@ pub fn update(conn: &mut Connection, data_dir: &Path, message_id: i64, f: &Conta
 
 /// Suppression d'un contact.
 pub fn delete(conn: &mut Connection, message_id: i64) -> Result<()> {
+    thunderlook_safety::snapshot_conn(conn, message_id)?;
     conn.execute("DELETE FROM message_fts WHERE rowid = ?1", [message_id]).map_err(e)?;
     conn.execute("DELETE FROM message WHERE id = ?1", [message_id]).map_err(e)?;
     Ok(())
@@ -386,5 +387,26 @@ mod tests {
         let id2 = create(&mut conn, &dir, 1, &ContactForm { id: None, folder_id: String::new(), ..parsed[0].form.clone() }).unwrap();
         assert_ne!(id, id2);
         assert_eq!(form_of(&conn, &dir, id2).unwrap().photo, f.photo);
+    }
+
+    #[test]
+    fn suppression_puis_annulation_rend_le_meme_formulaire() {
+        let (dir, mut conn) = fixture("annuler");
+        let f = ContactForm { given_name: "Léa".into(), surname: "Martin".into(), notes: "Une note".into(), photo: Some(jpeg(3)), categories: "Clients, VIP".into(), ..Default::default() };
+        let id = create(&mut conn, &dir, 1, &f).unwrap();
+        let before = form_of(&conn, &dir, id).unwrap();
+
+        delete(&mut conn, id).unwrap();
+        assert!(form_of(&conn, &dir, id).is_err());
+        let msg = thunderlook_safety::undo(&mut conn, &dir).unwrap();
+        assert_eq!(msg, "Annulé : suppression du contact « Martin, Léa »");
+        assert_eq!(form_of(&conn, &dir, id).unwrap(), before);
+
+        // Modification annulée : l'ancien formulaire revient, photo comprise.
+        thunderlook_safety::snapshot_edit(&conn, &dir, id).unwrap();
+        update(&mut conn, &dir, id, &ContactForm { surname: "Durand".into(), photo: Some(jpeg(5)), notes: "Autre".into(), ..before.clone() }).unwrap();
+        assert_eq!(form_of(&conn, &dir, id).unwrap().surname, "Durand");
+        thunderlook_safety::undo(&mut conn, &dir).unwrap();
+        assert_eq!(form_of(&conn, &dir, id).unwrap(), before);
     }
 }

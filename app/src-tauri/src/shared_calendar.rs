@@ -189,6 +189,7 @@ pub fn appointment_save(app: AppHandle, form: AppointmentForm) -> Result<String,
     let mut conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
     if let (Some(id), true) = (&form.id, form.recurring) {
         let n = message_id(id)?.0;
+        thunderlook_safety::snapshot_edit(&conn, &dir, n)?;
         if form.scope == "occurrence" {
             let r = thunderlook_calendar::write::update_occurrence(&mut conn, &dir, n, &form.occurrence, &edit_of(&form));
             return done(&app, r, "Occurrence enregistrée");
@@ -204,7 +205,11 @@ pub fn appointment_save(app: AppHandle, form: AppointmentForm) -> Result<String,
         };
     }
     let r = match &form.id {
-        Some(id) => thunderlook_calendar::write::update(&mut conn, &dir, message_id(id)?.0, &edit_of(&form)),
+        Some(id) => {
+            let n = message_id(id)?.0;
+            thunderlook_safety::snapshot_edit(&conn, &dir, n)?;
+            thunderlook_calendar::write::update(&mut conn, &dir, n, &edit_of(&form))
+        }
         None => {
             let folder: i64 = form.calendar_id.strip_prefix('c').and_then(|c| c.parse().ok()).ok_or("choisissez un calendrier")?;
             thunderlook_calendar::write::create(&mut conn, &dir, folder, &edit_of(&form)).map(|_| ())
@@ -220,7 +225,10 @@ pub fn appointment_delete(app: AppHandle, id: String, series: bool) -> Result<St
     let (n, day) = message_id(&id)?;
     let mut conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
     match day {
-        Some(day) if !series => done(&app, thunderlook_calendar::write::delete_occurrence(&mut conn, n, &day), "Occurrence supprimée"),
+        Some(day) if !series => {
+            thunderlook_safety::snapshot_edit(&conn, &dir, n)?;
+            done(&app, thunderlook_calendar::write::delete_occurrence(&mut conn, n, &day), "Occurrence supprimée")
+        }
         _ => done(&app, thunderlook_calendar::write::delete(&mut conn, n), "Rendez-vous supprimé"),
     }
 }

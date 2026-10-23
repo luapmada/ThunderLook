@@ -28,6 +28,7 @@ mod quicksteps;
 mod reading;
 mod reminders;
 mod rules;
+mod safety;
 mod splitter;
 mod state;
 mod statusbar;

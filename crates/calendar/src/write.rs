@@ -489,6 +489,7 @@ pub fn move_appointment(conn: &mut Connection, message_id: i64, start_local: &st
 
 /// Suppression d'un rendez-vous (toute la série pour un rendez-vous périodique).
 pub fn delete(conn: &mut Connection, message_id: i64) -> Result<()> {
+    thunderlook_safety::snapshot_conn(conn, message_id)?;
     conn.execute("DELETE FROM message_fts WHERE rowid = ?1", [message_id]).map_err(e)?;
     conn.execute("DELETE FROM message WHERE id = ?1", [message_id]).map_err(e)?;
     Ok(())
@@ -562,6 +563,24 @@ mod tests {
     fn recurrence(conn: &Connection, id: i64) -> Recurrence {
         let s = load_series(conn, id).unwrap();
         s.rec
+    }
+
+    #[test]
+    fn delete_then_undo_restores_the_series() {
+        let (dir, mut conn, folder) = fixture("undo");
+        let id = weekly(&mut conn, &dir, folder);
+        let before = listing(&conn, id);
+        delete(&mut conn, id).unwrap();
+        assert!(!crate::load(&conn).unwrap().appointments.iter().any(|a| a.id == id));
+        assert_eq!(thunderlook_safety::undo(&mut conn, &dir).unwrap(), "Annulé : suppression du rendez-vous « Point d'équipe »");
+        assert_eq!(listing(&conn, id), before);
+
+        // Une occurrence supprimée puis annulée : la série retrouve ses six dates.
+        thunderlook_safety::snapshot_edit(&conn, &dir, id).unwrap();
+        delete_occurrence(&mut conn, id, "2026-10-30").unwrap();
+        assert_eq!(listing(&conn, id).len(), 5);
+        thunderlook_safety::undo(&mut conn, &dir).unwrap();
+        assert_eq!(listing(&conn, id), before);
     }
 
     #[test]

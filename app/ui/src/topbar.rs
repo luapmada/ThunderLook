@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::{actions, global_search, icons::*, state::use_ui};
+use crate::{actions, global_search, icons::*, state::{Module, use_ui}};
 
 /// Délai avant de lancer la recherche pendant la frappe.
 const DEBOUNCE_MS: u64 = 350;
@@ -63,7 +63,7 @@ pub fn TopBar() -> impl IntoView {
                     aria-label=move || ui.undo_label.get().map(|l| format!("Annuler : {l}")).unwrap_or_else(|| "Annuler".into())
                     title=move || ui.undo_label.get().map(|l| format!("Annuler : {l} (Ctrl+Z)")).unwrap_or_else(|| "Annuler (Ctrl+Z)".into())
                     aria-keyshortcuts="Control+Z"
-                    on:click=move |_| actions::undo(ui)
+                    on:click=move |_| if ui.module.get_untracked() == Module::Mail { actions::undo(ui) } else { crate::safety::undo(ui) }
                 >
                     <Svg icon=UNDO />
                 </button>

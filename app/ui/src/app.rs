@@ -92,7 +92,7 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
     let key = ev.key();
     let (ctrl, alt, shift) = (ev.ctrl_key(), ev.alt_key(), ev.shift_key());
     // Une boîte de dialogue ou un menu contextuel garde ses touches.
-    if ui.dialog.get_untracked().is_some() || ui.context_menu.get_untracked().is_some() || ui.phone_exchange.get_untracked() {
+    if ui.dialog.get_untracked().is_some() || ui.context_menu.get_untracked().is_some() || ui.phone_exchange.get_untracked() || ui.backups.get_untracked() {
         return;
     }
     // Échange avec le téléphone (fichiers vCard, iCalendar, vNote).
@@ -154,6 +154,12 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
             actions::delete(ui, shift);
             return;
         }
+    }
+    // Annuler une suppression ou une modification (Calendrier, Contacts, Tâches, Notes) ; dans un champ, Ctrl+Z reste au texte.
+    if ctrl && !alt && !shift && key.eq_ignore_ascii_case("z") && ui.module.get_untracked() != Module::Mail && !typing() {
+        ev.prevent_default();
+        crate::safety::undo(ui);
+        return;
     }
     if ui.module.get_untracked() == Module::Calendar && calendar::key(ui, ev) {
         ev.prevent_default();
@@ -501,6 +507,7 @@ pub fn App() -> impl IntoView {
             <crate::exchange::ExchangeDialog />
             <crate::options::OptionsDialog />
             <crate::options::OptionsEffects />
+            <crate::safety::BackupsDialog />
         </div>
     }
 }

@@ -736,3 +736,35 @@ pub async fn phone_exchange_apply(keys: &[String]) -> Result<String, String> {
 pub async fn phone_exchange_undo() -> Result<String, String> {
     call("phone_exchange_undo", &NoArgs {}).await
 }
+
+// --- Annulation et sauvegardes (lot O) --------------------------------------------------------------------------------
+
+use crate::safety::BackupRow;
+
+/// Défait la dernière suppression ou modification (Calendrier, Contacts, Tâches, Notes) ; rend le message « Annulé : … ».
+pub async fn safety_undo() -> Result<String, String> {
+    call("safety_undo", &NoArgs {}).await
+}
+
+pub async fn backups_list() -> Result<Vec<BackupRow>, String> {
+    call("backups_list", &NoArgs {}).await
+}
+
+pub async fn backup_now() -> Result<String, String> {
+    call("backup_now", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct RestoreArg<'a> {
+    name: &'a str,
+    mode: &'a str,
+}
+
+/// `mode` : « merge » (éléments manquants) ou « all » (tout remettre).
+pub async fn backup_restore(name: &str, mode: &str) -> Result<String, String> {
+    call("backup_restore", &RestoreArg { name, mode }).await
+}
+
+pub async fn backups_open_folder() -> Result<(), String> {
+    call("backups_open_folder", &NoArgs {}).await
+}

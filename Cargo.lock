@@ -5075,6 +5075,7 @@ dependencies = [
  "thunderlook-mailbox",
  "thunderlook-model",
  "thunderlook-reminders",
+ "thunderlook-safety",
  "thunderlook-search",
  "thunderlook-store",
  "thunderlook-sync",
@@ -5091,6 +5092,7 @@ dependencies = [
  "thunderlook-contacts",
  "thunderlook-items",
  "thunderlook-model",
+ "thunderlook-safety",
  "thunderlook-store",
 ]
 
@@ -5102,6 +5104,7 @@ dependencies = [
  "mail-parser",
  "thunderlook-calendar",
  "thunderlook-model",
+ "thunderlook-safety",
  "thunderlook-store",
 ]
 
@@ -5141,6 +5144,7 @@ dependencies = [
  "mail-parser",
  "thunderlook-calendar",
  "thunderlook-model",
+ "thunderlook-safety",
  "thunderlook-store",
 ]
 
@@ -5197,6 +5201,16 @@ version = "0.10.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "thunderlook-safety"
+version = "0.10.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "serde_json",
+ "thunderlook-store",
 ]
 
 [[package]]
