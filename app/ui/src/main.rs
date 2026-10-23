@@ -23,6 +23,7 @@ mod menu;
 mod menus;
 mod notes;
 mod options;
+mod print;
 mod quicksteps;
 mod reading;
 mod reminders;

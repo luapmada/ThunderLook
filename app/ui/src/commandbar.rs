@@ -3,6 +3,7 @@
 //! suivants sont présentes mais désactivées.
 
 use icondata_core::Icon;
+use icondata_lu::LuPrinter as PRINTER;
 use leptos::prelude::*;
 use thunderlook_model::{
     ComposeKind, FolderOp, MessageOp, SearchScope,
@@ -84,6 +85,8 @@ pub enum Action {
     NoteNew,
     NoteDelete,
     Exchange(&'static str, bool),
+    /// Impression : « page » (vue courante), « card » ou « list » (Contacts).
+    Print(&'static str),
 }
 
 impl Action {
@@ -170,6 +173,7 @@ fn perform(ui: Ui, action: Action) {
                 crate::contact_form::delete(ui, id);
             }
         }
+        Action::Print(kind) => crate::print::run(ui, kind),
         Action::CalImport => crate::calendar::import(ui),
         Action::CalExportIcs => crate::calendar::export(ui, false),
         Action::CalExportCsv => crate::calendar::export(ui, true),
@@ -486,6 +490,7 @@ const CALENDAR_HOME: &[Group] = &[
             wired("Ouvrir un calendrier", FOLDER_INPUT, None, false, true, Action::CalImport),
             wired("Enregistrer le calendrier (.ics)", SAVE, None, false, true, Action::CalExportIcs),
             wired("Exporter en CSV", DOWNLOAD, None, false, true, Action::CalExportCsv),
+            wired("Imprimer", PRINTER, Some("Ctrl+P"), true, true, Action::Print("page")),
         ],
     },
 ];
@@ -493,6 +498,10 @@ const CALENDAR_HOME: &[Group] = &[
 const CONTACTS_HOME: &[Group] = &[
     Group { label: "Nouveau", cmds: &[wired("Nouveau contact", PLUS, Some("Ctrl+N"), true, true, Action::ContactNew)] },
     Group { label: "Supprimer", cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::ContactDelete)] },
+    Group {
+        label: "Imprimer",
+        cmds: &[wired("Imprimer la fiche", PRINTER, None, true, true, Action::Print("card")), wired("Imprimer la liste", PRINTER, None, true, true, Action::Print("list"))],
+    },
     Group {
         label: "Téléphone",
         cmds: &[wired("Importer (.vcf)", DOWNLOAD, None, true, true, Action::Exchange("contacts", true)), wired("Exporter (.vcf)", DOWNLOAD, None, true, true, Action::Exchange("contacts", false))],
@@ -508,6 +517,7 @@ const TASKS_HOME: &[Group] = &[
         cmds: &[
             wired("Marquer comme terminée", CHECK, None, true, true, Action::TaskComplete),
             wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::TaskDelete),
+            wired("Imprimer", PRINTER, None, true, true, Action::Print("page")),
         ],
     },
     Group {
@@ -518,7 +528,10 @@ const TASKS_HOME: &[Group] = &[
 
 const NOTES_HOME: &[Group] = &[
     Group { label: "Nouveau", cmds: &[wired("Nouvelle note", STICKY_NOTE, Some("Ctrl+N"), true, true, Action::NoteNew)] },
-    Group { label: "Gérer", cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::NoteDelete)] },
+    Group {
+        label: "Gérer",
+        cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::NoteDelete), wired("Imprimer", PRINTER, None, true, true, Action::Print("page"))],
+    },
     Group {
         label: "Téléphone",
         cmds: &[wired("Importer (.vnt)", DOWNLOAD, None, true, true, Action::Exchange("notes", true)), wired("Exporter (.vnt)", DOWNLOAD, None, true, true, Action::Exchange("notes", false))],

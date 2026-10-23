@@ -132,7 +132,10 @@ pub fn TasksPane() -> impl IntoView {
         let query = TaskQuery { view, folder, sort: so, text };
         spawn_local(async move {
             match call::<_, TaskList>("tasks_query", &QueryArg { query: &query }).await {
-                Ok(l) => shown.set(Some(l)),
+                Ok(l) => {
+                    crate::print::remember_tasks(&l);
+                    shown.set(Some(l));
+                }
                 Err(e) => ui.error.set(Some(e)),
             }
         });

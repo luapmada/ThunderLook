@@ -113,7 +113,7 @@ fn matches(r: &ContactRow, filter: &str) -> bool {
 }
 
 /// Lignes de la liste après le filtre (contacts et listes de distribution, sans tenir compte de la casse).
-fn visible(ui: Ui) -> Vec<ContactRow> {
+pub fn visible(ui: Ui) -> Vec<ContactRow> {
     let filter = ui.contact_filter.get().trim().to_lowercase();
     ui.contact_list.with(|l| {
         l.as_ref()
