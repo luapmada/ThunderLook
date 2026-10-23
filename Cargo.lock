@@ -5221,6 +5221,7 @@ version = "0.10.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "rusqlite",
  "serde_json",
  "thunderlook-store",
 ]
