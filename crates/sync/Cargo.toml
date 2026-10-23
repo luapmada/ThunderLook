@@ -1,6 +1,6 @@
 [package]
 name = "thunderlook-sync"
-version = "0.9.2"
+version = "0.10.0"
 edition = "2024"
 publish = false
 description = "Comptes de ThunderLook : relève IMAP, envoi SMTP, files d'opérations et d'envoi"

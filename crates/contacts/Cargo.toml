@@ -1,6 +1,6 @@
 [package]
 name = "thunderlook-contacts"
-version = "0.9.2"
+version = "0.10.0"
 edition = "2024"
 publish = false
 description = "Contacts de ThunderLook (J10) : contacts lus depuis les sacs MAPI importés [MS-OXOCNTC]"
