@@ -16,9 +16,14 @@ pub struct FolderRow {
     /// `c<id>` pour un calendrier, `k<id>` pour un dossier de contacts, `f<id>` pour tâches et notes.
     pub id: String,
     pub source_id: i64,
+    /// Nom affiché (lisible, distinct des autres dossiers de la même sorte).
     pub name: String,
+    /// Nom enregistré, proposé au renommage.
+    pub raw_name: String,
     pub section: String,
     pub count: u32,
+    /// Teinte propre au fichier de données (0 à 7).
+    pub account: u8,
     /// Palette 0 à 24 (calendriers).
     pub color: Option<u8>,
 }
@@ -58,7 +63,7 @@ pub fn item_folders(app: AppHandle, kind: Kind) -> Result<Vec<FolderRow>, String
     let p = prefix(kind);
     Ok(thunderlook_folders::list(&conn, kind)?
         .into_iter()
-        .map(|f| FolderRow { color: colors.get(&format!("c{}", f.id)).copied(), id: format!("{p}{}", f.id), source_id: f.source_id, name: f.name, section: f.section, count: f.count })
+        .map(|f| FolderRow { color: colors.get(&format!("c{}", f.id)).copied(), id: format!("{p}{}", f.id), source_id: f.source_id, name: f.name, raw_name: f.raw_name, section: f.section, count: f.count, account: f.account })
         .collect())
 }
 
