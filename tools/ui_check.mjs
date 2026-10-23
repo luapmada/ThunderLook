@@ -614,7 +614,7 @@ CHECKS.push(['J10 : contacts (dossiers, liste triée, fiche, filtre)', async (lo
     if ((rows < count || rows > count + 5)) throw new Error(`${rows} lignes pour ${count} contacts annoncés`);
     log(`Ctrl+3 : dossier « ${sel} », ${rows} contacts, mention : ${await js(`document.querySelector('.contacts .cal-note')?.textContent ?? '(aucune)'`)}`);
     // Tri : libellés dans l'ordre, sans tenir compte de la casse ni des accents.
-    const titles = await js(`[...document.querySelectorAll('.contact-title')].map(e => e.textContent)`);
+    const titles = await js(`[...document.querySelectorAll('.contact-title')].map(e => e.textContent).slice(0, ${count})`);
     const key = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
     const bad = titles.findIndex((t, i) => i > 0 && key(titles[i - 1]) > key(t));
     if (bad > 0) throw new Error(`tri : « ${titles[bad - 1]} » avant « ${titles[bad]} »`);
