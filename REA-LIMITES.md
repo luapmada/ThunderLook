@@ -169,8 +169,8 @@ Chaque entrée : action → résultat → cause → contournement → source.
 ## À vérifier avec REA/Outlook — séries avec exceptions (`crates/calendar`, 23/10)
 
 `Recurrence::encode` écrit maintenant les exceptions (miroir de `parse`) ; `write::update_series` et
-`write::update_occurrence` s'en servent. Vérifié : `encode(parse(b)) == b` sur les 26 blobs réels de
-`tests/fixtures/recur_reels.hex` (dont 11 avec exception, **sans objet ni lieu**), sauf 2 « jamais » à l'ancienne
+`write::update_occurrence` s'en servent. Vérifié : `encode(parse(b)) == b` sur les 25 blobs réels de
+`tests/fixtures/recur_reels.hex` (dont 10 avec exception, **sans objet ni lieu**), sauf 2 « jamais » à l'ancienne
 (`0xFFFFFFFF`, réécrit `0x2023`). **Jamais testé dans Outlook** : aucune écriture dans Outlook, aucune ouverture d'une
 série écrite par ThunderLook.
 
@@ -180,7 +180,7 @@ Non vérifié sur un blob réel (pas de fixture avec objet ou lieu d'exception) 
 - **`ExtendedException`** : ordre écrit = `ChangeHighlight` (si version d'écriture ≥ 0x3009 : taille 4 + valeur),
   `ReservedBlockEE1`, puis, si objet ou lieu modifié, `StartDateTime`/`EndDateTime`/`OriginalStartDate`, chaînes
   Unicode (`longueur u16` + UTF-16, objet puis lieu), `ReservedBlockEE2`. Confirmé seulement pour le cas sans chaîne
-  (11 fixtures, `ChangeHighlight` = 0, blocs vides).
+  (10 fixtures, `ChangeHighlight` = 0, blocs vides).
 - **`ChangeHighlight`** : toujours 0 à l'écriture (jamais le masque de champs modifiés d'Outlook) ; sens des bits non vérifié.
 - **`ReservedBlock1` / `ReservedBlock2`** : vides à l'écriture ; relus et réécrits tels quels sinon. Les octets
   **après** `ReservedBlock2` (4 à 20 octets vus sur 2 fixtures, ex. `2a92090d 00000000 …`) ne sont pas décrits : conservés
