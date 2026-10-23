@@ -686,6 +686,8 @@ pub fn on_reminders_due(f: impl Fn(Vec<crate::reminders::Reminder>) + 'static) {
         let _ = tauri_listen("reminders-due", &handler).await;
         handler.forget();
     });
+}
+
 // --- Échange avec le téléphone (fichiers) ---------------------------------------------------------------------------
 
 use crate::exchange::{CheckResult, ExchangeState};
