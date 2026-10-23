@@ -64,3 +64,5 @@ app/dist/
 # Icônes de ThunderLook (originales) : exception à la règle *.png
 !app/src-tauri/icons/*.png
 !app/src-tauri/app-icon.png
+
+/target-verif/
