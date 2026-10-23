@@ -9,6 +9,7 @@ pub mod imported;
 pub mod named;
 pub mod recur;
 pub mod tz;
+pub mod write;
 pub mod view;
 
 use std::collections::HashMap;

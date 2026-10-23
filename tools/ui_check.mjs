@@ -577,11 +577,11 @@ CHECKS.push(['Clic droit : les actions des sous-menus s\'exécutent (Règles ›
 
 // Calendrier commun avec Outlook : sans écriture (la création, la modification et la suppression dans Outlook se
 // vérifient par target/tl-scripts/appt_test.mjs, volontairement). Outlook fermé : le cas le dit et passe.
-CHECKS.push(['J9b : calendrier commun avec Outlook (mention, boîte Rendez-vous ouverte puis annulée)', async (log) => {
+CHECKS.push(['J9b : calendrier de ThunderLook (mention, boîte Rendez-vous ouverte puis annulée)', async (log) => {
   const press = (k, mods = {}) => js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, ctrlKey: ${!!mods.ctrl}, altKey: ${!!mods.alt}, bubbles: true }))`);
   try {
     await press('2', { ctrl: true });
-    await until(`/Calendrier commun avec Outlook/.test(document.querySelector('.cal-note')?.textContent ?? '')`, 'mention du calendrier commun');
+    await until(`/Calendrier de ThunderLook/.test(document.querySelector('.cal-note')?.textContent ?? '')`, 'mention du calendrier commun');
     // La synchronisation lancée à l'ouverture du module se termine (« synchronisé le … » ou l'erreur d'Outlook).
     await until(`!/en cours/.test(document.querySelector('.cal-note').textContent)`, 'fin de la synchronisation', 60000);
     const note = await js(`document.querySelector('.cal-note').textContent`);

@@ -1,93 +1,28 @@
-//! Calendrier commun avec Outlook (J9, étape 4) : synchronisation en arrière-plan et commandes de la boîte
-//! « Rendez-vous ». Outlook garde les rendez-vous ; ThunderLook les lit et y écrit par `thunderlook_outlook`.
-
-use std::sync::{
-    Mutex,
-    atomic::{AtomicBool, AtomicI64, Ordering},
-};
+//! Calendrier de ThunderLook : commandes de la boîte « Rendez-vous » (création, modification, suppression dans la base,
+//! sans Outlook).
 
 use tauri::{AppHandle, Emitter, Manager, State};
-use thunderlook_calendar::{Appointment, Busy, tz::TimeZone};
+use thunderlook_calendar::{Appointment, Busy, tz::TimeZone, write::Edit};
 use thunderlook_model::calendar::{AppointmentForm, CalendarInfo};
 
 use crate::{CalendarCache, clear_calendar, data_dir, now_ms, with_calendar};
 
-/// Intervalle des synchronisations automatiques.
-const EVERY_MS: i64 = 5 * 60_000;
+/// Plus de lien avec Outlook : les calendriers de la base sont tous modifiables dans ThunderLook.
+pub fn start(_app: &AppHandle) {}
 
-#[derive(Default)]
-pub struct OutlookStatus {
-    running: AtomicBool,
-    last_try_ms: AtomicI64,
-    error: Mutex<Option<String>>,
-}
+pub fn tick(_app: &AppHandle) {}
 
-/// Lance une synchronisation (une seule à la fois) ; l'interface suit l'événement « calendar-changed ».
-pub fn start(app: &AppHandle) {
-    let st = app.state::<OutlookStatus>();
-    st.last_try_ms.store(now_ms(), Ordering::SeqCst);
-    if st.running.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let r = data_dir(&app).and_then(|d| thunderlook_outlook::calendar::sync(&d, false));
-        let st = app.state::<OutlookStatus>();
-        match &r {
-            Ok(rep) => {
-                *st.error.lock().unwrap_or_else(|p| p.into_inner()) = None;
-                if rep.added + rep.updated + rep.removed > 0 {
-                    let _ = clear_calendar(&app.state::<CalendarCache>());
-                }
-            }
-            Err(e) => *st.error.lock().unwrap_or_else(|p| p.into_inner()) = Some(e.clone()),
-        }
-        st.running.store(false, Ordering::SeqCst);
-        let _ = app.emit("calendar-changed", ());
-        // Contacts : même lien avec Outlook, relevés à la suite du calendrier.
-        if r.is_ok() {
-            if let Ok(rep) = data_dir(&app).and_then(|d| thunderlook_outlook::contacts::sync(&d)) {
-                if rep.added + rep.updated + rep.removed > 0 {
-                    let _ = app.emit("contacts-changed", ());
-                }
-            }
-        }
-    });
-}
-
-/// Appelé par l'ordonnanceur chaque minute.
-pub fn tick(app: &AppHandle) {
-    if now_ms() - app.state::<OutlookStatus>().last_try_ms.load(Ordering::SeqCst) >= EVERY_MS {
-        start(app);
-    }
-}
-
-/// Marque les calendriers communs avec Outlook.
-pub fn mark_shared(app: &AppHandle, conn: &thunderlook_store::rusqlite::Connection, calendars: &mut [CalendarInfo]) {
-    let Some(l) = data_dir(app).ok().and_then(|d| thunderlook_outlook::calendar::linked(&d)) else { return };
+/// Marque les calendriers de la base (dossiers `c<id>`) comme modifiables.
+pub fn mark_shared(_app: &AppHandle, _conn: &thunderlook_store::rusqlite::Connection, calendars: &mut [CalendarInfo]) {
     for c in calendars.iter_mut() {
-        let Some(id) = c.id.strip_prefix('c').and_then(|x| x.parse::<i64>().ok()) else { continue };
-        let nid: Option<(i64, u32)> = conn.query_row("SELECT source_id, nid FROM folder WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
-        c.shared = nid.is_some_and(|(s, n)| s == l.source_id && l.folders.contains(&n));
-        c.outlook_default = c.shared && nid.is_some_and(|(_, n)| n == l.default_folder);
+        c.shared = c.id.strip_prefix('c').is_some_and(|x| x.parse::<i64>().is_ok());
+        c.outlook_default = false;
     }
 }
 
-/// Mention des calendriers communs affichés : heure de la dernière synchronisation, ou pourquoi elle échoue.
-pub fn note(app: &AppHandle) -> String {
-    let st = app.state::<OutlookStatus>();
-    let last = data_dir(app).ok().and_then(|d| thunderlook_outlook::calendar::linked(&d)).map(|l| l.last_sync_ms).unwrap_or(0);
-    let when = if last > 0 {
-        chrono::DateTime::from_timestamp_millis(last).map(|t| t.with_timezone(&chrono::Local).format("%d/%m à %H:%M").to_string()).unwrap_or_default()
-    } else {
-        String::new()
-    };
-    match st.error.lock().unwrap_or_else(|p| p.into_inner()).clone() {
-        Some(e) if when.is_empty() => format!("Calendrier commun avec Outlook : {e}"),
-        Some(e) => format!("Calendrier commun avec Outlook, tel qu'à la synchronisation du {when}. {e}"),
-        None if st.running.load(Ordering::SeqCst) && when.is_empty() => "Calendrier commun avec Outlook : synchronisation en cours…".into(),
-        None => format!("Calendrier commun avec Outlook — synchronisé le {when}."),
-    }
+/// Mention des calendriers affichés.
+pub fn note(_app: &AppHandle) -> String {
+    "Calendrier de ThunderLook.".into()
 }
 
 fn local(ms: i64) -> chrono::NaiveDateTime {
@@ -158,8 +93,8 @@ pub fn appointment_form(app: AppHandle, cache: State<CalendarCache>, id: Option<
     })
 }
 
-fn edit_of(f: &AppointmentForm) -> thunderlook_outlook::calendar::Edit {
-    thunderlook_outlook::calendar::Edit {
+fn edit_of(f: &AppointmentForm) -> Edit {
+    Edit {
         subject: f.subject.clone(),
         location: f.location.clone(),
         start: f.start.clone(),
@@ -173,18 +108,14 @@ fn edit_of(f: &AppointmentForm) -> thunderlook_outlook::calendar::Edit {
     }
 }
 
-fn done(app: &AppHandle, r: Result<thunderlook_outlook::calendar::SyncReport, String>, what: &str) -> Result<String, String> {
-    let st = app.state::<OutlookStatus>();
-    let out = r.map(|_| what.to_string());
-    if out.is_ok() {
-        *st.error.lock().unwrap_or_else(|p| p.into_inner()) = None;
-    }
+fn done(app: &AppHandle, r: Result<(), String>, what: &str) -> Result<String, String> {
+    r?;
     clear_calendar(&app.state::<CalendarCache>())?;
     let _ = app.emit("calendar-changed", ());
-    out
+    Ok(what.to_string())
 }
 
-/// Enregistre le rendez-vous dans Outlook (création ou modification), puis relit son calendrier.
+/// Enregistre le rendez-vous dans la base (création ou modification).
 #[tauri::command(async)]
 pub fn appointment_save(app: AppHandle, form: AppointmentForm) -> Result<String, String> {
     if form.subject.trim().is_empty() && form.location.trim().is_empty() {
@@ -194,28 +125,29 @@ pub fn appointment_save(app: AppHandle, form: AppointmentForm) -> Result<String,
         return Err("La fin est avant le début.".into());
     }
     let dir = data_dir(&app)?;
+    let mut conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
     let r = match &form.id {
-        Some(id) => thunderlook_outlook::calendar::update(&dir, message_id(id)?.0, edit_of(&form)),
+        Some(id) => thunderlook_calendar::write::update(&mut conn, &dir, message_id(id)?.0, &edit_of(&form)),
         None => {
-            let folder: i64 = form.calendar_id.strip_prefix('c').and_then(|c| c.parse().ok()).ok_or("choisissez un calendrier commun avec Outlook")?;
-            thunderlook_outlook::calendar::create(&dir, folder, edit_of(&form))
+            let folder: i64 = form.calendar_id.strip_prefix('c').and_then(|c| c.parse().ok()).ok_or("choisissez un calendrier")?;
+            thunderlook_calendar::write::create(&mut conn, &dir, folder, &edit_of(&form)).map(|_| ())
         }
     };
-    done(&app, r, "Rendez-vous enregistré dans Outlook")
+    done(&app, r, "Rendez-vous enregistré")
 }
 
-/// Supprime le rendez-vous dans Outlook : toute la série (`series`), ou seulement l'occurrence affichée.
+/// Supprime le rendez-vous : la série entière. Une seule occurrence d'une série : pas encore possible.
 #[tauri::command(async)]
 pub fn appointment_delete(app: AppHandle, id: String, series: bool) -> Result<String, String> {
     let dir = data_dir(&app)?;
     let (n, day) = message_id(&id)?;
-    let occurrence = if series { None } else { day };
-    let what = if occurrence.is_some() { "Occurrence supprimée dans Outlook" } else { "Rendez-vous supprimé dans Outlook" };
-    done(&app, thunderlook_outlook::calendar::delete(&dir, n, occurrence), what)
+    if day.is_some() && !series {
+        return Err("Supprimer une seule occurrence d'une série n'est pas encore possible : supprimez la série.".into());
+    }
+    let mut conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    done(&app, thunderlook_calendar::write::delete(&mut conn, n), "Rendez-vous supprimé")
 }
 
-/// Synchronisation demandée par l'interface (ouverture du calendrier, F9).
+/// Demande de l'interface à l'ouverture du calendrier (ancienne synchronisation avec Outlook) : rien à faire.
 #[tauri::command(async)]
-pub fn outlook_sync(app: AppHandle) {
-    start(&app);
-}
+pub fn outlook_sync(_app: AppHandle) {}
