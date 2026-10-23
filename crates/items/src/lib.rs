@@ -426,6 +426,7 @@ pub fn task_complete(conn: &mut Connection, data_dir: &Path, id: i64, done: bool
 }
 
 fn delete_message(conn: &mut Connection, id: i64) -> Result<()> {
+    thunderlook_safety::snapshot_conn(conn, id)?;
     conn.execute("DELETE FROM message_fts WHERE rowid = ?1", [id]).map_err(e)?;
     conn.execute("DELETE FROM message WHERE id = ?1", [id]).map_err(e)?;
     Ok(())
@@ -617,6 +618,20 @@ mod tests {
 
     fn form(subject: &str) -> TaskForm {
         TaskForm { folder_id: "f1".into(), subject: subject.into(), importance: 1, ..Default::default() }
+    }
+
+    #[test]
+    fn delete_then_undo_gives_the_same_form() {
+        let (mut conn, dir) = db("undo", &TASK_LIDS);
+        let f = TaskForm { due: "2026-10-30".into(), reminder: Some("2026-10-29T09:30".into()), ..form("Appeler le client") };
+        let id = task_save(&mut conn, &dir, &f).unwrap();
+        let n: i64 = id[1..].parse().unwrap();
+        let before = task_form(&conn, &dir, n).unwrap();
+        task_delete(&mut conn, n).unwrap();
+        assert!(task_form(&conn, &dir, n).is_err());
+        assert_eq!(thunderlook_safety::undo(&mut conn, &dir).unwrap(), "Annulé : suppression du tâche « Appeler le client »");
+        assert_eq!(task_form(&conn, &dir, n).unwrap(), before);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

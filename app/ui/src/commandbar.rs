@@ -84,6 +84,8 @@ pub enum Action {
     NoteNew,
     NoteDelete,
     Exchange(&'static str, bool),
+    /// Annule la dernière suppression ou modification (hors courrier).
+    Undo,
 }
 
 impl Action {
@@ -165,6 +167,7 @@ fn perform(ui: Ui, action: Action) {
         Action::NoteNew => crate::notes::open_new(ui),
         Action::Exchange(kind, import) => crate::contact_form::exchange(ui, kind, import),
         Action::NoteDelete => crate::notes::delete_selected(ui),
+        Action::Undo => crate::safety::undo(ui),
         Action::ContactDelete => {
             if let Some(id) = ui.contact_selected.get_untracked() {
                 crate::contact_form::delete(ui, id);
@@ -480,6 +483,7 @@ const CALENDAR_HOME: &[Group] = &[
             wired("Mois", CALENDAR, Some("Ctrl+Alt+4"), true, true, Action::CalView(CalendarViewKind::Month)),
         ],
     },
+    Group { label: "Annuler", cmds: &[wired("Annuler", UNDO, Some("Ctrl+Z"), true, true, Action::Undo)] },
     Group {
         label: "Partager",
         cmds: &[
@@ -493,6 +497,7 @@ const CALENDAR_HOME: &[Group] = &[
 const CONTACTS_HOME: &[Group] = &[
     Group { label: "Nouveau", cmds: &[wired("Nouveau contact", PLUS, Some("Ctrl+N"), true, true, Action::ContactNew)] },
     Group { label: "Supprimer", cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::ContactDelete)] },
+    Group { label: "Annuler", cmds: &[wired("Annuler", UNDO, Some("Ctrl+Z"), true, true, Action::Undo)] },
     Group {
         label: "Téléphone",
         cmds: &[wired("Importer (.vcf)", DOWNLOAD, None, true, true, Action::Exchange("contacts", true)), wired("Exporter (.vcf)", DOWNLOAD, None, true, true, Action::Exchange("contacts", false))],
@@ -510,6 +515,7 @@ const TASKS_HOME: &[Group] = &[
             wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::TaskDelete),
         ],
     },
+    Group { label: "Annuler", cmds: &[wired("Annuler", UNDO, Some("Ctrl+Z"), true, true, Action::Undo)] },
     Group {
         label: "Téléphone",
         cmds: &[wired("Importer (.ics)", DOWNLOAD, None, true, true, Action::Exchange("tasks", true)), wired("Exporter (.ics)", DOWNLOAD, None, true, true, Action::Exchange("tasks", false))],
@@ -519,6 +525,7 @@ const TASKS_HOME: &[Group] = &[
 const NOTES_HOME: &[Group] = &[
     Group { label: "Nouveau", cmds: &[wired("Nouvelle note", STICKY_NOTE, Some("Ctrl+N"), true, true, Action::NoteNew)] },
     Group { label: "Gérer", cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::NoteDelete)] },
+    Group { label: "Annuler", cmds: &[wired("Annuler", UNDO, Some("Ctrl+Z"), true, true, Action::Undo)] },
     Group {
         label: "Téléphone",
         cmds: &[wired("Importer (.vnt)", DOWNLOAD, None, true, true, Action::Exchange("notes", true)), wired("Exporter (.vnt)", DOWNLOAD, None, true, true, Action::Exchange("notes", false))],
@@ -744,9 +751,16 @@ pub fn CommandBar() -> impl IntoView {
     view! {
         <div class="commandbar">
             <div class="tabs">
-                <button class="tab file" aria-disabled="true" title="Fichier — pas encore disponible" tabindex="-1">
-                    "Fichier"
-                </button>
+                <MenuButton
+                    label="Fichier"
+                    icon=ARCHIVE
+                    show_label=true
+                    class="tab file"
+                    entries=Signal::derive(move || vec![
+                        MenuEntry::action("Sauvegardes…", move || ui.backups.set(true)),
+                        MenuEntry::action("Échange avec le téléphone…", move || ui.phone_exchange.set(true)),
+                    ])
+                />
                 <div role="tablist" aria-label="Barre de commandes" class="tablist" node_ref=ui.refs.tabs on:keydown=on_tabs_key>
                     {move || {
                         let searching = !ui.search_text.get().is_empty();

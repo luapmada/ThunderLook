@@ -283,3 +283,11 @@ Tauri (`mail_cmds.rs`) et l'interface n'ont pas pu être compilés ici pour Wind
   pas de façon groupée avec ce schéma à ma connaissance — non vérifié.
 - **Impression** : `window.print()` du cadre du message (HTML) ou du volet de lecture (texte, règles `@media print`). Pas d'en-têtes
   Outlook (De/À/Date/Objet) dans l'impression du corps HTML seul : à voir à l'écran.
+
+## À vérifier — annulation et sauvegardes (`crates/safety`, lot O)
+
+- **Taille du JSON de sauvegarde, mesurée** sur 10 000 contacts fabriqués (nom, société, courriel, téléphones, adresse, note) : **15 Mo sans photo** (écriture 0,6 s) ; **383 Mo avec une photo de 20 Ko chacun**, car la photo est stockée deux fois (sacs MAPI + `.eml`) puis encodée en base64. Au pire, 14 quotidiennes + 8 hebdomadaires = plusieurs Go. Si les vrais contacts de Paul ont beaucoup de photos : à vérifier dans `data_dir/backups` après quelques jours ; piste = ne pas sauvegarder le `.eml` des contacts (reconstructible).
+- Relecture « fusionner » de 10 000 éléments : ~8 s (non optimisé).
+- Annulation : pile en mémoire (perdue à la fermeture) ; les instantanés restent 60 jours dans `data_dir/trash/` et se remettent via `thunderlook_safety::restore` (pas d'écran pour l'instant).
+- Non vérifié : la création d'un élément n'est pas annulable (périmètre : suppressions et modifications). Une suppression faite par « Échange avec le téléphone » (annuler l'import) passe aussi par la corbeille interne.
+- Non compilé ici : `app/src-tauri` (bibliothèques GTK absentes sous Linux cloud). L'interface (`app/ui`) compile pour `wasm32-unknown-unknown`.

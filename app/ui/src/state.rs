@@ -249,6 +249,8 @@ pub struct Ui {
     pub reminders_open: RwSignal<bool>,
     /// Boîte « Échange avec le téléphone » ouverte (Ctrl+Maj+T).
     pub phone_exchange: RwSignal<bool>,
+    /// Écran « Sauvegardes » ouvert (menu Fichier).
+    pub backups: RwSignal<bool>,
     pub refs: Refs,
 }
 
@@ -321,6 +323,7 @@ impl Ui {
             reminders: RwSignal::new(Vec::new()),
             reminders_open: RwSignal::new(false),
             phone_exchange: RwSignal::new(false),
+            backups: RwSignal::new(false),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),

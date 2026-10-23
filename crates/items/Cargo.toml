@@ -7,6 +7,7 @@ description = "Tâches et notes de ThunderLook : lues et écrites dans la base (
 
 [dependencies]
 thunderlook-store = { path = "../store" }
+thunderlook-safety = { path = "../safety" }
 thunderlook-calendar = { path = "../calendar" }
 thunderlook-model = { path = "../model" }
 mail-parser = "0.11.9"

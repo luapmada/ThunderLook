@@ -65,6 +65,7 @@ pub fn appointment_shift(app: AppHandle, cache: State<CalendarCache>, id: String
         return Err("La fin est avant le début.".into());
     }
     let (start, end) = (start.format(FORMAT).to_string(), end.format(FORMAT).to_string());
+    thunderlook_safety::snapshot_edit(&conn, &dir, n)?;
     let result = match day {
         None => write::move_appointment(&mut conn, n, &start, &end),
         Some(d) => {
