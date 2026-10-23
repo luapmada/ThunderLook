@@ -365,6 +365,7 @@ fn recurrence(rule: &str, start: NaiveDateTime, end: NaiveDateTime) -> Result<Re
         first_date_time: 0,
         period,
         end: End::Never,
+        occurrences: 0,
         first_day_of_week,
         deleted: Vec::new(),
         modified: Vec::new(),

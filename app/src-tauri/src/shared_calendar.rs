@@ -2,7 +2,12 @@
 //! sans Outlook).
 
 use tauri::{AppHandle, Emitter, Manager, State};
-use thunderlook_calendar::{Appointment, Busy, tz::TimeZone, write::Edit};
+use thunderlook_calendar::{
+    Appointment, Busy,
+    recur::Frequency,
+    tz::TimeZone,
+    write::{Edit, Repeat, RepeatEnd},
+};
 use thunderlook_model::calendar::{AppointmentForm, CalendarInfo};
 
 use crate::{CalendarCache, clear_calendar, data_dir, now_ms, with_calendar};
@@ -52,6 +57,9 @@ fn form_of(a: &Appointment, dir: &std::path::Path) -> AppointmentForm {
         categories: a.categories.join(", "),
         private: a.private,
         recurring: a.recurrence.is_some(),
+        repeat_every: 1,
+        repeat_count: 10,
+        ..Default::default()
     }
 }
 
@@ -88,6 +96,8 @@ pub fn appointment_form(app: AppHandle, cache: State<CalendarCache>, id: Option<
         start: fmt(start),
         end: fmt(start + chrono::Duration::minutes(30)),
         reminder: Some(15),
+        repeat_every: 1,
+        repeat_count: 10,
         busy: 2,
         ..Default::default()
     })
@@ -105,6 +115,27 @@ fn edit_of(f: &AppointmentForm) -> Edit {
         body: f.body.clone(),
         categories: f.categories.clone(),
         private: f.private,
+        // Une série existante garde sa périodicité : la répétition ne s'applique qu'à la création.
+        repeat: if f.id.is_some() {
+            None
+        } else {
+            let frequency = match f.repeat.as_str() {
+                "daily" => Some(Frequency::Daily),
+                "weekly" => Some(Frequency::Weekly),
+                "monthly" => Some(Frequency::Monthly),
+                "yearly" => Some(Frequency::Yearly),
+                _ => None,
+            };
+            frequency.map(|frequency| Repeat {
+                frequency,
+                interval: f.repeat_every.max(1),
+                end: match f.repeat_end.as_str() {
+                    "count" => RepeatEnd::Count(f.repeat_count.max(1)),
+                    "until" => RepeatEnd::Until(f.repeat_until.clone()),
+                    _ => RepeatEnd::Never,
+                },
+            })
+        },
     }
 }
 
@@ -136,16 +167,16 @@ pub fn appointment_save(app: AppHandle, form: AppointmentForm) -> Result<String,
     done(&app, r, "Rendez-vous enregistré")
 }
 
-/// Supprime le rendez-vous : la série entière. Une seule occurrence d'une série : pas encore possible.
+/// Supprime le rendez-vous : toute la série (`series`), ou seulement l'occurrence affichée.
 #[tauri::command(async)]
 pub fn appointment_delete(app: AppHandle, id: String, series: bool) -> Result<String, String> {
     let dir = data_dir(&app)?;
     let (n, day) = message_id(&id)?;
-    if day.is_some() && !series {
-        return Err("Supprimer une seule occurrence d'une série n'est pas encore possible : supprimez la série.".into());
-    }
     let mut conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
-    done(&app, thunderlook_calendar::write::delete(&mut conn, n), "Rendez-vous supprimé")
+    match day {
+        Some(day) if !series => done(&app, thunderlook_calendar::write::delete_occurrence(&mut conn, n, &day), "Occurrence supprimée"),
+        _ => done(&app, thunderlook_calendar::write::delete(&mut conn, n), "Rendez-vous supprimé"),
+    }
 }
 
 /// Demande de l'interface à l'ouverture du calendrier (ancienne synchronisation avec Outlook) : rien à faire.

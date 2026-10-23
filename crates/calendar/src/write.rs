@@ -5,16 +5,35 @@
 
 use std::path::Path;
 
-use chrono::NaiveDateTime;
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use thunderlook_store::rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
     bag::{self, Value},
+    expand,
+    recur::{End, Frequency, Pattern, Recurrence, local_to_minutes, minutes_to_local},
     named::{Named, PS_PUBLIC_STRINGS, PSETID_APPOINTMENT, PSETID_COMMON, PSETID_MEETING},
     tz::TimeZone,
 };
 
 type Result<T> = std::result::Result<T, String>;
+
+/// Répétition d'un nouveau rendez-vous : « tous les `interval` jours, semaines, mois ou ans » (même jour de la semaine,
+/// du mois ou de l'année que le début), jusqu'à une fin.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Repeat {
+    pub frequency: Frequency,
+    pub interval: u32,
+    pub end: RepeatEnd,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RepeatEnd {
+    Never,
+    Count(u32),
+    /// Dernier jour (`AAAA-MM-JJ`, inclus).
+    Until(String),
+}
 
 /// Rendez-vous saisi. Dates locales (heure de Paris) `AAAA-MM-JJTHH:MM`.
 #[derive(Clone, Debug, Default)]
@@ -32,6 +51,8 @@ pub struct Edit {
     /// Catégories séparées par des virgules.
     pub categories: String,
     pub private: bool,
+    /// Nouveau rendez-vous périodique (création seulement : une série existante garde sa périodicité).
+    pub repeat: Option<Repeat>,
 }
 
 fn e(x: thunderlook_store::rusqlite::Error) -> String {
@@ -66,6 +87,74 @@ fn write_eml(data_dir: &Path, source_id: i64, id: i64, subject: &str, body: &str
     let text = format!("MIME-Version: 1.0\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{body}");
     std::fs::write(&path, text).map_err(|x| x.to_string())?;
     Ok(rel)
+}
+
+const NEVER_END: u32 = 0x5AE9_80DF;
+
+/// Périodicité d'un nouveau rendez-vous, au format des séries qu'Outlook écrit (FirstDateTime, Period… relevés sur les
+/// séries de la base).
+fn recurrence_of(edit: &Edit, rep: &Repeat) -> Result<Recurrence> {
+    let parse = |t: &str| NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M").map_err(|_| format!("date invalide : {t}"));
+    let (start, end) = (parse(&edit.start)?, parse(&edit.end)?);
+    let date = start.date();
+    let interval = rep.interval.clamp(1, 999);
+    let midnight = |d: NaiveDate| local_to_minutes(d.and_hms_opt(0, 0, 0).unwrap_or_default());
+    let month_index = (date.year() - 1601) * 12 + date.month0() as i32;
+    let first_of_month = |idx: u32| {
+        let (y, m) = (1601 + (idx / 12) as i32, idx % 12 + 1);
+        midnight(NaiveDate::from_ymd_opt(y, m, 1).unwrap_or_default())
+    };
+    let (pattern, period, first) = match rep.frequency {
+        Frequency::Daily => (Pattern::Day, 1_440 * interval, midnight(date) % (1_440 * interval)),
+        Frequency::Weekly => {
+            let monday = date - Duration::days(i64::from(date.weekday().num_days_from_monday()));
+            (Pattern::Week { days: 1 << date.weekday().num_days_from_sunday() }, interval, midnight(monday) % (10_080 * interval))
+        }
+        Frequency::Monthly => (Pattern::Month { day: date.day() }, interval, first_of_month(month_index as u32 % interval)),
+        Frequency::Yearly => (Pattern::Month { day: date.day() }, 12 * interval, first_of_month(date.month0())),
+    };
+    let start_offset = start.time().format("%H").to_string().parse::<u32>().unwrap_or(0) * 60 + start.time().format("%M").to_string().parse::<u32>().unwrap_or(0);
+    let duration = (end - start).num_minutes().max(0) as u32;
+    let mut r = Recurrence {
+        frequency: rep.frequency,
+        pattern,
+        calendar_type: 0,
+        first_date_time: first,
+        period,
+        end: End::Never,
+        occurrences: 0,
+        first_day_of_week: 1,
+        deleted: vec![],
+        modified: vec![],
+        start_date: midnight(date),
+        end_date: NEVER_END,
+        start_offset,
+        end_offset: start_offset + duration,
+        exceptions: vec![],
+    };
+    let horizon = date + Duration::days(366 * 120);
+    match &rep.end {
+        RepeatEnd::Never => {}
+        RepeatEnd::Count(n) => {
+            let n = (*n).clamp(1, 9_999) as usize;
+            let all = expand::dates(&r, date, horizon);
+            let last = all.get(n - 1).or(all.last()).copied().unwrap_or(date);
+            r.end = End::Count(n.min(all.len().max(1)) as u32);
+            r.occurrences = n as u32;
+            r.end_date = midnight(last);
+        }
+        RepeatEnd::Until(day) => {
+            let until = NaiveDate::parse_from_str(day, "%Y-%m-%d").map_err(|_| format!("date de fin invalide : {day}"))?;
+            if until < date {
+                return Err("La fin de la répétition est avant le début.".into());
+            }
+            r.end = End::Date;
+            r.end_date = midnight(until);
+            r.occurrences = expand::dates(&r, date, until).len() as u32;
+        }
+    }
+    let _ = minutes_to_local(0);
+    Ok(r)
 }
 
 /// Propriétés du rendez-vous : (identifiant local dans la source, valeur).
@@ -118,6 +207,15 @@ pub fn create(conn: &mut Connection, data_dir: &Path, folder_id: i64, edit: &Edi
             set.push((id, Some(val)));
         }
     }
+    if let Some(rep) = &edit.repeat {
+        let blob = recurrence_of(edit, rep)?.encode();
+        for (id, val) in [(a(0x8223), Value::Bool(true)), (a(0x8216), Value::Binary(blob))] {
+            if let Some(id) = id {
+                set.retain(|(i, _)| *i != id);
+                set.push((id, Some(val)));
+            }
+        }
+    }
     if let Some(id) = named.id(PSETID_MEETING, 0x0023) {
         let seed = now_ms() as u128 ^ (u128::from(std::process::id()) << 64);
         let mut uid = seed.to_be_bytes().to_vec();
@@ -165,6 +263,24 @@ pub fn update(conn: &mut Connection, data_dir: &Path, message_id: i64, edit: &Ed
     Ok(())
 }
 
+/// Supprime une seule occurrence d'une série (`day` : sa date d'origine `AAAA-MM-JJ`) : elle rejoint les occurrences
+/// supprimées de la périodicité.
+pub fn delete_occurrence(conn: &mut Connection, message_id: i64, day: &str) -> Result<()> {
+    let row: Option<(i64, Vec<u8>)> = conn
+        .query_row("SELECT f.source_id, m.props FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id = ?1", [message_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()
+        .map_err(e)?;
+    let (source_id, old) = row.ok_or("rendez-vous introuvable")?;
+    let named = named_of(conn, source_id)?;
+    let id = named.id(PSETID_APPOINTMENT, 0x8216).ok_or("source sans périodicité")?;
+    let blob = bag::Bag::parse(&old)?.binary(id).map(<[u8]>::to_vec).ok_or("ce rendez-vous n'est pas une série")?;
+    let date = NaiveDate::parse_from_str(day, "%Y-%m-%d").map_err(|_| format!("date invalide : {day}"))?;
+    let patched = Recurrence::with_deleted_instance(&blob, local_to_minutes(date.and_hms_opt(0, 0, 0).unwrap_or_default()))?;
+    let props = bag::merge(&old, &[(id, Some(Value::Binary(patched)))])?;
+    conn.execute("UPDATE message SET props = ?2, modified_at = ?3, indexed = 0 WHERE id = ?1", params![message_id, props, now_ms()]).map_err(e)?;
+    Ok(())
+}
+
 /// Suppression d'un rendez-vous (toute la série pour un rendez-vous périodique).
 pub fn delete(conn: &mut Connection, message_id: i64) -> Result<()> {
     conn.execute("DELETE FROM message_fts WHERE rowid = ?1", [message_id]).map_err(e)?;
@@ -175,6 +291,19 @@ pub fn delete(conn: &mut Connection, message_id: i64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeat_round_trip() {
+        let edit = Edit { start: "2026-10-23T14:00".into(), end: "2026-10-23T14:30".into(), ..Default::default() };
+        let rep = Repeat { frequency: Frequency::Weekly, interval: 1, end: RepeatEnd::Count(4) };
+        let r = recurrence_of(&edit, &rep).unwrap();
+        let blob = r.encode();
+        let back = Recurrence::parse(&blob).unwrap_or_else(|e| panic!("{e} (blob de {} octets)", blob.len()));
+        assert_eq!(back.end, End::Count(4));
+        assert_eq!(expand::dates(&back, NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(), NaiveDate::from_ymd_opt(2027, 1, 1).unwrap()).len(), 4);
+        let patched = Recurrence::with_deleted_instance(&blob, local_to_minutes(NaiveDate::from_ymd_opt(2026, 10, 30).unwrap().and_hms_opt(0, 0, 0).unwrap())).unwrap();
+        assert_eq!(Recurrence::parse(&patched).unwrap().deleted.len(), 1);
+    }
 
     #[test]
     fn paris_to_utc() {

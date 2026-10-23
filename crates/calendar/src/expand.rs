@@ -195,6 +195,7 @@ mod tests {
             first_date_time: 0,
             period,
             end: End::Date,
+            occurrences: 0,
             first_day_of_week: 1,
             deleted: vec![],
             modified: vec![],

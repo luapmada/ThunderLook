@@ -184,6 +184,20 @@ pub struct AppointmentForm {
     /// Catégories séparées par des virgules.
     pub categories: String,
     pub private: bool,
-    /// Série périodique : heures et périodicité restent celles d'Outlook.
+    /// Série périodique existante : heures et périodicité ne se modifient pas encore.
     pub recurring: bool,
+    /// Nouveau rendez-vous périodique : "" (aucune), "daily", "weekly", "monthly" ou "yearly".
+    #[serde(default)]
+    pub repeat: String,
+    /// Tous les N jours, semaines, mois ou ans.
+    #[serde(default)]
+    pub repeat_every: u32,
+    /// "never", "count" ou "until".
+    #[serde(default)]
+    pub repeat_end: String,
+    #[serde(default)]
+    pub repeat_count: u32,
+    /// Dernier jour `AAAA-MM-JJ`.
+    #[serde(default)]
+    pub repeat_until: String,
 }

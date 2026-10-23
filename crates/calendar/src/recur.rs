@@ -57,6 +57,8 @@ pub struct Recurrence {
     pub first_date_time: u32,
     pub period: u32,
     pub end: End,
+    /// `OccurrenceCount` tel qu'écrit (le nombre d'occurrences, même pour une série qui finit à une date).
+    pub occurrences: u32,
     pub first_day_of_week: u32,
     pub deleted: Vec<u32>,
     pub modified: Vec<u32>,
@@ -235,6 +237,7 @@ impl Recurrence {
             first_date_time,
             period,
             end,
+            occurrences: count,
             first_day_of_week,
             deleted,
             modified,
@@ -244,6 +247,103 @@ impl Recurrence {
             end_offset,
             exceptions,
         })
+    }
+}
+
+impl Recurrence {
+    /// Encodage de la périodicité d'une série sans exception (rendez-vous créé dans ThunderLook).
+    pub fn encode(&self) -> Vec<u8> {
+        let mut b: Vec<u8> = Vec::new();
+        let w16 = |b: &mut Vec<u8>, v: u16| b.extend_from_slice(&v.to_le_bytes());
+        let w32 = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_le_bytes());
+        w16(&mut b, 0x3004);
+        w16(&mut b, 0x3004);
+        w16(
+            &mut b,
+            match self.frequency {
+                Frequency::Daily => 0x200A,
+                Frequency::Weekly => 0x200B,
+                Frequency::Monthly => 0x200C,
+                Frequency::Yearly => 0x200D,
+            },
+        );
+        w16(
+            &mut b,
+            match self.pattern {
+                Pattern::Day => 0x0000,
+                Pattern::Week { .. } => 0x0001,
+                Pattern::Month { .. } => 0x0002,
+                Pattern::MonthNth { .. } => 0x0003,
+                Pattern::MonthEnd => 0x0004,
+            },
+        );
+        w16(&mut b, self.calendar_type);
+        w32(&mut b, self.first_date_time);
+        w32(&mut b, self.period);
+        w32(&mut b, 0);
+        match self.pattern {
+            Pattern::Day => {}
+            Pattern::Week { days } => w32(&mut b, days),
+            Pattern::Month { day } => w32(&mut b, day),
+            Pattern::MonthNth { days, nth } => {
+                w32(&mut b, days);
+                w32(&mut b, nth);
+            }
+            Pattern::MonthEnd => w32(&mut b, 1),
+        }
+        let (end_type, count) = match self.end {
+            End::Date => (0x2021, 0),
+            End::Count(n) => (0x2022, n),
+            End::Never => (0x2023, self.occurrences),
+        };
+        let count = if matches!(self.end, End::Date) { self.occurrences } else { count };
+        w32(&mut b, end_type);
+        w32(&mut b, count);
+        w32(&mut b, self.first_day_of_week);
+        w32(&mut b, self.deleted.len() as u32);
+        self.deleted.iter().for_each(|d| w32(&mut b, *d));
+        w32(&mut b, self.modified.len() as u32);
+        self.modified.iter().for_each(|d| w32(&mut b, *d));
+        w32(&mut b, self.start_date);
+        w32(&mut b, self.end_date);
+        // AppointmentRecurrencePattern sans exception.
+        w32(&mut b, 0x3006);
+        w32(&mut b, 0x3009);
+        w32(&mut b, self.start_offset);
+        w32(&mut b, self.end_offset);
+        w16(&mut b, 0);
+        w32(&mut b, 0);
+        w32(&mut b, 0);
+        b
+    }
+
+    /// Ajoute une occurrence supprimée (minuit local de son jour, en minutes depuis 1601) à une périodicité déjà
+    /// encodée, sans toucher au reste (exceptions comprises). La liste reste triée.
+    pub fn with_deleted_instance(blob: &[u8], day_minutes: u32) -> Result<Vec<u8>, String> {
+        let r = Self::parse(blob)?;
+        if r.deleted.contains(&day_minutes) {
+            return Ok(blob.to_vec());
+        }
+        // Position du nombre d'occurrences supprimées : après l'en-tête et le motif.
+        let pattern_len = match r.pattern {
+            Pattern::Day => 0,
+            Pattern::Week { .. } | Pattern::Month { .. } | Pattern::MonthEnd => 4,
+            Pattern::MonthNth { .. } => 8,
+        };
+        let count_at = 5 * 2 + 4 * 3 + pattern_len + 4 * 3;
+        let at = |i: usize| blob.get(i..i + 4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]));
+        if at(count_at) != Some(r.deleted.len() as u32) {
+            return Err("périodicité d'une forme inattendue".into());
+        }
+        let mut deleted = r.deleted.clone();
+        deleted.push(day_minutes);
+        deleted.sort_unstable();
+        let list_end = count_at + 4 + 4 * r.deleted.len();
+        let mut out = blob[..count_at].to_vec();
+        out.extend_from_slice(&(deleted.len() as u32).to_le_bytes());
+        deleted.iter().for_each(|d| out.extend_from_slice(&d.to_le_bytes()));
+        out.extend_from_slice(&blob[list_end..]);
+        Ok(out)
     }
 }
 

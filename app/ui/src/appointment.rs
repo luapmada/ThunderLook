@@ -222,7 +222,50 @@ pub fn AppointmentDialog() -> impl IntoView {
                         <span>"Journée entière"</span>
                     </label>
                     {move || form().is_some_and(|f| f.recurring).then(|| view! {
-                        <p class="dialog-note">"Série périodique : les heures et la périodicité se modifient dans Outlook pour l'instant ; le reste s'applique à toute la série."</p>
+                        <p class="dialog-note">"Série périodique : les heures et la périodicité ne se modifient pas encore ; le reste s'applique à toute la série."</p>
+                    })}
+                    {move || form().is_some_and(|f| f.id.is_none()).then(|| view! {
+                        <div class="appt-row">
+                            <label class="field">
+                                <span>"Répéter"</span>
+                                <select aria-label="Répéter" on:change=move |ev| { let v = event_target_value(&ev); set(&|f| f.repeat = v.clone()); }>
+                                    <option value="" selected=move || form().is_some_and(|f| f.repeat.is_empty())>"Jamais"</option>
+                                    <option value="daily" selected=move || form().is_some_and(|f| f.repeat == "daily")>"Tous les jours"</option>
+                                    <option value="weekly" selected=move || form().is_some_and(|f| f.repeat == "weekly")>"Toutes les semaines"</option>
+                                    <option value="monthly" selected=move || form().is_some_and(|f| f.repeat == "monthly")>"Tous les mois"</option>
+                                    <option value="yearly" selected=move || form().is_some_and(|f| f.repeat == "yearly")>"Tous les ans"</option>
+                                </select>
+                            </label>
+                            {move || form().is_some_and(|f| !f.repeat.is_empty()).then(|| view! {
+                                <label class="field">
+                                    <span>"Tous les"</span>
+                                    <input type="number" min="1" max="99" aria-label="Intervalle de répétition" prop:value=move || form().map(|f| f.repeat_every).unwrap_or(1)
+                                        on:input=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(1); set(&|f| f.repeat_every = v); } />
+                                </label>
+                                <label class="field">
+                                    <span>"Fin"</span>
+                                    <select aria-label="Fin de la répétition" on:change=move |ev| { let v = event_target_value(&ev); set(&|f| f.repeat_end = v.clone()); }>
+                                        <option value="never" selected=move || form().is_some_and(|f| f.repeat_end != "count" && f.repeat_end != "until")>"Jamais"</option>
+                                        <option value="count" selected=move || form().is_some_and(|f| f.repeat_end == "count")>"Après N occurrences"</option>
+                                        <option value="until" selected=move || form().is_some_and(|f| f.repeat_end == "until")>"Le…"</option>
+                                    </select>
+                                </label>
+                                {move || form().is_some_and(|f| f.repeat_end == "count").then(|| view! {
+                                    <label class="field">
+                                        <span>"Occurrences"</span>
+                                        <input type="number" min="1" max="999" aria-label="Nombre d'occurrences" prop:value=move || form().map(|f| f.repeat_count).unwrap_or(10)
+                                            on:input=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(1); set(&|f| f.repeat_count = v); } />
+                                    </label>
+                                })}
+                                {move || form().is_some_and(|f| f.repeat_end == "until").then(|| view! {
+                                    <label class="field">
+                                        <span>"Dernier jour"</span>
+                                        <input type="date" aria-label="Dernier jour de la répétition" prop:value=move || form().map(|f| f.repeat_until).unwrap_or_default()
+                                            on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.repeat_until = v.clone()); } />
+                                    </label>
+                                })}
+                            })}
+                        </div>
                     })}
                     <div class="appt-row">
                         <label class="field">
