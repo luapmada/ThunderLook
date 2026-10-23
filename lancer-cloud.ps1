@@ -1,6 +1,7 @@
 # Lance les lots cloud demandes (par defaut K a O), un par un, et ouvre l'onglet de suivi de chaque session.
 # Usage : .\lancer-cloud.ps1 [K L M N O]
 param([string[]]$Lots = @('K','L','M','N','O'))
+$Lots = @($Lots | ForEach-Object { $_ -split '[,; ]+' } | Where-Object { $_ })
 Set-Location $PSScriptRoot
 $urls = @()
 foreach ($l in $Lots) {
