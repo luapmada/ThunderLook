@@ -5,13 +5,13 @@
 
 use std::path::Path;
 
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
 use thunderlook_store::rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
     bag::{self, Value},
     expand,
-    recur::{End, Frequency, Pattern, Recurrence, local_to_minutes, minutes_to_local},
+    recur::{End, Exception, Frequency, Pattern, Recurrence, local_to_minutes, minutes_to_local},
     named::{Named, PS_PUBLIC_STRINGS, PSETID_APPOINTMENT, PSETID_COMMON, PSETID_MEETING},
     tz::TimeZone,
 };
@@ -131,6 +131,7 @@ fn recurrence_of(edit: &Edit, rep: &Repeat) -> Result<Recurrence> {
         start_offset,
         end_offset: start_offset + duration,
         exceptions: vec![],
+        raw: Default::default(),
     };
     let horizon = date + Duration::days(366 * 120);
     match &rep.end {
@@ -275,8 +276,181 @@ pub fn delete_occurrence(conn: &mut Connection, message_id: i64, day: &str) -> R
     let id = named.id(PSETID_APPOINTMENT, 0x8216).ok_or("source sans périodicité")?;
     let blob = bag::Bag::parse(&old)?.binary(id).map(<[u8]>::to_vec).ok_or("ce rendez-vous n'est pas une série")?;
     let date = NaiveDate::parse_from_str(day, "%Y-%m-%d").map_err(|_| format!("date invalide : {day}"))?;
-    let patched = Recurrence::with_deleted_instance(&blob, local_to_minutes(date.and_hms_opt(0, 0, 0).unwrap_or_default()))?;
+    let midnight = local_to_minutes(date.and_hms_opt(0, 0, 0).unwrap_or_default());
+    let mut rec = Recurrence::parse(&blob)?;
+    // Une occurrence déplacée (exception) : on retire l'exception ; la date d'origine reste dans les supprimées.
+    let patched = match rec.exceptions.iter().position(|x| minutes_to_local(x.original_start).date() == date) {
+        Some(i) => {
+            let x = rec.exceptions.remove(i);
+            drop_modified(&mut rec, &x);
+            rec.encode()
+        }
+        None => Recurrence::with_deleted_instance(&blob, midnight)?,
+    };
     let props = bag::merge(&old, &[(id, Some(Value::Binary(patched)))])?;
+    conn.execute("UPDATE message SET props = ?2, modified_at = ?3, indexed = 0 WHERE id = ?1", params![message_id, props, now_ms()]).map_err(e)?;
+    Ok(())
+}
+
+/// Retire de `modified` la date (minuit local) du nouveau début de l'exception `x`.
+fn drop_modified(rec: &mut Recurrence, x: &Exception) {
+    let at = local_to_minutes(minutes_to_local(x.start).date().and_hms_opt(0, 0, 0).unwrap_or_default());
+    if let Some(i) = rec.modified.iter().position(|m| *m == at) {
+        rec.modified.remove(i);
+    }
+}
+
+fn parse_local(t: &str) -> Result<NaiveDateTime> {
+    NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M").map_err(|_| format!("date invalide : {t}"))
+}
+
+/// Série lue pour modification : sac, table des noms et périodicité.
+struct Series {
+    source_id: i64,
+    old: Vec<u8>,
+    named: Named,
+    blob_id: u16,
+    rec: Recurrence,
+    subject: String,
+}
+
+fn load_series(conn: &Connection, message_id: i64) -> Result<Series> {
+    let row: Option<(i64, Vec<u8>, String)> = conn
+        .query_row("SELECT f.source_id, m.props, m.subject FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id = ?1", [message_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .optional()
+        .map_err(e)?;
+    let (source_id, old, subject) = row.ok_or("rendez-vous introuvable")?;
+    let named = named_of(conn, source_id)?;
+    let blob_id = named.id(PSETID_APPOINTMENT, 0x8216).ok_or("source sans périodicité")?;
+    let blob = bag::Bag::parse(&old)?.binary(blob_id).map(<[u8]>::to_vec).ok_or("ce rendez-vous n'est pas une série")?;
+    let rec = Recurrence::parse(&blob)?;
+    Ok(Series { source_id, old, named, blob_id, rec, subject })
+}
+
+fn save(conn: &Connection, data_dir: &Path, message_id: i64, source_id: i64, edit: &Edit, props: &[u8]) -> Result<()> {
+    let eml = write_eml(data_dir, source_id, message_id, &edit.subject, &edit.body)?;
+    conn.execute(
+        "UPDATE message SET subject = ?2, sensitivity = ?3, modified_at = ?4, preview = ?5, eml_path = ?6, props = ?7, indexed = 0 WHERE id = ?1",
+        params![message_id, edit.subject, if edit.private { 2 } else { 0 }, now_ms(), preview(&edit.body), eml, props],
+    )
+    .map_err(e)?;
+    conn.execute("DELETE FROM message_fts WHERE rowid = ?1", [message_id]).map_err(e)?;
+    Ok(())
+}
+
+/// Ce que `update_series` a abandonné en changeant la périodicité.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SeriesChange {
+    /// Occurrences modifiées (exceptions) perdues.
+    pub lost_exceptions: usize,
+    /// Occurrences supprimées (sans exception) rétablies.
+    pub lost_deleted: usize,
+}
+
+/// Modification d'une série existante : objet, lieu, etc. comme `update`, plus les heures (heure de début et durée de
+/// `edit.start`/`edit.end`) et, avec `rule`, la périodicité (la date de `edit.start` est alors le premier jour de la
+/// série). Sans `rule`, ou avec la même périodicité, la date de `edit.start` est ignorée et les exceptions comme les
+/// occurrences supprimées sont conservées ; si la périodicité change, elles sont abandonnées (nombre dans le retour).
+pub fn update_series(conn: &mut Connection, data_dir: &Path, message_id: i64, edit: &Edit, rule: Option<Repeat>) -> Result<SeriesChange> {
+    let s = load_series(conn, message_id)?;
+    let (start, end) = (parse_local(&edit.start)?, parse_local(&edit.end)?);
+    if end < start {
+        return Err("La fin est avant le début.".into());
+    }
+    let mut rec = s.rec.clone();
+    let mut change = SeriesChange::default();
+    if let Some(rule) = &rule {
+        let fresh = recurrence_of(edit, rule)?;
+        let same = (fresh.frequency, fresh.pattern, fresh.period, fresh.end, fresh.start_date, fresh.end_date)
+            == (rec.frequency, rec.pattern, rec.period, rec.end, rec.start_date, rec.end_date);
+        if !same {
+            change = SeriesChange { lost_exceptions: rec.exceptions.len(), lost_deleted: rec.deleted.len().saturating_sub(rec.exceptions.len()) };
+            rec = fresh;
+        }
+    }
+    rec.start_offset = start.hour() * 60 + start.minute();
+    rec.end_offset = rec.start_offset + (end - start).num_minutes() as u32;
+    // Début et fin du rendez-vous : ceux de la première occurrence.
+    let first_day = minutes_to_local(rec.start_date).date();
+    let first = expand::dates(&rec, first_day, first_day + Duration::days(366 * 5)).first().copied().unwrap_or(first_day);
+    let at = |offset: u32| first.and_hms_opt(0, 0, 0).unwrap_or_default() + Duration::minutes(i64::from(offset));
+    let (first_start, first_end) = (TimeZone::PARIS.to_utc(at(rec.start_offset)).and_utc().timestamp_millis(), TimeZone::PARIS.to_utc(at(rec.end_offset)).and_utc().timestamp_millis());
+    let a = |lid| s.named.id(PSETID_APPOINTMENT, lid);
+    let mut set = props_of(&s.named, edit, false)?;
+    set.push((s.blob_id, Some(Value::Binary(rec.encode()))));
+    for (id, v) in [
+        (a(0x820D), Value::time_ms(first_start)),
+        (a(0x820E), Value::time_ms(first_end)),
+        (a(0x8215), Value::Bool(edit.all_day)),
+        (Some(0x0060), Value::time_ms(first_start)),
+        (Some(0x0061), Value::time_ms(first_end)),
+    ] {
+        if let Some(id) = id {
+            set.push((id, Some(v)));
+        }
+    }
+    let props = bag::merge(&s.old, &set)?;
+    save(conn, data_dir, message_id, s.source_id, edit, &props)?;
+    Ok(change)
+}
+
+/// Modifie UNE occurrence d'une série (`date` : son jour d'origine `AAAA-MM-JJ`) : exception portant les champs de
+/// `edit` qui diffèrent de la série (objet, lieu, début, fin, disponibilité, rappel, journée entière) ; le jour
+/// d'origine rejoint les occurrences supprimées et le jour du nouveau début les modifiées. Une exception déjà présente
+/// pour ce jour est remplacée. Description, catégories et caractère privé de `edit` ne s'appliquent qu'à la série
+/// (ThunderLook n'écrit pas de message intégré par exception).
+pub fn update_occurrence(conn: &mut Connection, _data_dir: &Path, message_id: i64, date: &str, edit: &Edit) -> Result<()> {
+    let s = load_series(conn, message_id)?;
+    let day = NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| format!("date invalide : {date}"))?;
+    let midnight = local_to_minutes(day.and_hms_opt(0, 0, 0).unwrap_or_default());
+    let (start, end) = (parse_local(&edit.start)?, parse_local(&edit.end)?);
+    if end < start {
+        return Err("La fin est avant le début.".into());
+    }
+    let mut rec = s.rec;
+    let previous = rec.exceptions.iter().position(|x| minutes_to_local(x.original_start).date() == day);
+    let original_start = match previous {
+        Some(i) => {
+            let x = rec.exceptions.remove(i);
+            drop_modified(&mut rec, &x);
+            x.original_start
+        }
+        None => {
+            if rec.deleted.contains(&midnight) || !expand::dates(&rec, day, day).contains(&day) {
+                return Err(format!("{date} n'est pas une occurrence de cette série"));
+            }
+            midnight + rec.start_offset
+        }
+    };
+    let bag = bag::Bag::parse(&s.old)?;
+    let a = |lid| s.named.id(PSETID_APPOINTMENT, lid);
+    let c = |lid| s.named.id(PSETID_COMMON, lid);
+    let master_location = a(0x8208).and_then(|i| bag.text(i)).unwrap_or_default();
+    let master_busy = a(0x8205).and_then(|i| bag.int(i)).unwrap_or(2);
+    let master_all_day = a(0x8215).and_then(|i| bag.bool(i)).unwrap_or(false);
+    let master_reminder = c(0x8503).and_then(|i| bag.bool(i)).unwrap_or(false);
+    let master_delta = c(0x8501).and_then(|i| bag.int(i)).unwrap_or(15);
+    let x = Exception {
+        start: local_to_minutes(start),
+        end: local_to_minutes(end),
+        original_start,
+        subject: Some(edit.subject.clone()).filter(|v| *v != s.subject),
+        location: Some(edit.location.clone()).filter(|v| *v != master_location),
+        busy_status: Some(edit.busy).filter(|v| i64::from(*v) != master_busy).map(|v| v as u32),
+        reminder_set: Some(edit.reminder.is_some()).filter(|v| *v != master_reminder),
+        reminder_delta: edit.reminder.filter(|m| i64::from(*m) != master_delta).map(|m| m as u32),
+        all_day: Some(edit.all_day).filter(|v| *v != master_all_day),
+        ..Default::default()
+    };
+    if !rec.deleted.contains(&midnight) {
+        rec.deleted.push(midnight);
+    }
+    rec.modified.push(local_to_minutes(start.date().and_hms_opt(0, 0, 0).unwrap_or_default()));
+    rec.exceptions.push(x);
+    rec.deleted.sort_unstable();
+    rec.modified.sort_unstable();
+    rec.exceptions.sort_by_key(|x| x.original_start);
+    let props = bag::merge(&s.old, &[(s.blob_id, Some(Value::Binary(rec.encode())))])?;
     conn.execute("UPDATE message SET props = ?2, modified_at = ?3, indexed = 0 WHERE id = ?1", params![message_id, props, now_ms()]).map_err(e)?;
     Ok(())
 }
@@ -303,6 +477,148 @@ mod tests {
         assert_eq!(expand::dates(&back, NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(), NaiveDate::from_ymd_opt(2027, 1, 1).unwrap()).len(), 4);
         let patched = Recurrence::with_deleted_instance(&blob, local_to_minutes(NaiveDate::from_ymd_opt(2026, 10, 30).unwrap().and_hms_opt(0, 0, 0).unwrap())).unwrap();
         assert_eq!(Recurrence::parse(&patched).unwrap().deleted.len(), 1);
+    }
+
+    /// Base de test : une source dont la table de noms a les propriétés d'un rendez-vous, un dossier calendrier.
+    fn fixture(name: &str) -> (std::path::PathBuf, Connection, i64) {
+        let dir = std::env::temp_dir().join(format!("tl-write-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let conn = thunderlook_store::open(&dir).unwrap();
+        let mut names = Vec::new();
+        let mut add = |id: u16, set: &str, lid: u32| {
+            names.extend_from_slice(&id.to_le_bytes());
+            names.extend_from_slice(set.as_bytes());
+            names.push(0);
+            names.extend_from_slice(&lid.to_le_bytes());
+        };
+        for (i, lid) in [0x820D, 0x820E, 0x8215, 0x8208, 0x8205, 0x8223, 0x8216, 0x8217, 0x8218].into_iter().enumerate() {
+            add(0x8000 + i as u16, PSETID_APPOINTMENT, lid);
+        }
+        add(0x8010, PSETID_COMMON, 0x8501);
+        add(0x8011, PSETID_COMMON, 0x8503);
+        conn.execute("INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at, props) VALUES (1, 'tl', '', '', 't', 0, 0, ?1)", [names]).unwrap();
+        conn.execute("INSERT INTO folder (id, source_id, nid, name, role, hidden, position) VALUES (1, 1, 1, 'Calendrier', 'folder', 0, 0)", []).unwrap();
+        (dir, conn, 1)
+    }
+
+    fn weekly(conn: &mut Connection, dir: &Path, folder: i64) -> i64 {
+        let edit = Edit {
+            subject: "Point d'équipe".into(),
+            location: "Salle A".into(),
+            start: "2026-10-23T14:00".into(),
+            end: "2026-10-23T14:30".into(),
+            reminder: Some(15),
+            busy: 2,
+            repeat: Some(Repeat { frequency: Frequency::Weekly, interval: 1, end: RepeatEnd::Count(6) }),
+            ..Default::default()
+        };
+        create(conn, dir, folder, &edit).unwrap()
+    }
+
+    /// Occurrences de l'année, sous la forme « jour d'origine début-fin objet » (heure de Paris).
+    fn listing(conn: &Connection, id: i64) -> Vec<String> {
+        let cal = crate::load(conn).unwrap();
+        let a = cal.appointments.iter().find(|a| a.id == id).unwrap();
+        let tz = a.time_zone.unwrap_or(TimeZone::PARIS);
+        let local = |ms: i64| tz.to_local(chrono::DateTime::from_timestamp_millis(ms).unwrap().naive_utc()).format("%m-%d %H:%M").to_string();
+        expand::occurrences(a, utc_ms("2026-01-01T00:00").unwrap(), utc_ms("2027-06-01T00:00").unwrap())
+            .iter()
+            .map(|o| format!("{} {} → {} {}{}", o.original_date.map(|d| d.format("%m-%d").to_string()).unwrap_or_default(), local(o.start_ms), local(o.end_ms), o.subject, if o.exception { " *" } else { "" }))
+            .collect()
+    }
+
+    fn recurrence(conn: &Connection, id: i64) -> Recurrence {
+        let s = load_series(conn, id).unwrap();
+        s.rec
+    }
+
+    #[test]
+    fn update_occurrence_moves_one_occurrence() {
+        let (dir, mut conn, folder) = fixture("occ");
+        let id = weekly(&mut conn, &dir, folder);
+        let before = listing(&conn, id);
+        assert_eq!(before.len(), 6, "{before:?}");
+        let edit = Edit {
+            subject: "Point déplacé".into(),
+            location: "Salle A".into(),
+            start: "2026-10-31T16:00".into(),
+            end: "2026-10-31T17:00".into(),
+            reminder: Some(15),
+            busy: 1,
+            ..Default::default()
+        };
+        update_occurrence(&mut conn, &dir, id, "2026-10-30", &edit).unwrap();
+        let after = listing(&conn, id);
+        assert_eq!(after.len(), 6, "{after:?}");
+        assert!(after.iter().any(|l| l == "10-30 10-31 16:00 → 10-31 17:00 Point déplacé *"), "{after:?}");
+        assert!(!after.iter().any(|l| l.contains("10-30 14:00")), "l'ancienne occurrence est restée : {after:?}");
+        let others = |v: &[String]| v.iter().filter(|l| !l.starts_with("10-30")).cloned().collect::<Vec<_>>();
+        assert_eq!(others(&before), others(&after));
+        // Seuls les champs réellement modifiés sont écrits.
+        let r = recurrence(&conn, id);
+        let x = &r.exceptions[0];
+        assert_eq!((x.subject.as_deref(), x.location.as_deref(), x.busy_status, x.reminder_set, x.reminder_delta, x.all_day), (Some("Point déplacé"), None, Some(1), None, None, None));
+        assert_eq!((r.deleted.len(), r.modified.len()), (1, 1));
+        // Une seconde modification du même jour remplace l'exception.
+        let again = Edit { subject: "Point d'équipe".into(), start: "2026-10-30T09:00".into(), end: "2026-10-30T09:30".into(), ..edit.clone() };
+        update_occurrence(&mut conn, &dir, id, "2026-10-30", &again).unwrap();
+        let r = recurrence(&conn, id);
+        assert_eq!((r.exceptions.len(), r.deleted.len(), r.modified.len()), (1, 1, 1));
+        assert_eq!(r.exceptions[0].subject, None);
+        assert!(listing(&conn, id).iter().any(|l| l == "10-30 10-30 09:00 → 10-30 09:30 Point d'équipe *"));
+        assert!(update_occurrence(&mut conn, &dir, id, "2026-10-29", &again).is_err(), "pas une occurrence");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn delete_occurrence_after_exception() {
+        let (dir, mut conn, folder) = fixture("del");
+        let id = weekly(&mut conn, &dir, folder);
+        let edit = Edit { subject: "Autre".into(), start: "2026-10-31T16:00".into(), end: "2026-10-31T17:00".into(), busy: 2, reminder: Some(15), location: "Salle A".into(), ..Default::default() };
+        update_occurrence(&mut conn, &dir, id, "2026-10-30", &edit).unwrap();
+        // Supprimer une autre occurrence laisse l'exception intacte.
+        delete_occurrence(&mut conn, id, "2026-11-06").unwrap();
+        let r = recurrence(&conn, id);
+        assert_eq!((r.exceptions.len(), r.deleted.len(), r.modified.len()), (1, 2, 1));
+        assert_eq!(listing(&conn, id).len(), 5);
+        // Supprimer l'occurrence déplacée retire l'exception et son jour de `modified`, sans rétablir l'originale.
+        delete_occurrence(&mut conn, id, "2026-10-30").unwrap();
+        let r = recurrence(&conn, id);
+        assert_eq!((r.exceptions.len(), r.deleted.len(), r.modified.len()), (0, 2, 0));
+        let after = listing(&conn, id);
+        assert_eq!(after.len(), 4, "{after:?}");
+        assert!(after.iter().all(|l| !l.starts_with("10-30") && !l.starts_with("11-06")), "{after:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn update_series_times_keep_the_rest_and_new_rule_drops_it() {
+        let (dir, mut conn, folder) = fixture("ser");
+        let id = weekly(&mut conn, &dir, folder);
+        let moved = Edit { subject: "Autre".into(), start: "2026-10-31T16:00".into(), end: "2026-10-31T17:00".into(), busy: 2, reminder: Some(15), location: "Salle A".into(), ..Default::default() };
+        update_occurrence(&mut conn, &dir, id, "2026-10-30", &moved).unwrap();
+        delete_occurrence(&mut conn, id, "2026-11-06").unwrap();
+        // Heures seules : 15 h – 16 h ; exception et suppression conservées.
+        let times = Edit { subject: "Point d'équipe".into(), location: "Salle A".into(), start: "2026-10-23T15:00".into(), end: "2026-10-23T16:00".into(), busy: 2, reminder: Some(15), ..Default::default() };
+        let change = update_series(&mut conn, &dir, id, &times, None).unwrap();
+        assert_eq!(change, SeriesChange::default());
+        let l = listing(&conn, id);
+        assert_eq!(l.len(), 5, "{l:?}");
+        assert!(l.contains(&"10-23 10-23 15:00 → 10-23 16:00 Point d'équipe".to_string()), "{l:?}");
+        assert!(l.contains(&"10-30 10-31 16:00 → 10-31 17:00 Autre *".to_string()), "{l:?}");
+        // La même périodicité n'abandonne rien.
+        let same = Repeat { frequency: Frequency::Weekly, interval: 1, end: RepeatEnd::Count(6) };
+        assert_eq!(update_series(&mut conn, &dir, id, &times, Some(same)).unwrap(), SeriesChange::default());
+        assert_eq!(recurrence(&conn, id).exceptions.len(), 1);
+        // Une autre périodicité (toutes les 2 semaines, 3 fois) abandonne l'exception et la suppression.
+        let rule = Repeat { frequency: Frequency::Weekly, interval: 2, end: RepeatEnd::Count(3) };
+        let change = update_series(&mut conn, &dir, id, &times, Some(rule)).unwrap();
+        assert_eq!(change, SeriesChange { lost_exceptions: 1, lost_deleted: 1 });
+        let l = listing(&conn, id);
+        assert_eq!(l, ["10-23 10-23 15:00 → 10-23 16:00 Point d'équipe", "11-06 11-06 15:00 → 11-06 16:00 Point d'équipe", "11-20 11-20 15:00 → 11-20 16:00 Point d'équipe"]);
+        let r = recurrence(&conn, id);
+        assert_eq!((r.exceptions.len(), r.deleted.len(), r.modified.len()), (0, 0, 0));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

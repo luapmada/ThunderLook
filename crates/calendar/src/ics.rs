@@ -374,6 +374,7 @@ fn recurrence(rule: &str, start: NaiveDateTime, end: NaiveDateTime) -> Result<Re
         start_offset: start_min,
         end_offset: start_min + (end - start).num_minutes().max(0) as u32,
         exceptions: Vec::new(),
+        raw: Default::default(),
     };
     // La première date de la série doit être une occurrence du motif (sinon RFC 5545 la compte quand même).
     if let Some(first) = dates(&r, start.date(), start.date() + Duration::days(4_000)).first() {

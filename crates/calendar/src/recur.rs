@@ -46,6 +46,30 @@ pub struct Exception {
     /// `PidLidAppointmentSubType` de l'occurrence : journée entière.
     pub all_day: Option<bool>,
     pub has_attachment: bool,
+    /// Champs lus puis conservés tels quels pour que `encode(parse(b))` redonne `b` : type de réunion et couleur
+    /// (OVERRIDE_MEETING_TYPE / OVERRIDE_COLOR).
+    pub meeting_type: Option<u32>,
+    pub color: Option<u32>,
+    /// `ChangeHighlight` d'`ExtendedException` (taille de 4 octets, puis valeur et réservé) ; `None` : zéro.
+    pub change_highlight: Option<Vec<u8>>,
+    pub reserved_ee1: Vec<u8>,
+    /// Début, fin et début d'origine répétés devant les chaînes Unicode ; `None` : ceux d'`ExceptionInfo`.
+    pub wide_times: Option<[u32; 3]>,
+    pub reserved_ee2: Vec<u8>,
+    /// Drapeaux d'`OverrideFlags` hors `OVERRIDE_*` connus (0x200 relevé dans la base, sans donnée associée).
+    pub extra_flags: u16,
+}
+
+/// Versions et blocs réservés d'`AppointmentRecurrencePattern`, conservés à la lecture ; à zéro / vides pour une série
+/// écrite par ThunderLook (0x3006 / 0x3009).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Raw {
+    pub reader_version: u32,
+    pub writer_version: u32,
+    pub reserved1: Vec<u8>,
+    pub reserved2: Vec<u8>,
+    /// Octets après `ReservedBlock2` (relevés sur des séries d'Outlook ; non décrits par [MS-OXOCAL]).
+    pub trailing: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,6 +91,7 @@ pub struct Recurrence {
     pub start_offset: u32,
     pub end_offset: u32,
     pub exceptions: Vec<Exception>,
+    pub raw: Raw,
 }
 
 struct Reader<'a> {
@@ -95,9 +120,9 @@ impl<'a> Reader<'a> {
         }
         (0..n).map(|_| self.u32()).collect()
     }
-    fn skip_block(&mut self) -> Result<(), String> {
+    fn block(&mut self) -> Result<Vec<u8>, String> {
         let n = self.u32()? as usize;
-        self.take(n).map(|_| ())
+        self.take(n).map(<[u8]>::to_vec)
     }
 }
 
@@ -158,7 +183,7 @@ impl Recurrence {
         let start_date = r.u32()?;
         let end_date = r.u32()?;
         // AppointmentRecurrencePattern.
-        let _reader2 = r.u32()?;
+        let reader2 = r.u32()?;
         let writer2 = r.u32()?;
         let start_offset = r.u32()?;
         let end_offset = r.u32()?;
@@ -168,13 +193,14 @@ impl Recurrence {
         for _ in 0..n {
             let mut e = Exception { start: r.u32()?, end: r.u32()?, original_start: r.u32()?, ..Default::default() };
             let f = r.u16()?;
+            e.extra_flags = f & !0x01FF;
             if f & OVERRIDE_SUBJECT != 0 {
                 let _len = r.u16()?;
                 let len2 = r.u16()?;
                 e.subject = Some(r.take(usize::from(len2))?.iter().map(|&c| crate::bag::cp1252(c)).collect());
             }
             if f & OVERRIDE_MEETING_TYPE != 0 {
-                r.u32()?;
+                e.meeting_type = Some(r.u32()?);
             }
             if f & OVERRIDE_REMINDER_DELTA != 0 {
                 e.reminder_delta = Some(r.u32()?);
@@ -197,23 +223,23 @@ impl Recurrence {
                 e.all_day = Some(r.u32()? != 0);
             }
             if f & OVERRIDE_COLOR != 0 {
-                r.u32()?;
+                e.color = Some(r.u32()?);
             }
             exceptions.push(e);
             flags.push(f);
         }
-        r.skip_block()?;
+        let reserved1 = r.block()?;
         // ExtendedException : objet et lieu en Unicode, qui remplacent les versions 8 bits ; ChangeHighlight à partir
         // de la version d'écriture 0x3009.
         {
             for (e, f) in exceptions.iter_mut().zip(&flags) {
                 if writer2 >= 0x3009 {
                     let size = r.u32()? as usize;
-                    r.take(size)?;
+                    e.change_highlight = Some(r.take(size)?.to_vec());
                 }
-                r.skip_block()?;
+                e.reserved_ee1 = r.block()?;
                 if f & (OVERRIDE_SUBJECT | OVERRIDE_LOCATION) != 0 {
-                    r.take(12)?;
+                    e.wide_times = Some([r.u32()?, r.u32()?, r.u32()?]);
                     let wide = |r: &mut Reader| -> Result<String, String> {
                         let n = usize::from(r.u16()?);
                         let s = r.take(n * 2)?;
@@ -225,11 +251,12 @@ impl Recurrence {
                     if f & OVERRIDE_LOCATION != 0 {
                         e.location = Some(wide(&mut r)?);
                     }
-                    r.skip_block()?;
+                    e.reserved_ee2 = r.block()?;
                 }
             }
         }
-        r.skip_block()?;
+        let reserved2 = r.block()?;
+        let trailing = r.b[r.i..].to_vec();
         Ok(Self {
             frequency,
             pattern,
@@ -246,12 +273,41 @@ impl Recurrence {
             start_offset,
             end_offset,
             exceptions,
+            raw: Raw { reader_version: reader2, writer_version: writer2, reserved1, reserved2, trailing },
         })
     }
 }
 
+impl Exception {
+    /// Drapeaux `OVERRIDE_*` : un champ présent est un champ modifié.
+    fn flags(&self) -> u16 {
+        [
+            (self.subject.is_some(), OVERRIDE_SUBJECT),
+            (self.meeting_type.is_some(), OVERRIDE_MEETING_TYPE),
+            (self.reminder_delta.is_some(), OVERRIDE_REMINDER_DELTA),
+            (self.reminder_set.is_some(), OVERRIDE_REMINDER),
+            (self.location.is_some(), OVERRIDE_LOCATION),
+            (self.busy_status.is_some(), OVERRIDE_BUSY),
+            (self.has_attachment, OVERRIDE_ATTACHMENT),
+            (self.all_day.is_some(), OVERRIDE_SUBTYPE),
+            (self.color.is_some(), OVERRIDE_COLOR),
+        ]
+        .iter()
+        .filter(|(on, _)| *on)
+        .fold(self.extra_flags, |f, (_, bit)| f | bit)
+    }
+}
+
+/// Caractère → octet Windows-1252 (`?` s'il n'y est pas).
+fn to_cp1252(c: char) -> u8 {
+    match c as u32 {
+        v @ (0..=0x7F | 0xA0..=0xFF) => v as u8,
+        _ => (0x80..=0x9Fu8).find(|&b| crate::bag::cp1252(b) == c).unwrap_or(b'?'),
+    }
+}
+
 impl Recurrence {
-    /// Encodage de la périodicité d'une série sans exception (rendez-vous créé dans ThunderLook).
+    /// Encodage de la périodicité d'une série, exceptions comprises : miroir de `parse`.
     pub fn encode(&self) -> Vec<u8> {
         let mut b: Vec<u8> = Vec::new();
         let w16 = |b: &mut Vec<u8>, v: u16| b.extend_from_slice(&v.to_le_bytes());
@@ -306,14 +362,86 @@ impl Recurrence {
         self.modified.iter().for_each(|d| w32(&mut b, *d));
         w32(&mut b, self.start_date);
         w32(&mut b, self.end_date);
-        // AppointmentRecurrencePattern sans exception.
-        w32(&mut b, 0x3006);
-        w32(&mut b, 0x3009);
+        // AppointmentRecurrencePattern.
+        let writer = if self.raw.writer_version == 0 { 0x3009 } else { self.raw.writer_version };
+        w32(&mut b, if self.raw.reader_version == 0 { 0x3006 } else { self.raw.reader_version });
+        w32(&mut b, writer);
         w32(&mut b, self.start_offset);
         w32(&mut b, self.end_offset);
-        w16(&mut b, 0);
-        w32(&mut b, 0);
-        w32(&mut b, 0);
+        w16(&mut b, self.exceptions.len() as u16);
+        let flags: Vec<u16> = self.exceptions.iter().map(Exception::flags).collect();
+        for (x, &f) in self.exceptions.iter().zip(&flags) {
+            w32(&mut b, x.start);
+            w32(&mut b, x.end);
+            w32(&mut b, x.original_start);
+            w16(&mut b, f);
+            // Chaînes 8 bits : longueur + 1, longueur, octets (sans zéro final).
+            let narrow = |b: &mut Vec<u8>, s: &str| {
+                let bytes: Vec<u8> = s.chars().map(to_cp1252).collect();
+                b.extend_from_slice(&(bytes.len() as u16 + 1).to_le_bytes());
+                b.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
+                b.extend_from_slice(&bytes);
+            };
+            if let Some(s) = x.subject.as_deref().filter(|_| f & OVERRIDE_SUBJECT != 0) {
+                narrow(&mut b, s);
+            }
+            if let Some(v) = x.meeting_type {
+                w32(&mut b, v);
+            }
+            if let Some(v) = x.reminder_delta {
+                w32(&mut b, v);
+            }
+            if let Some(v) = x.reminder_set {
+                w32(&mut b, u32::from(v));
+            }
+            if let Some(s) = x.location.as_deref().filter(|_| f & OVERRIDE_LOCATION != 0) {
+                narrow(&mut b, s);
+            }
+            if let Some(v) = x.busy_status {
+                w32(&mut b, v);
+            }
+            if f & OVERRIDE_ATTACHMENT != 0 {
+                w32(&mut b, u32::from(x.has_attachment));
+            }
+            if let Some(v) = x.all_day {
+                w32(&mut b, u32::from(v));
+            }
+            if let Some(v) = x.color {
+                w32(&mut b, v);
+            }
+        }
+        w32(&mut b, self.raw.reserved1.len() as u32);
+        b.extend_from_slice(&self.raw.reserved1);
+        for (x, &f) in self.exceptions.iter().zip(&flags) {
+            if writer >= 0x3009 {
+                let hl = x.change_highlight.clone().unwrap_or_else(|| vec![0; 4]);
+                w32(&mut b, hl.len() as u32);
+                b.extend_from_slice(&hl);
+            }
+            w32(&mut b, x.reserved_ee1.len() as u32);
+            b.extend_from_slice(&x.reserved_ee1);
+            if f & (OVERRIDE_SUBJECT | OVERRIDE_LOCATION) != 0 {
+                for t in x.wide_times.unwrap_or([x.start, x.end, x.original_start]) {
+                    w32(&mut b, t);
+                }
+                let wide = |b: &mut Vec<u8>, s: &str| {
+                    let units: Vec<u16> = s.encode_utf16().collect();
+                    b.extend_from_slice(&(units.len() as u16).to_le_bytes());
+                    units.iter().for_each(|u| b.extend_from_slice(&u.to_le_bytes()));
+                };
+                if let Some(s) = x.subject.as_deref().filter(|_| f & OVERRIDE_SUBJECT != 0) {
+                    wide(&mut b, s);
+                }
+                if let Some(s) = x.location.as_deref().filter(|_| f & OVERRIDE_LOCATION != 0) {
+                    wide(&mut b, s);
+                }
+                w32(&mut b, x.reserved_ee2.len() as u32);
+                b.extend_from_slice(&x.reserved_ee2);
+            }
+        }
+        w32(&mut b, self.raw.reserved2.len() as u32);
+        b.extend_from_slice(&self.raw.reserved2);
+        b.extend_from_slice(&self.raw.trailing);
         b
     }
 
@@ -354,4 +482,76 @@ pub fn minutes_to_local(m: u32) -> NaiveDateTime {
 
 pub fn local_to_minutes(t: NaiveDateTime) -> u32 {
     (t - NaiveDate::from_ymd_opt(1601, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap()).num_minutes() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base() -> Recurrence {
+        let day = |y, m, d| local_to_minutes(NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(0, 0, 0).unwrap());
+        Recurrence {
+            frequency: Frequency::Weekly,
+            pattern: Pattern::Week { days: 1 << 5 },
+            calendar_type: 0,
+            first_date_time: 0,
+            period: 1,
+            end: End::Count(6),
+            occurrences: 6,
+            first_day_of_week: 1,
+            deleted: vec![day(2026, 10, 30), day(2026, 11, 6)],
+            modified: vec![day(2026, 10, 31)],
+            start_date: day(2026, 10, 23),
+            end_date: day(2026, 11, 27),
+            start_offset: 840,
+            end_offset: 870,
+            exceptions: vec![Exception {
+                start: day(2026, 10, 31) + 960,
+                end: day(2026, 10, 31) + 1020,
+                original_start: day(2026, 10, 30) + 840,
+                subject: Some("Réunion déplacée – œuvre €".into()),
+                location: Some("Salle ø".into()),
+                busy_status: Some(1),
+                reminder_delta: Some(30),
+                reminder_set: Some(true),
+                all_day: Some(false),
+                meeting_type: Some(1),
+                color: Some(4),
+                ..Default::default()
+            }],
+            raw: Raw::default(),
+        }
+    }
+
+    #[test]
+    fn exceptions_round_trip() {
+        for exceptions in [
+            base().exceptions,
+            // Aucun champ modifié, puis deux exceptions dont une seule avec chaînes.
+            vec![Exception { start: 10, end: 20, original_start: 5, ..Default::default() }],
+            vec![
+                Exception { start: 10, end: 20, original_start: 5, reminder_set: Some(false), ..Default::default() },
+                Exception { start: 30, end: 40, original_start: 25, location: Some("Là".into()), ..Default::default() },
+            ],
+        ] {
+            let r = Recurrence { exceptions, ..base() };
+            let blob = r.encode();
+            let mut back = Recurrence::parse(&blob).unwrap();
+            // La lecture rend explicites les valeurs par défaut (ChangeHighlight à zéro, dates d'ExtendedException) ;
+            // les chaînes hors Windows-1252 (ø) reviennent intactes grâce à la version Unicode.
+            back.exceptions.iter_mut().for_each(|x| (x.change_highlight, x.wide_times) = (None, None));
+            assert_eq!(back.exceptions, r.exceptions);
+            assert_eq!(back.encode(), blob);
+        }
+    }
+
+    #[test]
+    fn change_highlight_only_from_version_0x3009() {
+        let mut r = Recurrence { exceptions: vec![Exception { start: 10, end: 20, original_start: 5, ..Default::default() }], ..base() };
+        let new = r.encode();
+        r.raw = Raw { reader_version: 0x3006, writer_version: 0x3008, ..Raw::default() };
+        let old = r.encode();
+        assert_eq!(new.len(), old.len() + 8, "ChangeHighlight (taille + valeur) absent avant 0x3009");
+        assert_eq!(Recurrence::parse(&old).unwrap().raw.writer_version, 0x3008);
+    }
 }

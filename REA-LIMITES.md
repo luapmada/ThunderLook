@@ -165,3 +165,37 @@ Chaque entrée : action → résultat → cause → contournement → source.
 ## Menus d'Outlook par les ressources PE (23/10)
 - `inspect_pe_resources` : `OUTLOOK.EXE` n'a **aucun** RT_MENU (icônes, bitmaps, 268 UIFILE DirectUI). `1036\OUTLLIBR.DLL` en a 87, mais le résultat est une arborescence d'offsets (non décodée) : menus et chaînes (RT_STRING) lus par script Python à partir des offsets.
 - Les menus décodés sont des menus Win32 hérités (dossiers, pièces jointes, zone de notification, etc.) : **les menus contextuels du calendrier (rendez-vous, créneau) n'y sont pas** ; ils viennent de la barre de commandes Office (hors RT_MENU). Pour eux, seule l'observation de l'interface (UIA) donne les libellés : relevés déjà faits dans `notes/outlook-couleurs-menus.md`.
+
+## À vérifier avec REA/Outlook — séries avec exceptions (`crates/calendar`, 23/10)
+
+`Recurrence::encode` écrit maintenant les exceptions (miroir de `parse`) ; `write::update_series` et
+`write::update_occurrence` s'en servent. Vérifié : `encode(parse(b)) == b` sur les 26 blobs réels de
+`tests/fixtures/recur_reels.hex` (dont 11 avec exception, **sans objet ni lieu**), sauf 2 « jamais » à l'ancienne
+(`0xFFFFFFFF`, réécrit `0x2023`). **Jamais testé dans Outlook** : aucune écriture dans Outlook, aucune ouverture d'une
+série écrite par ThunderLook.
+
+Non vérifié sur un blob réel (pas de fixture avec objet ou lieu d'exception) :
+- **Chaînes 8 bits d'`ExceptionInfo`** : écrites `longueur+1, longueur, octets` (sans zéro final), d'après ma lecture de
+  [MS-OXOCAL] 2.2.1.44.2 ; `parse` ignore la première longueur, donc rien ne la confirme ici.
+- **`ExtendedException`** : ordre écrit = `ChangeHighlight` (si version d'écriture ≥ 0x3009 : taille 4 + valeur),
+  `ReservedBlockEE1`, puis, si objet ou lieu modifié, `StartDateTime`/`EndDateTime`/`OriginalStartDate`, chaînes
+  Unicode (`longueur u16` + UTF-16, objet puis lieu), `ReservedBlockEE2`. Confirmé seulement pour le cas sans chaîne
+  (11 fixtures, `ChangeHighlight` = 0, blocs vides).
+- **`ChangeHighlight`** : toujours 0 à l'écriture (jamais le masque de champs modifiés d'Outlook) ; sens des bits non vérifié.
+- **`ReservedBlock1` / `ReservedBlock2`** : vides à l'écriture ; relus et réécrits tels quels sinon. Les octets
+  **après** `ReservedBlock2` (4 à 20 octets vus sur 2 fixtures, ex. `2a92090d 00000000 …`) ne sont pas décrits : conservés
+  à l'identique, jamais produits par ThunderLook.
+- **Drapeau `0x200` d'`OverrideFlags`** (vu sur 1 fixture, sans donnée associée) : conservé, jamais produit.
+- **`StartDateTime`/`EndDateTime`** d'une exception : minutes locales depuis 1601 du nouveau début/fin (conforme aux
+  fixtures). **`OriginalStartDate`** : écrit = minuit du jour d'origine + heure de début de la série (conforme aux
+  fixtures) ; je ne sais pas si Outlook exige exactement cette forme pour retrouver l'occurrence.
+- **Dates d'`ExtendedException`** : recopiées de celles d'`ExceptionInfo` (aucune fixture avec chaîne pour confirmer).
+- **`ModifiedInstanceDates`** : minuit du jour du nouveau début ; triées par date, comme `DeletedInstanceDates`. Le
+  lien d'ordre avec le tableau d'exceptions (trié par date d'origine) n'est pas confirmé quand une occurrence est
+  déplacée avant ou après sa voisine.
+- **Message intégré par exception** : Outlook en met un (pièce jointe, `has_attachment`) par exception ; ThunderLook
+  n'en écrit pas, la lecture n'en a pas besoin. Ignoré : description, catégories et caractère privé d'une occurrence
+  (seuls objet, lieu, début, fin, disponibilité, rappel, journée entière vont dans l'exception). Outlook pourrait
+  recréer ou réclamer ce message à l'ouverture : à voir.
+- **Changement de périodicité** (`update_series`) : exceptions et suppressions abandonnées (comptées dans le retour).
+  « Même périodicité » = fréquence, motif, période, fin et dates de début/fin identiques.

@@ -204,6 +204,7 @@ mod tests {
             start_offset: 600,
             end_offset: 660,
             exceptions: vec![],
+            raw: Default::default(),
         }
     }
 
