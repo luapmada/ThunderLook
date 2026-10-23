@@ -232,6 +232,8 @@ pub struct Ui {
     pub contact_card: RwSignal<Option<ContactCard>>,
     /// Boîte « Contact » ouverte (création ou modification).
     pub contact_form: RwSignal<Option<thunderlook_model::contacts::ContactForm>>,
+    /// Boîte « Nettoyer les doublons » ouverte.
+    pub dedupe_open: RwSignal<bool>,
     /// Tâches et notes : listes, élément sélectionné, boîtes ouvertes, filtre et rechargement.
     pub tasks: RwSignal<Option<thunderlook_model::items::TaskList>>,
     pub task_selected: RwSignal<Option<String>>,
@@ -310,6 +312,7 @@ impl Ui {
             contact_selected: RwSignal::new(None),
             contact_card: RwSignal::new(None),
             contact_form: RwSignal::new(None),
+            dedupe_open: RwSignal::new(false),
             tasks: RwSignal::new(None),
             task_selected: RwSignal::new(None),
             task_form: RwSignal::new(None),

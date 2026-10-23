@@ -3,6 +3,7 @@
 
 #[allow(dead_code)]
 mod textfmt;
+pub mod dedupe;
 pub mod distlist;
 pub mod vcard;
 pub mod view;

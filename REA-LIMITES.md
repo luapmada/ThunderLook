@@ -221,6 +221,17 @@ Non vérifié sur un blob réel (pas de fixture avec objet ou lieu d'exception) 
   - si 0x8054 liste bien **tous** les membres (contacts compris) comme je le lis : non confirmé ;
   - si l'import PST conserve les propriétés `PtypMultipleBinary` dans `message.props` (sinon la liste s'affiche vide) ;
   - `PidLidDistributionListStream` (0x8064, ordre et noms de repli) non lu.
+## À vérifier avec REA/Outlook — doublons de contacts (`crates/contacts/src/dedupe.rs`, lot S)
+
+Écrit et testé sous Linux sur des bases de test (`cargo test -p thunderlook-contacts dedupe`) ; **aucune écriture dans Outlook, jamais lancé sur la vraie base**.
+
+- **Périmètre** : l'analyse porte sur le dossier de contacts affiché (jamais « Contacts » contre « doublons2 » : deux dossiers = deux analyses). Pour dédoublonner entre les deux, il faudrait un choix explicite de portée (non fait).
+- **Informations que le formulaire ne porte pas** (deuxième prénom, surnom, adresse « autre », messagerie, conjoint, téléphones hors Mobile/Bureau/Domicile…) : celles d'une fiche supprimée sont recopiées en fin de notes (« Reporté de la fiche fusionnée… ») si le contact conservé ne les a pas ; elles ne sont pas remises dans leurs propres champs. Photo : une seule est gardée (la plus grande par défaut).
+- **Courriel seul = groupe** (score 70, jamais « sûr » si les noms diffèrent) : une adresse partagée (contact@société, boîte familiale) regroupera des personnes différentes ; à regarder à l'écran.
+- **Annulation** : une fusion = une modification + N suppressions, chacune dans la corbeille interne (60 jours). Ctrl+Z n'annule que la dernière suppression ; les autres se remettent via `thunderlook_safety::restore` (pas d'écran).
+- **Mobile « équivalent »** : seuls +33 / 0033 / 0 suivis de 9 chiffres sont ramenés à `0…` ; tout autre indicatif est comparé tel quel en chiffres.
+- **Non compilé ici** : `app/src-tauri` (GTK absent). `dedupe_cmds.rs` a été contrôlé par un crate de substitution (types seulement, `tauri` simulé), pas lancé. L'interface compile pour `wasm32-unknown-unknown` ; mise en page non vue (styles en ligne, aucun CSS ajouté).
+
 ## À vérifier avec REA/Outlook — tâches et notes (`crates/items`, lot C, 23/10)
 
 Tout est écrit dans la base de ThunderLook, jamais dans Outlook. Tests sous Linux : `cargo test -p thunderlook-items` (23 tests, dont
