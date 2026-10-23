@@ -6,6 +6,7 @@
 pub mod calendar;
 pub mod contacts;
 pub mod format;
+pub mod items;
 pub mod quicksteps;
 pub mod settings;
 

@@ -228,6 +228,64 @@ pub async fn contact_delete(id: &str) -> Result<(), String> {
     call("contact_delete", &IdArg { id }).await
 }
 
+pub async fn tasks_list() -> Result<thunderlook_model::items::TaskList, String> {
+    call("tasks_list", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct ItemFormArg<'a> {
+    id: Option<&'a str>,
+    folder: Option<&'a str>,
+}
+
+pub async fn task_form(id: Option<&str>) -> Result<thunderlook_model::items::TaskForm, String> {
+    call("task_form", &ItemFormArg { id, folder: None }).await
+}
+
+#[derive(Serialize)]
+struct FormArg2<'a, T> {
+    form: &'a T,
+}
+
+pub async fn task_save(form: &thunderlook_model::items::TaskForm) -> Result<String, String> {
+    call("task_save", &FormArg2 { form }).await
+}
+
+#[derive(Serialize)]
+struct CompleteArg<'a> {
+    id: &'a str,
+    done: bool,
+}
+
+pub async fn task_complete(id: &str, done: bool) -> Result<(), String> {
+    call("task_complete", &CompleteArg { id, done }).await
+}
+
+pub async fn task_delete(id: &str) -> Result<(), String> {
+    call("task_delete", &IdArg { id }).await
+}
+
+pub async fn notes_list() -> Result<thunderlook_model::items::NoteList, String> {
+    call("notes_list", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct NoteFormArg<'a> {
+    id: Option<&'a str>,
+}
+
+pub async fn note_form(id: Option<&str>) -> Result<thunderlook_model::items::NoteForm, String> {
+    call("note_form", &NoteFormArg { id }).await
+}
+
+pub async fn note_save(form: &thunderlook_model::items::NoteForm) -> Result<String, String> {
+    call("note_save", &FormArg2 { form }).await
+}
+
+pub async fn note_delete(id: &str) -> Result<(), String> {
+    call("note_delete", &IdArg { id }).await
+}
+
 pub async fn contact_folders() -> Result<Vec<ContactFolder>, String> {
     call("contact_folders", &NoArgs {}).await
 }

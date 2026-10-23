@@ -1001,6 +1001,93 @@ fn contact_list(app: AppHandle, folder: String) -> Result<thunderlook_model::con
     Ok(list)
 }
 
+// --- Tâches et notes -----------------------------------------------------------------------------------------------
+
+fn items_conn(app: &AppHandle) -> Result<(std::path::PathBuf, thunderlook_store::rusqlite::Connection), String> {
+    let dir = data_dir(app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    Ok((dir, conn))
+}
+
+fn task_num(id: &str) -> Result<i64, String> {
+    id.strip_prefix('t').and_then(|f| f.parse().ok()).ok_or_else(|| "tâche inconnue".to_string())
+}
+
+fn note_num(id: &str) -> Result<i64, String> {
+    id.strip_prefix('n').and_then(|f| f.parse().ok()).ok_or_else(|| "note inconnue".to_string())
+}
+
+#[tauri::command(async)]
+fn tasks_list(app: AppHandle) -> Result<thunderlook_model::items::TaskList, String> {
+    let (_, conn) = items_conn(&app)?;
+    thunderlook_items::tasks(&conn)
+}
+
+/// Boîte « Tâche » : tâche existante (`id`), ou nouvelle dans le dossier le plus fourni.
+#[tauri::command(async)]
+fn task_form(app: AppHandle, id: Option<String>, folder: Option<String>) -> Result<thunderlook_model::items::TaskForm, String> {
+    let (dir, conn) = items_conn(&app)?;
+    match id {
+        Some(id) => thunderlook_items::task_form(&conn, &dir, task_num(&id)?),
+        None => {
+            let folder_id = match folder.filter(|f| !f.is_empty()) {
+                Some(f) => f,
+                None => thunderlook_items::default_folder(&conn, "IPM.Task%")?.ok_or("aucun dossier de tâches")?,
+            };
+            Ok(thunderlook_model::items::TaskForm { folder_id, ..Default::default() })
+        }
+    }
+}
+
+#[tauri::command(async)]
+fn task_save(app: AppHandle, form: thunderlook_model::items::TaskForm) -> Result<String, String> {
+    let (dir, mut conn) = items_conn(&app)?;
+    thunderlook_items::task_save(&mut conn, &dir, &form)
+}
+
+#[tauri::command(async)]
+fn task_complete(app: AppHandle, id: String, done: bool) -> Result<(), String> {
+    let (dir, mut conn) = items_conn(&app)?;
+    thunderlook_items::task_complete(&mut conn, &dir, task_num(&id)?, done)
+}
+
+#[tauri::command(async)]
+fn task_delete(app: AppHandle, id: String) -> Result<(), String> {
+    let (_, mut conn) = items_conn(&app)?;
+    thunderlook_items::task_delete(&mut conn, task_num(&id)?)
+}
+
+#[tauri::command(async)]
+fn notes_list(app: AppHandle) -> Result<thunderlook_model::items::NoteList, String> {
+    let (dir, conn) = items_conn(&app)?;
+    thunderlook_items::notes(&conn, &dir)
+}
+
+#[tauri::command(async)]
+fn note_form(app: AppHandle, id: Option<String>) -> Result<thunderlook_model::items::NoteForm, String> {
+    let (dir, conn) = items_conn(&app)?;
+    match id {
+        Some(id) => thunderlook_items::note_form(&conn, &dir, note_num(&id)?),
+        None => Ok(thunderlook_model::items::NoteForm {
+            folder_id: thunderlook_items::default_folder(&conn, "IPM.StickyNote%")?.ok_or("aucun dossier de notes")?,
+            color: 3,
+            ..Default::default()
+        }),
+    }
+}
+
+#[tauri::command(async)]
+fn note_save(app: AppHandle, form: thunderlook_model::items::NoteForm) -> Result<String, String> {
+    let (dir, mut conn) = items_conn(&app)?;
+    thunderlook_items::note_save(&mut conn, &dir, &form)
+}
+
+#[tauri::command(async)]
+fn note_delete(app: AppHandle, id: String) -> Result<(), String> {
+    let (_, mut conn) = items_conn(&app)?;
+    thunderlook_items::note_delete(&mut conn, note_num(&id)?)
+}
+
 /// Boîte « Contact » : contact existant (`id`), ou nouveau dans le dossier `folder`.
 #[tauri::command(async)]
 fn contact_form(app: AppHandle, id: Option<String>, folder: Option<String>) -> Result<thunderlook_model::contacts::ContactForm, String> {
@@ -1314,6 +1401,15 @@ pub fn run() {
             contact_folders,
             contact_list,
             contact_card,
+            tasks_list,
+            task_form,
+            task_save,
+            task_complete,
+            task_delete,
+            notes_list,
+            note_form,
+            note_save,
+            note_delete,
             contact_form,
             contact_save,
             contact_delete,

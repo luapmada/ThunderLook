@@ -348,6 +348,7 @@ fn NavBar() -> impl IntoView {
         Module::Calendar => CALENDAR,
         Module::Contacts => USERS,
         Module::Tasks => SQUARE_CHECK,
+        Module::Notes => STICKY_NOTE,
     };
     view! {
         <div class="navbar" role="navigation" aria-label="Modules">

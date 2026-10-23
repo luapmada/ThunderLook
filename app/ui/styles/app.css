@@ -2245,3 +2245,97 @@ input {
 .confirm-text {
   color: var(--text-2);
 }
+
+/* Tâches et notes */
+.pane.tasks {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.task-rows {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: var(--u);
+  padding: calc(var(--u) * 1.5) calc(var(--u) * 2);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.task-row.selected {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+}
+
+.task-row.done .task-title {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.task-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-cats,
+.task-due {
+  color: var(--text-dim, #8a8a8a);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.task-due.overdue,
+.task-flag {
+  color: #d64545;
+  font-weight: 600;
+}
+
+.pane.notes {
+  overflow-y: auto;
+  padding: calc(var(--u) * 3);
+}
+
+.note-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: calc(var(--u) * 3);
+}
+
+.note-card {
+  color: #1b1b1b;
+  padding: calc(var(--u) * 2);
+  border-radius: 4px;
+  min-height: 140px;
+  max-height: 260px;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+}
+
+.note-card.selected {
+  outline: 2px solid var(--accent);
+}
+
+.note-card h3 {
+  margin: 0 0 var(--u);
+  font-size: var(--fs-md, 1em);
+}
+
+.note-card p {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: var(--fs-sm);
+}
+
+.note-card footer {
+  margin-top: var(--u);
+  font-size: var(--fs-sm);
+  opacity: 0.65;
+}

@@ -25,6 +25,7 @@ thunderlook-sync = { path = "../../crates/sync" }
 thunderlook-store = { path = "../../crates/store" }
 thunderlook-calendar = { path = "../../crates/calendar" }
 thunderlook-contacts = { path = "../../crates/contacts" }
+thunderlook-items = { path = "../../crates/items" }
 thunderlook-outlook = { path = "../../crates/outlook" }
 base64 = "0.22.1"
 tokio = { version = "1", features = ["rt"] }

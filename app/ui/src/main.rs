@@ -19,12 +19,14 @@ mod ipc;
 mod list;
 mod menu;
 mod menus;
+mod notes;
 mod quicksteps;
 mod reading;
 mod rules;
 mod splitter;
 mod state;
 mod statusbar;
+mod tasks;
 mod topbar;
 
 fn main() {

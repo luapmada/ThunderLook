@@ -78,6 +78,11 @@ pub enum Action {
     CalExportCsv,
     ContactNew,
     ContactDelete,
+    TaskNew,
+    TaskComplete,
+    TaskDelete,
+    NoteNew,
+    NoteDelete,
 }
 
 impl Action {
@@ -153,6 +158,11 @@ fn perform(ui: Ui, action: Action) {
         Action::CalToday => crate::calendar::go_today(ui),
         Action::CalNew => crate::appointment::open_new(ui),
         Action::ContactNew => crate::contact_form::open_new(ui),
+        Action::TaskNew => crate::tasks::open_new(ui),
+        Action::TaskComplete => crate::tasks::toggle_selected(ui),
+        Action::TaskDelete => crate::tasks::delete_selected(ui),
+        Action::NoteNew => crate::notes::open_new(ui),
+        Action::NoteDelete => crate::notes::delete_selected(ui),
         Action::ContactDelete => {
             if let Some(id) = ui.contact_selected.get_untracked() {
                 crate::contact_form::delete(ui, id);
@@ -486,20 +496,19 @@ const CONTACTS_HOME: &[Group] = &[
 ];
 
 const TASKS_HOME: &[Group] = &[
-    Group {
-        label: "Nouveau",
-        cmds: &[
-            cmd("Nouvelle tâche", SQUARE_CHECK, Some("Ctrl+N"), false, true, true),
-            cmd("Nouveau message", MAIL_PLUS, Some("Ctrl+Maj+M"), false, true, false),
-        ],
-    },
+    Group { label: "Nouveau", cmds: &[wired("Nouvelle tâche", SQUARE_CHECK, Some("Ctrl+N"), true, true, Action::TaskNew)] },
     Group {
         label: "Gérer",
         cmds: &[
-            cmd("Marquer comme terminée", CHECK, None, false, true, true),
-            cmd("Retirer de la liste", MINUS, None, false, true, false),
+            wired("Marquer comme terminée", CHECK, None, true, true, Action::TaskComplete),
+            wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::TaskDelete),
         ],
     },
+];
+
+const NOTES_HOME: &[Group] = &[
+    Group { label: "Nouveau", cmds: &[wired("Nouvelle note", STICKY_NOTE, Some("Ctrl+N"), true, true, Action::NoteNew)] },
+    Group { label: "Gérer", cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::NoteDelete)] },
 ];
 
 pub fn groups(module: Module, tab: Tab) -> &'static [Group] {
@@ -508,6 +517,7 @@ pub fn groups(module: Module, tab: Tab) -> &'static [Group] {
         (Tab::Home, Module::Calendar) => CALENDAR_HOME,
         (Tab::Home, Module::Contacts) => CONTACTS_HOME,
         (Tab::Home, Module::Tasks) => TASKS_HOME,
+        (Tab::Home, Module::Notes) => NOTES_HOME,
         (Tab::SendReceive, _) => SEND_RECEIVE,
         (Tab::Folder, _) => FOLDER,
         (Tab::View, _) => VIEW,

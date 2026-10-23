@@ -16,7 +16,7 @@ pub use icondata_lu::{
     LuPanelLeftOpen as PANEL_LEFT_OPEN, LuPanelRight as PANEL_RIGHT, LuPaperclip as PAPERCLIP, LuPencil as PENCIL,
     LuPlus as PLUS, LuRefreshCw as REFRESH, LuReply as REPLY, LuReplyAll as REPLY_ALL, LuRows2 as ROWS_2, LuSave as SAVE,
     LuRows3 as ROWS_3, LuScissors as SCISSORS, LuSearch as SEARCH, LuSearchX as SEARCH_X, LuSend as SEND, LuSettings2 as SETTINGS, LuShieldAlert as SHIELD_ALERT,
-    LuSquareCheck as SQUARE_CHECK, LuStar as STAR, LuTags as TAGS, LuTrash2 as TRASH, LuUndo2 as UNDO, LuUnderline as UNDERLINE, LuX as X,
+    LuSquareCheck as SQUARE_CHECK, LuStickyNote as STICKY_NOTE, LuStar as STAR, LuTags as TAGS, LuTrash2 as TRASH, LuUndo2 as UNDO, LuUnderline as UNDERLINE, LuX as X,
     LuUsers as USERS, LuZap as ZAP,
 };
 

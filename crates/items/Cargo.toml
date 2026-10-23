@@ -1,0 +1,13 @@
+[package]
+name = "thunderlook-items"
+version = "0.10.0"
+edition = "2024"
+publish = false
+description = "Tâches et notes de ThunderLook : lues et écrites dans la base (sacs MAPI [MS-OXOTASK], [MS-OXONOTE])"
+
+[dependencies]
+thunderlook-store = { path = "../store" }
+thunderlook-calendar = { path = "../calendar" }
+thunderlook-model = { path = "../model" }
+mail-parser = "0.11.9"
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }

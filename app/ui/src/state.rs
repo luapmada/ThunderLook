@@ -13,10 +13,11 @@ pub enum Module {
     Calendar,
     Contacts,
     Tasks,
+    Notes,
 }
 
 impl Module {
-    pub const ALL: [Module; 4] = [Module::Mail, Module::Calendar, Module::Contacts, Module::Tasks];
+    pub const ALL: [Module; 5] = [Module::Mail, Module::Calendar, Module::Contacts, Module::Tasks, Module::Notes];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -24,6 +25,7 @@ impl Module {
             Module::Calendar => "Calendrier",
             Module::Contacts => "Contacts",
             Module::Tasks => "Tâches",
+            Module::Notes => "Notes",
         }
     }
 
@@ -33,6 +35,7 @@ impl Module {
             Module::Calendar => "Ctrl+2",
             Module::Contacts => "Ctrl+3",
             Module::Tasks => "Ctrl+4",
+            Module::Notes => "Ctrl+5",
         }
     }
 }
@@ -227,6 +230,15 @@ pub struct Ui {
     pub contact_card: RwSignal<Option<ContactCard>>,
     /// Boîte « Contact » ouverte (création ou modification).
     pub contact_form: RwSignal<Option<thunderlook_model::contacts::ContactForm>>,
+    /// Tâches et notes : listes, élément sélectionné, boîtes ouvertes, filtre et rechargement.
+    pub tasks: RwSignal<Option<thunderlook_model::items::TaskList>>,
+    pub task_selected: RwSignal<Option<String>>,
+    pub task_form: RwSignal<Option<thunderlook_model::items::TaskForm>>,
+    pub task_filter: RwSignal<String>,
+    pub tasks_epoch: RwSignal<u64>,
+    pub notes: RwSignal<Option<thunderlook_model::items::NoteList>>,
+    pub note_form: RwSignal<Option<thunderlook_model::items::NoteForm>>,
+    pub notes_epoch: RwSignal<u64>,
     pub contact_filter: RwSignal<String>,
     pub refs: Refs,
 }
@@ -285,6 +297,14 @@ impl Ui {
             contact_selected: RwSignal::new(None),
             contact_card: RwSignal::new(None),
             contact_form: RwSignal::new(None),
+            tasks: RwSignal::new(None),
+            task_selected: RwSignal::new(None),
+            task_form: RwSignal::new(None),
+            task_filter: RwSignal::new(String::new()),
+            tasks_epoch: RwSignal::new(0),
+            notes: RwSignal::new(None),
+            note_form: RwSignal::new(None),
+            notes_epoch: RwSignal::new(0),
             contact_filter: RwSignal::new(String::new()),
             refs: Refs {
                 search: NodeRef::new(),

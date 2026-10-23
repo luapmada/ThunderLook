@@ -5070,6 +5070,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "thunderlook-calendar",
  "thunderlook-contacts",
+ "thunderlook-items",
  "thunderlook-mailbox",
  "thunderlook-model",
  "thunderlook-outlook",
@@ -5111,6 +5112,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thunderlook-mime",
+ "thunderlook-store",
+]
+
+[[package]]
+name = "thunderlook-items"
+version = "0.10.0"
+dependencies = [
+ "chrono",
+ "mail-parser",
+ "thunderlook-calendar",
+ "thunderlook-model",
  "thunderlook-store",
 ]
 

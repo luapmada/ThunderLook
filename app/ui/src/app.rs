@@ -158,6 +158,7 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
         (true, false, "2") => Some(Module::Calendar),
         (true, false, "3") => Some(Module::Contacts),
         (true, false, "4") => Some(Module::Tasks),
+        (true, false, "5") => Some(Module::Notes),
         _ => None,
     };
     if let Some(m) = module {
@@ -215,6 +216,8 @@ pub fn App() -> impl IntoView {
     actions::load_categories(ui);
     calendar::watch(ui);
     contacts::watch(ui);
+    crate::tasks::watch(ui);
+    crate::notes::watch(ui);
 
     // Envoi et réception (J7) : barre d'état, puis liste et arborescence rafraîchies à la fin d'un passage.
     ipc::on_sync(move |e| {
@@ -482,6 +485,8 @@ pub fn App() -> impl IntoView {
             <AutoReplyDialog />
             <AppointmentDialog />
             <crate::contact_form::ContactDialog />
+            <crate::tasks::TaskDialog />
+            <crate::notes::NoteDialog />
             <JunkOptionsDialog />
         </div>
     }
@@ -552,6 +557,8 @@ fn Main() -> impl IntoView {
                 (Module::Mail, ReadingPane::Off) => view! { <MessageList /> }.into_any(),
                 (Module::Calendar, _) => view! { <CalendarPane /> }.into_any(),
                 (Module::Contacts, _) => view! { <ContactsPane /> }.into_any(),
+                (Module::Tasks, _) => view! { <crate::tasks::TasksPane /> }.into_any(),
+                (Module::Notes, _) => view! { <crate::notes::NotesPane /> }.into_any(),
                 (other, _) => view! {
                     <section class="pane placeholder" aria-label=other.label()>
                         <div>
