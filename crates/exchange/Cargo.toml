@@ -1,0 +1,16 @@
+[package]
+name = "thunderlook-exchange"
+version = "0.10.0"
+edition = "2024"
+publish = false
+description = "Échange avec le téléphone par fichiers (option B de notes/mpe-plan.md) : export atomique, détection des changements, application et annulation"
+
+[dependencies]
+thunderlook-store = { path = "../store" }
+thunderlook-calendar = { path = "../calendar" }
+thunderlook-contacts = { path = "../contacts" }
+thunderlook-items = { path = "../items" }
+thunderlook-model = { path = "../model" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }

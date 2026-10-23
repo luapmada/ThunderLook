@@ -12,6 +12,7 @@ mod contacts;
 mod compose;
 mod create_rule;
 mod dialogs;
+mod exchange;
 mod folders;
 mod global_search;
 mod icons;
