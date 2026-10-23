@@ -3,8 +3,9 @@
 //! - **Corbeille interne** : [`snapshot`] enregistre le contenu complet d'un élément (ligne `message`, pièces, catégories,
 //!   `.eml`) dans `data_dir/trash/<horodatage>-<type>-<id>.json` ; [`restore`] le remet. [`purge`] vide au bout de 60 jours.
 //! - **Annulation** : chaque instantané alimente une pile de 50 niveaux ; [`undo`] défait le dernier.
-//! - **Sauvegardes** : [`backup`] écrit un JSON texte par jour (14 gardés) et une copie par semaine (8 gardées), jamais la
-//!   base entière ; [`restore_backup`] les relit (fusion ou remise complète).
+//! - **Sauvegardes** : [`backup`] écrit chaque jour, en JSON Lines et en lecture seule, les seuls éléments nouveaux, modifiés ou
+//!   supprimés depuis la veille (14 gardés), et un « plein » le dimanche (8 gardés), jamais la base entière ni la corbeille ;
+//!   [`restore_backup`] reconstitue l'état à une date (plein + incréments ; fusion ou remise complète).
 //!
 //! Aucune fonction d'ici ne supprime ni ne réécrit une ligne de la base sans en avoir enregistré l'ancien contenu avant.
 
@@ -409,67 +410,311 @@ pub fn purge_at(data_dir: &Path, days: i64, now: NaiveDateTime) -> usize {
 }
 
 // --- Sauvegardes -----------------------------------------------------------------------------------------------------
+//
+// Format JSON Lines, un élément par ligne, écrit en flux :
+//   ligne 1 : {"version":2,"type":"full"|"incr","date":"AAAA-MM-JJ","created":"…"}
+//   puis    : {"op":"put", …enregistrement complet…}  ou  {"op":"del","id":N,"key":"dossier:nid:création"}
+//   fin     : {"end":true,"count":N}   (absente = fichier tronqué)
+// `plein-AAAA-MM-JJ.jsonl` contient tout (le dimanche, ou si le dernier plein a plus de 7 jours) ; `AAAA-MM-JJ.jsonl` seulement
+// ce qui est nouveau, modifié ou supprimé depuis la veille. `index.json` retient, par élément, `modified_at` et une empreinte.
+// Les anciens fichiers `.json` (version 1) restent lisibles.
+
+/// Éléments lus entre deux pauses de la sauvegarde.
+const PAUSE_EVERY: usize = 500;
+const PAUSE: std::time::Duration = std::time::Duration::from_millis(20);
+/// Éléments par transaction de lecture.
+const BATCH: usize = 200;
+const INDEX_FILE: &str = "index.json";
+/// Dossiers jamais sauvegardés (corbeille, envoyés), en plus des rôles `deleted` et `sent`.
+const SKIPPED_FOLDERS: [&str; 6] = ["éléments supprimés", "deleted items", "sent", "sent items", "éléments envoyés", "elements supprimes"];
 
 pub fn backups_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("backups")
 }
 
-/// Sauvegarde du jour (une fois par jour). Rend le fichier écrit, `None` si celle d'aujourd'hui existe déjà.
-pub fn backup(conn: &Connection, data_dir: &Path, keep: usize) -> Result<Option<PathBuf>> {
-    backup_on(conn, data_dir, keep, Local::now().date_naive())
-}
+/// Empreinte FNV-1a 64 bits (stable d'une version de Rust à l'autre, contrairement à `DefaultHasher`).
+struct Fnv(u64);
 
-pub fn backup_on(conn: &Connection, data_dir: &Path, keep: usize, today: NaiveDate) -> Result<Option<PathBuf>> {
-    let dir = backups_dir(data_dir);
-    let daily = dir.join(format!("{}.json", today.format("%Y-%m-%d")));
-    if daily.exists() {
-        return Ok(None);
+impl Fnv {
+    fn new() -> Self {
+        Fnv(0xcbf2_9ce4_8422_2325)
     }
-    fs::create_dir_all(&dir).map_err(|x| io(&dir, x))?;
-    let ids: Vec<i64> = {
-        let clause = CLASSES.iter().map(|_| "message_class LIKE ?").collect::<Vec<_>>().join(" OR ");
-        let mut stmt = conn.prepare(&format!("SELECT id FROM message WHERE {clause} ORDER BY id")).map_err(e)?;
-        stmt.query_map(rusqlite::params_from_iter(CLASSES), |r| r.get(0)).map_err(e)?.collect::<rusqlite::Result<_>>().map_err(e)?
-    };
-    let tmp = daily.with_extension("tmp");
-    {
-        let mut w = BufWriter::new(fs::File::create(&tmp).map_err(|x| io(&tmp, x))?);
-        let werr = |x: std::io::Error| io(&tmp, x);
-        writeln!(w, "{{\"version\":{FORMAT_VERSION},\"created\":\"{}\",\"count\":{},\"items\":[", Local::now().format("%Y-%m-%dT%H:%M:%S"), ids.len()).map_err(werr)?;
-        for (i, id) in ids.iter().enumerate() {
-            let rec = record(conn, data_dir, *id, "sauvegarde")?;
-            w.write_all(&serde_json::to_vec(&rec).map_err(|x| x.to_string())?).map_err(werr)?;
-            w.write_all(if i + 1 < ids.len() { b",\n" } else { b"\n" }).map_err(werr)?;
+    fn feed(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 ^= u64::from(*b);
+            self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
         }
-        w.write_all(b"]}\n").map_err(werr)?;
-        w.flush().map_err(werr)?;
     }
-    fs::rename(&tmp, &daily).map_err(|x| io(&daily, x))?;
-
-    // Une copie par semaine (la première sauvegarde de la semaine ISO).
-    let iso = today.iso_week();
-    let weekly = dir.join(format!("hebdo-{}-S{:02}.json", iso.year(), iso.week()));
-    if !weekly.exists() {
-        fs::copy(&daily, &weekly).map_err(|x| io(&weekly, x))?;
-    }
-    prune(&dir, keep, KEEP_WEEKLY);
-    Ok(Some(daily))
-}
-
-/// Ne garde que les `daily` dernières sauvegardes quotidiennes et les `weekly` dernières copies hebdomadaires.
-fn prune(dir: &Path, daily: usize, weekly: usize) {
-    let (mut d, mut w) = (Vec::new(), Vec::new());
-    if let Ok(rd) = fs::read_dir(dir) {
-        for f in rd.flatten() {
-            let name = f.file_name().to_string_lossy().into_owned();
-            if name.starts_with("hebdo-") && name.ends_with(".json") {
-                w.push(f.path());
-            } else if name.len() == 15 && name.ends_with(".json") && NaiveDate::parse_from_str(&name[..10], "%Y-%m-%d").is_ok() {
-                d.push(f.path());
+    fn value(&mut self, v: ValueRef<'_>) {
+        match v {
+            ValueRef::Null => self.feed(&[0]),
+            ValueRef::Integer(i) => {
+                self.feed(&[1]);
+                self.feed(&i.to_le_bytes());
+            }
+            ValueRef::Real(f) => {
+                self.feed(&[2]);
+                self.feed(&f.to_le_bytes());
+            }
+            ValueRef::Text(t) => {
+                self.feed(&[3]);
+                self.feed(&(t.len() as u64).to_le_bytes());
+                self.feed(t);
+            }
+            ValueRef::Blob(b) => {
+                self.feed(&[4]);
+                self.feed(&(b.len() as u64).to_le_bytes());
+                self.feed(b);
             }
         }
     }
-    for (mut list, keep) in [(d, daily), (w, weekly)] {
+}
+
+/// Identité d'un élément d'une sauvegarde à l'autre (celle de [`place`]) : dossier, `nid`, date de création.
+fn identity(folder_id: &Value, nid: &Value, created: &Value) -> String {
+    let s = |v: &Value| if v.is_null() { String::new() } else { v.to_string() };
+    format!("{}:{}:{}", s(folder_id), s(nid), s(created))
+}
+
+/// (identité, `modified_at`, empreinte) d'un élément, sans lire son `.eml` en entier (taille et date du fichier suffisent).
+fn fingerprint(conn: &Connection, data_dir: &Path, id: i64) -> Result<Option<(String, Option<i64>, u64)>> {
+    let mut h = Fnv::new();
+    let mut stmt = conn.prepare_cached("SELECT * FROM message WHERE id = ?1").map_err(e)?;
+    let names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+    let mut rows = stmt.query([id]).map_err(e)?;
+    let Some(row) = rows.next().map_err(e)? else { return Ok(None) };
+    let (mut key, mut modified, mut eml) = ((Value::Null, Value::Null, Value::Null), None, String::new());
+    for (i, n) in names.iter().enumerate() {
+        let v = row.get_ref(i).map_err(e)?;
+        match n.as_str() {
+            "folder_id" => key.0 = encode(v),
+            "nid" => key.1 = encode(v),
+            "created_at" => key.2 = encode(v),
+            "modified_at" => modified = v.as_i64().ok(),
+            "eml_path" => eml = v.as_str().map(str::to_string).unwrap_or_default(),
+            _ => {}
+        }
+        // `indexed` bouge à chaque passage de l'indexeur de recherche : ce n'est pas une modification de l'utilisateur.
+        if n != "indexed" {
+            h.feed(n.as_bytes());
+            h.value(v);
+        }
+    }
+    drop(rows);
+    if !eml.is_empty() {
+        if let Ok(m) = fs::metadata(thunderlook_store::resolve(data_dir, &eml)) {
+            h.feed(&m.len().to_le_bytes());
+            let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis());
+            h.feed(&t.unwrap_or(0).to_le_bytes());
+        }
+    }
+    let mut stmt = conn.prepare_cached("SELECT * FROM attachment WHERE message_id = ?1 ORDER BY position, id").map_err(e)?;
+    let n = stmt.column_count();
+    let mut rows = stmt.query([id]).map_err(e)?;
+    while let Some(r) = rows.next().map_err(e)? {
+        for i in 0..n {
+            h.value(r.get_ref(i).map_err(e)?);
+        }
+    }
+    let mut stmt = conn.prepare_cached("SELECT name FROM message_category WHERE message_id = ?1 ORDER BY name").map_err(e)?;
+    let mut rows = stmt.query([id]).map_err(e)?;
+    while let Some(r) = rows.next().map_err(e)? {
+        h.value(r.get_ref(0).map_err(e)?);
+    }
+    Ok(Some((identity(&key.0, &key.1, &key.2), modified, h.0)))
+}
+
+/// Identifiants des éléments à sauvegarder : classes protégées, hors corbeille, envoyés et rapports.
+fn candidates(conn: &Connection) -> Result<Vec<i64>> {
+    let clause = CLASSES.iter().map(|_| "m.message_class LIKE ?").collect::<Vec<_>>().join(" OR ");
+    let mut stmt = conn
+        .prepare(&format!("SELECT m.id, f.role, f.name FROM message m JOIN folder f ON f.id = m.folder_id WHERE ({clause}) AND m.message_class NOT LIKE 'REPORT%' ORDER BY m.id"))
+        .map_err(e)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(CLASSES), |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))
+        .map_err(e)?;
+    let mut ids = Vec::new();
+    for row in rows {
+        let (id, role, name) = row.map_err(e)?;
+        if role != "deleted" && role != "sent" && !SKIPPED_FOLDERS.contains(&name.trim().to_lowercase().as_str()) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// Un autre fil vient d'écrire dans la base (`data_version` change quand une AUTRE connexion valide) : on lui laisse la place.
+fn wait_quiet(conn: &Connection, last: &mut i64) {
+    let version = |c: &Connection| c.query_row("PRAGMA data_version", [], |r| r.get::<_, i64>(0)).unwrap_or(0);
+    for _ in 0..20 {
+        let v = version(conn);
+        if v == *last {
+            return;
+        }
+        *last = v;
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+#[derive(Clone, Debug)]
+struct IndexEntry {
+    modified: Option<i64>,
+    hash: u64,
+    key: String,
+}
+
+fn read_index(dir: &Path) -> Option<(String, std::collections::HashMap<i64, IndexEntry>)> {
+    let v: Value = serde_json::from_slice(&fs::read(dir.join(INDEX_FILE)).ok()?).ok()?;
+    let full = v["full"].as_str()?.to_string();
+    let items = v["items"].as_object()?;
+    let map = items
+        .iter()
+        .filter_map(|(k, o)| {
+            Some((k.parse().ok()?, IndexEntry { modified: o["m"].as_i64(), hash: u64::from_str_radix(o["h"].as_str()?, 16).ok()?, key: o["k"].as_str()?.to_string() }))
+        })
+        .collect();
+    Some((full, map))
+}
+
+fn write_index(dir: &Path, full: &str, items: &std::collections::HashMap<i64, IndexEntry>) -> Result<()> {
+    let items: Map<String, Value> = items.iter().map(|(id, x)| (id.to_string(), json!({ "m": x.modified, "h": format!("{:016x}", x.hash), "k": x.key }))).collect();
+    write_atomic(&dir.join(INDEX_FILE), &serde_json::to_vec(&json!({ "version": 1, "full": full, "items": items })).map_err(|x| x.to_string())?)
+}
+
+/// (date, plein ?) d'après le nom d'un fichier `.jsonl` de sauvegarde.
+fn parse_name(name: &str) -> Option<(NaiveDate, bool)> {
+    let stem = name.strip_suffix(".jsonl")?;
+    let (full, date) = match stem.strip_prefix("plein-") {
+        Some(d) => (true, d),
+        None => (false, stem),
+    };
+    Some((NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?, full))
+}
+
+/// Sauvegarde du jour (une fois par jour), en lecture seule et par paquets. Rend le fichier écrit, `None` si celle d'aujourd'hui existe déjà.
+pub fn backup(data_dir: &Path, keep: usize) -> Result<Option<PathBuf>> {
+    backup_on(data_dir, keep, Local::now().date_naive())
+}
+
+/// Comme [`backup`], dans un fil à part (le lancement n'attend pas).
+pub fn spawn_backup(data_dir: PathBuf, keep: usize) -> std::thread::JoinHandle<Result<Option<PathBuf>>> {
+    std::thread::spawn(move || backup(&data_dir, keep))
+}
+
+pub fn backup_on(data_dir: &Path, keep: usize, today: NaiveDate) -> Result<Option<PathBuf>> {
+    let dir = backups_dir(data_dir);
+    let day = today.format("%Y-%m-%d").to_string();
+    let incr = dir.join(format!("{day}.jsonl"));
+    let full = dir.join(format!("plein-{day}.jsonl"));
+    if incr.exists() || full.exists() || dir.join(format!("{day}.json")).exists() {
+        return Ok(None);
+    }
+    fs::create_dir_all(&dir).map_err(|x| io(&dir, x))?;
+    let conn = thunderlook_store::open_readonly(data_dir).map_err(e)?;
+
+    // Plein : le dimanche, ou si le dernier plein a plus de 7 jours, ou sans index exploitable.
+    let last_full = fs::read_dir(&dir)
+        .map(|rd| rd.flatten().filter_map(|f| parse_name(&f.file_name().to_string_lossy())).filter(|(_, is_full)| *is_full).map(|(d, _)| d).max())
+        .unwrap_or(None);
+    let index = read_index(&dir);
+    let is_full = today.weekday() == chrono::Weekday::Sun || index.is_none() || last_full.is_none_or(|d| (today - d).num_days() >= 7);
+    let previous = if is_full { Default::default() } else { index.map(|x| x.1).unwrap_or_default() };
+    let path = if is_full { full } else { incr };
+
+    let tmp = path.with_extension("tmp");
+    let ids = candidates(&conn)?;
+    let mut next = std::collections::HashMap::with_capacity(ids.len());
+    let mut written = 0usize;
+    {
+        let mut w = BufWriter::new(fs::File::create(&tmp).map_err(|x| io(&tmp, x))?);
+        let werr = |x: std::io::Error| io(&tmp, x);
+        let head = json!({ "version": 2, "type": if is_full { "full" } else { "incr" }, "date": day, "created": Local::now().format("%Y-%m-%dT%H:%M:%S").to_string() });
+        writeln!(w, "{head}").map_err(werr)?;
+        let line = |w: &mut BufWriter<fs::File>, v: &Value| -> Result<()> {
+            serde_json::to_writer(&mut *w, v).map_err(|x| x.to_string())?;
+            w.write_all(b"\n").map_err(werr)
+        };
+        let mut data_version = 0;
+        let mut seen = 0usize;
+        for batch in ids.chunks(BATCH) {
+            wait_quiet(&conn, &mut data_version);
+            conn.execute_batch("BEGIN").map_err(e)?;
+            let r = (|| -> Result<()> {
+                for &id in batch {
+                    seen += 1;
+                    if seen % PAUSE_EVERY == 0 {
+                        std::thread::sleep(PAUSE);
+                    }
+                    let Some((key, modified, hash)) = fingerprint(&conn, data_dir, id)? else { continue };
+                    let entry = IndexEntry { modified, hash, key };
+                    let unchanged = previous.get(&id).is_some_and(|p| p.hash == entry.hash && p.key == entry.key);
+                    if !unchanged {
+                        if let Some(old) = previous.get(&id).filter(|p| p.key != entry.key) {
+                            line(&mut w, &json!({ "op": "del", "id": id, "key": old.key }))?;
+                        }
+                        let mut rec = record(&conn, data_dir, id, "sauvegarde")?;
+                        rec["op"] = json!("put");
+                        line(&mut w, &rec)?;
+                        written += 1;
+                    }
+                    next.insert(id, entry);
+                }
+                Ok(())
+            })();
+            conn.execute_batch("COMMIT").map_err(e)?;
+            r?;
+        }
+        for (id, old) in &previous {
+            if !next.contains_key(id) {
+                line(&mut w, &json!({ "op": "del", "id": id, "key": old.key }))?;
+                written += 1;
+            }
+        }
+        line(&mut w, &json!({ "end": true, "count": written }))?;
+        w.flush().map_err(werr)?;
+    }
+    fs::rename(&tmp, &path).map_err(|x| io(&path, x))?;
+    // L'index n'avance qu'une fois le fichier en place : un échec avant fait simplement repartir de l'ancien état.
+    let full_date = if is_full { day.clone() } else { last_full.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_else(|| day.clone()) };
+    write_index(&dir, &full_date, &next)?;
+    prune(&dir, keep, KEEP_WEEKLY);
+    Ok(Some(path))
+}
+
+/// Ne garde que les `daily` derniers incréments et les `weekly` derniers pleins, plus tout incrément dont dépend le plus ancien
+/// jour gardé (pas de trou dans la chaîne plein + incréments). Les anciens `.json` suivent la règle d'avant.
+fn prune(dir: &Path, daily: usize, weekly: usize) {
+    let (mut incs, mut fulls, mut legacy_d, mut legacy_w) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    if let Ok(rd) = fs::read_dir(dir) {
+        for f in rd.flatten() {
+            let name = f.file_name().to_string_lossy().into_owned();
+            if let Some((date, is_full)) = parse_name(&name) {
+                if is_full { &mut fulls } else { &mut incs }.push((date, f.path()));
+            } else if name.starts_with("hebdo-") && name.ends_with(".json") {
+                legacy_w.push(f.path());
+            } else if name.len() == 15 && name.ends_with(".json") && NaiveDate::parse_from_str(&name[..10], "%Y-%m-%d").is_ok() {
+                legacy_d.push(f.path());
+            }
+        }
+    }
+    incs.sort();
+    fulls.sort();
+    if fulls.len() > weekly {
+        for (_, p) in fulls.drain(..fulls.len() - weekly) {
+            let _ = fs::remove_file(p);
+        }
+    }
+    if incs.len() > daily {
+        let oldest_kept = incs[incs.len() - daily].0;
+        // Le plein qui sert de base au plus ancien incrément gardé fixe la limite : rien de plus récent que lui n'est supprimé.
+        let base = fulls.iter().map(|(d, _)| *d).filter(|d| *d <= oldest_kept).max().unwrap_or(oldest_kept);
+        for (d, p) in &incs {
+            if *d < base {
+                let _ = fs::remove_file(p);
+            }
+        }
+    }
+    for (mut list, keep) in [(legacy_d, daily), (legacy_w, weekly)] {
         list.sort();
         if list.len() > keep {
             for p in &list[..list.len() - keep] {
@@ -483,7 +728,7 @@ fn prune(dir: &Path, daily: usize, weekly: usize) {
 pub struct BackupInfo {
     pub name: String,
     pub path: PathBuf,
-    /// `true` : copie hebdomadaire.
+    /// `true` : sauvegarde complète (le dimanche, ou ancienne copie hebdomadaire).
     pub weekly: bool,
     pub size: u64,
     pub count: usize,
@@ -498,18 +743,38 @@ pub fn list_backups(data_dir: &Path) -> Vec<BackupInfo> {
         .flatten()
         .filter_map(|f| {
             let name = f.file_name().to_string_lossy().into_owned();
-            if !name.ends_with(".json") {
+            let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+            if let Some((_, is_full)) = parse_name(&name) {
+                let (count, created) = header_v2(&f.path()).unwrap_or((0, String::new()));
+                return Some(BackupInfo { weekly: is_full, size, path: f.path(), name, count, created });
+            }
+            if !name.ends_with(".json") || name == INDEX_FILE {
                 return None;
             }
             let (count, created) = header(&f.path()).unwrap_or((0, String::new()));
-            Some(BackupInfo { weekly: name.starts_with("hebdo-"), size: f.metadata().map(|m| m.len()).unwrap_or(0), path: f.path(), name, count, created })
+            Some(BackupInfo { weekly: name.starts_with("hebdo-"), size, path: f.path(), name, count, created })
         })
         .collect();
     out.sort_by(|a, b| b.created.cmp(&a.created).then(b.name.cmp(&a.name)));
     out
 }
 
-/// Première ligne : `{"version":1,"created":"…","count":N,"items":[`.
+/// Version 2 : date de création en première ligne, nombre de lignes écrites dans la dernière.
+fn header_v2(file: &Path) -> Result<(usize, String)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = fs::File::open(file).map_err(|x| io(file, x))?;
+    let mut first = String::new();
+    BufReader::new(&mut f).read_line(&mut first).map_err(|x| io(file, x))?;
+    let created = serde_json::from_str::<Value>(&first).map_err(|x| x.to_string())?["created"].as_str().unwrap_or_default().to_string();
+    let len = f.metadata().map_err(|x| io(file, x))?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(128))).map_err(|x| io(file, x))?;
+    let mut tail = String::new();
+    f.read_to_string(&mut tail).map_err(|x| io(file, x))?;
+    let count = tail.lines().last().and_then(|l| serde_json::from_str::<Value>(l).ok()).and_then(|v| v["count"].as_u64()).unwrap_or(0);
+    Ok((count as usize, created))
+}
+
+/// Version 1, première ligne : `{"version":1,"created":"…","count":N,"items":[`.
 fn header(file: &Path) -> Result<(usize, String)> {
     let mut line = String::new();
     BufReader::new(fs::File::open(file).map_err(|x| io(file, x))?).read_line(&mut line).map_err(|x| io(file, x))?;
@@ -534,8 +799,73 @@ pub struct Restored {
     pub failed: Vec<String>,
 }
 
-/// Relit une sauvegarde et remet ses éléments. Rien n'est supprimé : les éléments absents de la sauvegarde restent.
+/// Remet l'état de la date de `file` : un plein, ou le dernier plein précédent rejoué avec les incréments jusqu'à elle.
+/// Rien n'est supprimé : les éléments absents de la sauvegarde ou supprimés depuis restent comme ils sont.
 pub fn restore_backup(conn: &mut Connection, data_dir: &Path, file: &Path, mode: Mode) -> Result<Restored> {
+    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let Some((date, is_full)) = parse_name(&name) else { return restore_v1(conn, data_dir, file, mode) };
+    let dir = file.parent().unwrap_or(Path::new("."));
+    let mut chain: Vec<(NaiveDate, PathBuf)> = Vec::new();
+    if is_full {
+        chain.push((date, file.to_path_buf()));
+    } else {
+        let mut files: Vec<(NaiveDate, bool, PathBuf)> =
+            fs::read_dir(dir).map_err(|x| io(dir, x))?.flatten().filter_map(|f| parse_name(&f.file_name().to_string_lossy()).map(|(d, full)| (d, full, f.path()))).collect();
+        files.sort();
+        let base = files.iter().filter(|(d, full, _)| *full && *d <= date).map(|(d, ..)| *d).max().ok_or("aucune sauvegarde complète avant cette date : état impossible à reconstituer")?;
+        chain.extend(files.into_iter().filter(|(d, full, _)| (*full && *d == base) || (!*full && *d > base && *d <= date)).map(|(d, _, p)| (d, p)));
+    }
+    // Du plus récent au plus ancien : la première version rencontrée d'un élément est la bonne, les suivantes sont ignorées.
+    chain.sort();
+    chain.reverse();
+    let mut out = Restored::default();
+    let mut seen = std::collections::HashSet::new();
+    for (_, path) in &chain {
+        let rd = BufReader::new(fs::File::open(path).map_err(|x| io(path, x))?);
+        let mut lines = rd.lines();
+        let first = lines.next().ok_or("sauvegarde vide")?.map_err(|x| io(path, x))?;
+        if serde_json::from_str::<Value>(&first).ok().and_then(|v| v["version"].as_i64()) != Some(2) {
+            return Err(format!("{} n'est pas une sauvegarde ThunderLook", path.display()));
+        }
+        let mut closed = false;
+        for line in lines {
+            let line = line.map_err(|x| io(path, x))?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(rec) = serde_json::from_str::<Value>(&line) else { break };
+            if rec["end"].as_bool() == Some(true) {
+                closed = true;
+                break;
+            }
+            match rec["op"].as_str() {
+                Some("del") => {
+                    seen.insert(rec["key"].as_str().unwrap_or_default().to_string());
+                }
+                Some("put") => {
+                    let m = &rec["message"];
+                    if !seen.insert(identity(&m["folder_id"], &m["nid"], &m["created_at"])) {
+                        continue;
+                    }
+                    match place(conn, data_dir, &rec, mode == Mode::All) {
+                        Ok(Placed::Added(_)) => out.added += 1,
+                        Ok(Placed::Replaced(_)) => out.replaced += 1,
+                        Ok(Placed::Skipped(_)) => out.skipped += 1,
+                        Err(err) => out.failed.push(format!("{} : {err}", describe(&rec))),
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !closed {
+            out.failed.push(format!("{} : fichier tronqué, la fin de la sauvegarde manque", path.file_name().unwrap_or_default().to_string_lossy()));
+        }
+    }
+    Ok(out)
+}
+
+/// Ancien format (version 1) : un JSON `{"items":[ … ]}` avec un élément par ligne.
+fn restore_v1(conn: &mut Connection, data_dir: &Path, file: &Path, mode: Mode) -> Result<Restored> {
     let rd = BufReader::new(fs::File::open(file).map_err(|x| io(file, x))?);
     let mut out = Restored::default();
     let mut lines = rd.lines();
@@ -690,27 +1020,144 @@ mod tests {
         assert!(new.exists());
     }
 
+    fn d(y: i32, m: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, day).unwrap()
+    }
+
+    fn lines_of(file: &Path) -> Vec<Value> {
+        fs::read_to_string(file).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    }
+
+    fn subjects(conn: &Connection) -> Vec<String> {
+        conn.prepare("SELECT subject FROM message ORDER BY subject").unwrap().query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+    }
+
     #[test]
-    fn backup_once_a_day_keeps_14_and_8_weeks() {
+    fn backup_once_a_day_full_on_sunday_and_pruned() {
         let (dir, conn) = fixture("backup");
         add(&conn, &dir, "IPM.Contact", "Dupont");
         add(&conn, &dir, "IPM.Appointment", "RDV");
         add(&conn, &dir, "IPM.Note", "un courrier, pas une note"); // IPM.Note = courrier : exclu
-        let start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-        let first = backup_on(&conn, &dir, KEEP_DAILY, start).unwrap().unwrap();
-        assert!(backup_on(&conn, &dir, KEEP_DAILY, start).unwrap().is_none(), "une fois par jour");
+        let start = d(2026, 1, 1); // jeudi
+        let first = backup_on(&dir, KEEP_DAILY, start).unwrap().unwrap();
+        assert!(first.ends_with("plein-2026-01-01.jsonl"), "pas d'index : plein");
+        assert!(backup_on(&dir, KEEP_DAILY, start).unwrap().is_none(), "une fois par jour");
         let list = list_backups(&dir);
-        let info = list.iter().find(|b| !b.weekly).unwrap();
-        assert_eq!((info.count, info.weekly), (2, false));
-        assert!(first.ends_with("2026-01-01.json"));
-        for d in 1..100 {
-            backup_on(&conn, &dir, KEEP_DAILY, start + chrono::Duration::days(d)).unwrap();
+        assert_eq!((list[0].count, list[0].weekly), (2, true));
+        let second = backup_on(&dir, KEEP_DAILY, d(2026, 1, 2)).unwrap().unwrap();
+        assert!(second.ends_with("2026-01-02.jsonl"));
+        assert_eq!(lines_of(&second).len(), 2, "en-tête et fin seulement : rien n'a changé");
+        for day in 2..100 {
+            backup_on(&dir, KEEP_DAILY, start + chrono::Duration::days(day)).unwrap();
         }
-        let list = list_backups(&dir);
-        assert_eq!(list.iter().filter(|b| !b.weekly).count(), KEEP_DAILY);
-        assert_eq!(list.iter().filter(|b| b.weekly).count(), KEEP_WEEKLY);
-        assert!(list.iter().filter(|b| !b.weekly).any(|b| b.name == "2026-04-10.json"), "la plus récente est gardée");
-        assert!(!dir.join("backups").join("2026-01-01.json").exists());
+        let files: Vec<String> = list_backups(&dir).into_iter().map(|b| b.name).collect();
+        let fulls = files.iter().filter(|n| n.starts_with("plein-")).count();
+        assert_eq!(fulls, KEEP_WEEKLY);
+        assert!(files.contains(&"2026-04-10.jsonl".to_string()), "la plus récente est gardée");
+        assert!(!dir.join("backups").join("2026-01-02.jsonl").exists());
+        // Chaîne sans trou : le plus ancien incrément gardé a son plein et tous les incréments intermédiaires.
+        let oldest_inc = files.iter().filter(|n| !n.starts_with("plein-")).min().unwrap().clone();
+        let (od, _) = parse_name(&oldest_inc).unwrap();
+        let base = files.iter().filter_map(|n| parse_name(n)).filter(|(x, f)| *f && *x <= od).map(|(x, _)| x).max().unwrap();
+        for day in 0..=(od - base).num_days() {
+            let dd = base + chrono::Duration::days(day);
+            let n = dd.format("%Y-%m-%d").to_string();
+            assert!(files.contains(&format!("plein-{n}.jsonl")) || files.contains(&format!("{n}.jsonl")), "trou dans la chaîne le {n}");
+        }
+        assert!(dir.join("backups/index.json").exists());
+    }
+
+    #[test]
+    fn incremental_keeps_only_changes_and_restores_the_state_at_a_date() {
+        let (dir, mut conn) = fixture("incr");
+        let a = add(&conn, &dir, "IPM.Contact", "A");
+        let b = add(&conn, &dir, "IPM.Task", "B");
+        let c = add(&conn, &dir, "IPM.StickyNote", "C");
+        let day1 = backup_on(&dir, KEEP_DAILY, d(2026, 2, 5)).unwrap().unwrap(); // jeudi : plein
+        assert_eq!(lines_of(&day1).len(), 5);
+
+        // Entre deux sauvegardes : A modifié, B supprimé, D créé ; C intact.
+        conn.execute("UPDATE message SET subject = 'A2' WHERE id = ?1", [a]).unwrap();
+        conn.execute("DELETE FROM message WHERE id = ?1", [b]).unwrap();
+        let dd = add(&conn, &dir, "IPM.Appointment", "D");
+        let day2 = backup_on(&dir, KEEP_DAILY, d(2026, 2, 6)).unwrap().unwrap();
+        let ops: Vec<(String, i64)> = lines_of(&day2).iter().filter_map(|v| Some((v["op"].as_str()?.to_string(), v["id"].as_i64()?))).collect();
+        assert_eq!(ops, [("put".to_string(), a), ("put".to_string(), dd), ("del".to_string(), b)], "C n'y est pas");
+        assert!(day2.ends_with("2026-02-06.jsonl"));
+
+        // Un 3e jour sans changement, puis le dimanche : plein.
+        let day3 = backup_on(&dir, KEEP_DAILY, d(2026, 2, 7)).unwrap().unwrap();
+        assert_eq!(lines_of(&day3).len(), 2);
+        let sunday = backup_on(&dir, KEEP_DAILY, d(2026, 2, 8)).unwrap().unwrap();
+        assert!(sunday.ends_with("plein-2026-02-08.jsonl"));
+        assert_eq!(lines_of(&sunday).len(), 2 + 3, "A2, C, D");
+
+        // Tout casser, puis reconstituer l'état du 6 février : plein du 5 + incrément du 6.
+        conn.execute("DELETE FROM message", []).unwrap();
+        let r = restore_backup(&mut conn, &dir, &day2, Mode::Merge).unwrap();
+        assert_eq!((r.added, r.skipped, r.failed.len()), (3, 0, 0));
+        assert_eq!(subjects(&conn), ["A2", "C", "D"], "A modifié, B supprimé n'est pas ressuscité");
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM attachment", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+
+        // Le 5 février (plein seul) : A, B, C d'origine ; l'existant est fusionné sans doublon.
+        let r = restore_backup(&mut conn, &dir, &day1, Mode::Merge).unwrap();
+        assert_eq!((r.added, r.skipped), (1, 2), "B revient, C déjà là, A déjà là (version actuelle gardée)");
+        assert_eq!(subjects(&conn), ["A2", "B", "C", "D"]);
+        let _ = c;
+
+        // « Tout remettre » à la date du 6 : A reprend A2 ; rien n'est dupliqué.
+        let r = restore_backup(&mut conn, &dir, &day3, Mode::All).unwrap();
+        assert_eq!((r.added, r.replaced), (0, 3));
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM message", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
+    }
+
+    #[test]
+    fn trash_folders_and_reports_are_not_saved() {
+        let (dir, conn) = fixture("skip");
+        add(&conn, &dir, "IPM.Contact", "gardé");
+        conn.execute("INSERT INTO folder (id, source_id, nid, name, role, hidden, position) VALUES (2, 1, 2, 'Éléments supprimés', 'folder', 0, 1)", []).unwrap();
+        conn.execute("INSERT INTO folder (id, source_id, nid, name, role, hidden, position) VALUES (3, 1, 3, 'Whatever', 'deleted', 0, 2)", []).unwrap();
+        conn.execute("INSERT INTO folder (id, source_id, nid, name, role, hidden, position) VALUES (4, 1, 4, 'Sent', 'folder', 0, 3)", []).unwrap();
+        for (f, class, subject) in [(2, "IPM.Contact", "corbeille fr"), (3, "IPM.Task", "corbeille role"), (4, "IPM.Contact", "sent"), (1, "REPORT.IPM.Contact.NDR", "rapport")] {
+            let id = add(&conn, &dir, class, subject);
+            conn.execute("UPDATE message SET folder_id = ?2 WHERE id = ?1", [id, f]).unwrap();
+        }
+        let file = backup_on(&dir, KEEP_DAILY, d(2026, 3, 2)).unwrap().unwrap();
+        let subjects: Vec<String> = lines_of(&file).iter().filter_map(|v| v["title"].as_str().map(str::to_string)).collect();
+        assert_eq!(subjects, ["gardé"]);
+    }
+
+    #[test]
+    fn old_v1_backups_are_still_listed_and_restored() {
+        let (dir, mut conn) = fixture("v1");
+        let a = add(&conn, &dir, "IPM.Contact", "A");
+        let rec = record(&conn, &dir, a, "sauvegarde").unwrap();
+        let file = backups_dir(&dir).join("2026-01-01.json");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, format!("{{\"version\":1,\"created\":\"2026-01-01T10:00:00\",\"count\":1,\"items\":[\n{}\n]}}\n", serde_json::to_string(&rec).unwrap())).unwrap();
+        assert_eq!(list_backups(&dir).iter().map(|b| (b.name.as_str(), b.count)).collect::<Vec<_>>(), [("2026-01-01.json", 1)]);
+        conn.execute("DELETE FROM message", []).unwrap();
+        assert_eq!(restore_backup(&mut conn, &dir, &file, Mode::Merge).unwrap().added, 1);
+    }
+
+    #[test]
+    fn backup_reads_while_another_connection_writes() {
+        let (dir, conn) = fixture("concurrent");
+        for i in 0..300 {
+            add(&conn, &dir, "IPM.Contact", &format!("c{i}"));
+        }
+        let dir2 = dir.clone();
+        let writer = std::thread::spawn(move || {
+            let w = thunderlook_store::open(&dir2).unwrap();
+            for i in 0..200 {
+                w.execute("UPDATE message SET preview = ?1 WHERE id = ?2", params![format!("p{i}"), i % 300 + 1]).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        });
+        let file = backup_on(&dir, KEEP_DAILY, d(2026, 3, 2)).unwrap().unwrap();
+        writer.join().unwrap();
+        assert_eq!(list_backups(&dir)[0].count, 300);
+        assert!(file.exists());
     }
 
     #[test]
@@ -719,7 +1166,7 @@ mod tests {
         let a = add(&conn, &dir, "IPM.Contact", "A");
         let b = add(&conn, &dir, "IPM.Task", "B");
         let c = add(&conn, &dir, "IPM.StickyNote", "C");
-        let file = backup_on(&conn, &dir, KEEP_DAILY, NaiveDate::from_ymd_opt(2026, 2, 1).unwrap()).unwrap().unwrap();
+        let file = backup_on(&dir, KEEP_DAILY, d(2026, 2, 1)).unwrap().unwrap();
         let before = dump(&conn, &dir, a);
 
         // Rien de manquant : rien ne change.
@@ -751,7 +1198,7 @@ mod tests {
     fn missing_folder_is_reported_not_fatal() {
         let (dir, mut conn) = fixture("nofolder");
         add(&conn, &dir, "IPM.Contact", "A");
-        let file = backup_on(&conn, &dir, KEEP_DAILY, NaiveDate::from_ymd_opt(2026, 2, 1).unwrap()).unwrap().unwrap();
+        let file = backup_on(&dir, KEEP_DAILY, d(2026, 2, 1)).unwrap().unwrap();
         conn.execute("DELETE FROM folder", []).unwrap();
         let r = restore_backup(&mut conn, &dir, &file, Mode::Merge).unwrap();
         assert_eq!((r.added, r.failed.len()), (0, 1));
@@ -761,10 +1208,40 @@ mod tests {
     fn truncated_backup_is_flagged() {
         let (dir, mut conn) = fixture("trunc");
         add(&conn, &dir, "IPM.Contact", "A");
-        let file = backup_on(&conn, &dir, KEEP_DAILY, NaiveDate::from_ymd_opt(2026, 2, 1).unwrap()).unwrap().unwrap();
+        let file = backup_on(&dir, KEEP_DAILY, d(2026, 2, 1)).unwrap().unwrap();
         let text = fs::read_to_string(&file).unwrap();
-        fs::write(&file, text.trim_end().trim_end_matches("]}")).unwrap();
+        fs::write(&file, text.trim_end().rsplit_once('\n').unwrap().0).unwrap();
         let r = restore_backup(&mut conn, &dir, &file, Mode::Merge).unwrap();
         assert!(r.failed.iter().any(|f| f.contains("tronqué")));
+    }
+
+    /// Mesure (notes/perf.md) : `cargo test -p thunderlook-safety --release -- --ignored --nocapture measure`.
+    #[test]
+    #[ignore]
+    fn measure_sizes() {
+        let (dir, conn) = fixture("measure");
+        conn.execute_batch("BEGIN").unwrap();
+        for i in 0..10_000 {
+            add(&conn, &dir, "IPM.Contact", &format!("Contact {i}"));
+        }
+        for i in 0..4_200 {
+            add(&conn, &dir, "IPM.Appointment", &format!("RDV {i}"));
+        }
+        for i in 0..400 {
+            add(&conn, &dir, "IPM.StickyNote", &format!("Note {i}"));
+        }
+        conn.execute_batch("COMMIT").unwrap();
+        let t = std::time::Instant::now();
+        let full = backup_on(&dir, KEEP_DAILY, d(2026, 2, 5)).unwrap().unwrap();
+        println!("plein : {} octets en {:?}", fs::metadata(&full).unwrap().len(), t.elapsed());
+        for i in 0..50 {
+            conn.execute("UPDATE message SET subject = subject || '!' WHERE id = ?1", [i + 1]).unwrap();
+        }
+        let t = std::time::Instant::now();
+        let inc = backup_on(&dir, KEEP_DAILY, d(2026, 2, 6)).unwrap().unwrap();
+        println!("incrément (50 modifiés) : {} octets en {:?}", fs::metadata(&inc).unwrap().len(), t.elapsed());
+        let t = std::time::Instant::now();
+        let inc = backup_on(&dir, KEEP_DAILY, d(2026, 2, 7)).unwrap().unwrap();
+        println!("incrément (rien) : {} octets en {:?}", fs::metadata(&inc).unwrap().len(), t.elapsed());
     }
 }

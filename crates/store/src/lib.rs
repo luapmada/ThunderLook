@@ -336,8 +336,10 @@ pub fn conversation_id(index: Option<&[u8]>, tracking: bool, topic: Option<&str>
 pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(data_dir).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
     let conn = Connection::open(data_dir.join(DB_FILE))?;
-    // Attente d'un verrou plutôt qu'un échec immédiat : l'indexation écrit en tâche de fond.
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 10000;")?;
+    // Attente d'un verrou plutôt qu'un échec immédiat : l'indexation écrit en tâche de fond. WAL + `synchronous = NORMAL` :
+    // les lecteurs ne bloquent pas l'écrivain, et la base reste cohérente après une coupure (seules les toutes dernières
+    // transactions peuvent être perdues).
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 8000;")?;
     let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version == 0 {
         conn.execute_batch(&format!("BEGIN; {SCHEMA_V1} {SCHEMA_V2} {SCHEMA_V3} {SCHEMA_V4} {SCHEMA_V5} {SCHEMA_V6} {SCHEMA_V7}"))?;
@@ -369,12 +371,18 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
 /// Ouvre une base existante en lecture seule (interface de lecture, outils tiers).
 /// Les migrations ne sont pas appliquées : ouvrir d'abord avec [`open`].
 pub fn open_read_only(data_dir: &Path) -> rusqlite::Result<Connection> {
+    open_readonly(data_dir)
+}
+
+/// Connexion en lecture seule pour les lectures longues (sauvegarde…) : en WAL elle lit un instantané cohérent sans bloquer
+/// l'écrivain, et attend au plus 8 s un verrou au lieu d'échouer (`database is locked`). À lire par paquets (transactions courtes).
+pub fn open_readonly(data_dir: &Path) -> rusqlite::Result<Connection> {
     use rusqlite::OpenFlags;
     let conn = Connection::open_with_flags(
         data_dir.join(DB_FILE),
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_URI,
     )?;
-    conn.execute_batch("PRAGMA query_only = ON;")?;
+    conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 8000;")?;
     Ok(conn)
 }
 
@@ -428,6 +436,38 @@ pub fn remove_empty_dirs(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pragmas_and_long_read_does_not_block_writer() {
+        let dir = std::env::temp_dir().join(format!("tl-store-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let w = open(&dir).unwrap();
+        let pragma = |c: &Connection, n: &str| c.query_row(&format!("PRAGMA {n}"), [], |r| r.get::<_, rusqlite::types::Value>(0)).unwrap();
+        assert_eq!(pragma(&w, "journal_mode"), rusqlite::types::Value::Text("wal".into()));
+        assert_eq!(pragma(&w, "synchronous"), rusqlite::types::Value::Integer(1), "NORMAL");
+        assert_eq!(pragma(&w, "busy_timeout"), rusqlite::types::Value::Integer(8000));
+        w.execute("INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at) VALUES (1, 'pst', 'a', 'a', 'A', 0, 0)", []).unwrap();
+        let r = open_readonly(&dir).unwrap();
+        assert_eq!(pragma(&r, "busy_timeout"), rusqlite::types::Value::Integer(8000));
+        assert!(r.execute("DELETE FROM source", []).is_err(), "lecture seule");
+
+        // Le lecteur garde une lecture ouverte pendant que l'écrivain enchaîne les transactions.
+        let reader = std::thread::spawn(move || {
+            r.execute_batch("BEGIN").unwrap();
+            let first = r.query_row("SELECT COUNT(*) FROM source", [], |x| x.get::<_, i64>(0)).unwrap();
+            for _ in 0..20 {
+                let n = r.query_row("SELECT COUNT(*) FROM source", [], |x| x.get::<_, i64>(0)).unwrap();
+                assert_eq!(n, first, "instantané stable pendant les écritures");
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            r.execute_batch("COMMIT").unwrap();
+        });
+        for i in 2..60 {
+            w.execute("INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at) VALUES (?1, 'pst', 'a', 'a', 'A', 0, 0)", [i]).unwrap();
+        }
+        reader.join().unwrap();
+        assert_eq!(w.query_row("SELECT COUNT(*) FROM source", [], |x| x.get::<_, i64>(0)).unwrap(), 59);
+    }
 
     #[test]
     fn schema_applies_once() {

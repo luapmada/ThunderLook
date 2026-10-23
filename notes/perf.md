@@ -39,3 +39,20 @@ changements, lecture complète. Les calendriers importés (`.ics`) sont relus en
 - Code de `app/src-tauri` non compilé ici (bibliothèques GTK absentes) : relu seulement ; `cargo check` à faire chez lui.
 - Non traité (hors périmètre de fichiers) : le rechargement complet des listes Contacts, Tâches et Notes à chaque changement
   côté interface/commandes Tauri (`items_conn`, `task_*`, `note_*`) ; `items::notes` relit les 440 `.eml` à chaque appel.
+
+## Lot P — sauvegarde incrémentale (23/10)
+
+Base fabriquée : 10 000 contacts, 4 200 rendez-vous, 400 notes (chacun avec une pièce, une catégorie et un `.eml` minuscule), build release sous Linux.
+`cargo test -p thunderlook-safety --release -- --ignored --nocapture measure`.
+
+| | Avant (lot O) | Après |
+|---|---|---|
+| Fichier du jour | 15,47 Mo (JSON) | **0,05 Mo** (50 éléments modifiés) ; 103 octets si rien n'a changé |
+| Dimanche / 1re semaine | + copie hebdo identique : 2 × 15,47 Mo écrits | 1 plein de 15,61 Mo (sans copie) |
+| Écriture par semaine | 7 × 15,5 + 15,5 ≈ 124 Mo | ≈ 15,6 + 6 × 0,05 ≈ 16 Mo |
+| Durée (14 600 éléments) | 1,2 s | plein 2,1 s ; incrément 1,1 s (dont ≈ 0,6 s de pauses de 20 ms) |
+| Base | lue en entier, connexion d'écriture | lecture seule, paquets de 200 par transaction courte, pause 20 ms / 500 éléments, attente si un autre fil écrit |
+
+- Mesure faite sur une base minuscule (15 Mo de sauvegarde) : la base réelle d'hier donnait 123 Mo ; les proportions (1 plein par semaine, incréments ≈ 0,3 % du plein) restent, pas les durées.
+- Corbeille (« Éléments supprimés », « Deleted Items », « Sent », rôles `deleted` et `sent`) et rapports exclus : non mesuré, la base fabriquée n'en contient pas.
+- gzip non fait : `flate2` n'est une dépendance directe d'aucun crate du dépôt (seulement dans `Cargo.lock`, transitive).
