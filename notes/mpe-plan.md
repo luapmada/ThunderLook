@@ -283,6 +283,27 @@ Registre `HKCU\Software\Microsoft\Office\16.0\Outlook` : `DefaultProfile = Outlo
    (CalDAV/CardDAV + DAVx⁵) n'est à étudier que sur demande.
 
 
+## 8 bis. À valider sur le S20 FE avec Paul
+Convertisseurs écrits le 2026-10-23 (`contacts/src/vcard.rs`, `items/src/vnote.rs`, `items/src/vtodo.rs`), testés sur
+des textes synthétiques seulement. Rien ci-dessous n'est **constaté** sur MPE :
+1. **Version de vCard que MPE accepte en écriture (2.1 ou 3.0)** : inconnue. Les deux sont écrites (`Version::V21`/`V30`) ;
+   MPE devra relire un fichier de chaque et on regardera ce qu'il réécrit (version, encodage QP/UTF-8, `UID`).
+2. **VTODO** : prise en charge par MPE inconnue (peut-être iCal 1.0/vCalendar plutôt que 2.0). `vtodo::export` écrit
+   iCalendar 2.0 ; la lecture n'accepte pas d'autre dialecte que ce qui est listé dans le module.
+3. **`X-` pour retrouver un élément** : inconnu. Écrit : `UID` (vCard, VTODO), `X-OUTLOOK-UID` (VNOTE) = identifiant
+   ThunderLook (`p…`, `t…`, `n…`) faute d'EntryID ; MPE pourrait exiger un EntryID hexadécimal ou réécrire l'identifiant.
+   À la lecture : vCard `UID` sinon `X-OUTLOOK-UID`, VTODO `UID`, VNOTE `X-OUTLOOK-UID` ; les `X-` inconnus sont perdus.
+4. Sémantique de `TaskForm.status` : le dépôt ne fixe que 2 = terminée et 0 = à faire (`task_complete`). 1 = en cours,
+   3 = en attente, 4 = reportée viennent de [MS-OXOTASK], pas du code. 3 et 4 sortent en `STATUS:IN-PROCESS` +
+   `X-THUNDERLOOK-STATUS` (MPE ne les connaît sans doute pas) ; `STATUS:CANCELLED` est lu comme 4 (choix arbitraire, signalé).
+   `importance` 0/1/2 → `PRIORITY` 9/5/1.
+5. Notes : pas de couleur dans VNOTE ; à la lecture le formulaire reçoit le jaune (3) par défaut, l'appelant doit garder
+   la couleur d'une note existante. Dates (`DCREATED`, `LAST-MODIFIED`) portées par `vnote::Meta`, hors `NoteForm`.
+6. Contacts : photo, catégories, région/boîte postale, 2e téléphone d'un même type, 4e e-mail : non portés par le
+   formulaire, perdus à la lecture avec avertissement. Téléphone sans type : rangé dans la première case libre
+   (mobile, travail, domicile) avec avertissement ; à confirmer d'après ce qu'écrit MPE.
+7. Texte 2.1/VNOTE sans `CHARSET` en QP : lu en UTF-8, repli WINDOWS-1252 si octets invalides (avertissement).
+
 ## 9. Journal d'exécution
 - **2026-10-22, étape 1 (sauvegardes)**, avec l'accord de Paul :
   - MPE fermé proprement ; `%APPDATA%\MyPhoneExplorer` copié dans
