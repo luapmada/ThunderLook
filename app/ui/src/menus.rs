@@ -89,8 +89,7 @@ fn calendar_event_context(ui: Ui, id: String) -> Vec<MenuEntry> {
     let (private_id, delete_id) = (id.clone(), id.clone());
     let private = ev.private;
     vec![
-        MenuEntry::pending("Transférer"),
-        editable(MenuEntry::radio("Privé", private, move || appointment::update(ui, private_id.clone(), move |f| f.private = !private))).separated(),
+        editable(MenuEntry::radio("Privé", private, move || appointment::update(ui, private_id.clone(), move |f| f.private = !private))),
         MenuEntry::submenu("Afficher en tant que", busy),
         MenuEntry::submenu("Classer", cats),
         editable(MenuEntry::action("Supprimer", move || appointment::delete(ui, delete_id.clone(), false))).separated(),
@@ -103,10 +102,8 @@ fn calendar_slot_context(ui: Ui, start: String) -> Vec<MenuEntry> {
     vec![
         MenuEntry::action("Nouveau rendez-vous", move || appointment::open_new_at(ui, Some(a.clone()), false)),
         MenuEntry::action("Nouvel événement d'une journée entière", move || appointment::open_new_at(ui, Some(b.clone()), true)),
-        MenuEntry::pending("Nouvelle demande de réunion"),
         MenuEntry::pending("Nouveau rendez-vous périodique").separated(),
         MenuEntry::pending("Nouvel événement périodique"),
-        MenuEntry::pending("Nouvelle réunion périodique"),
     ]
 }
 
