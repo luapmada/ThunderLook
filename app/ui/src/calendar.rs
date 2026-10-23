@@ -179,7 +179,7 @@ fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool) -> impl Into
     view! {
         <button
             class=format!("cal-ev cal-c{} busy-{}", event.color, event.busy)
-            class:cat=move || category_color().is_some()
+            class:cal-cat=move || category_color().is_some()
             style=move || cat_style().map(|c| format!("--c: {c}")).unwrap_or_default()
             class:selected=selected
             class:continued=event.continued
