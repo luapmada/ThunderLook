@@ -94,7 +94,10 @@ pub fn NotesPane() -> impl IntoView {
                 query: &'a NoteQuery,
             }
             match call::<_, NoteList>("notes_query", &Arg { query: &query }).await {
-                Ok(l) => shown.set(Some(l)),
+                Ok(l) => {
+                    crate::print::remember_notes(&l);
+                    shown.set(Some(l));
+                }
                 Err(e) => ui.error.set(Some(e)),
             }
         });

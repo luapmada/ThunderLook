@@ -156,6 +156,10 @@ pub fn key(ui: Ui, ev: &web_sys::KeyboardEvent) -> bool {
         set_kind(ui, k);
         return true;
     }
+    if ctrl && !alt && !shift && ev.key().eq_ignore_ascii_case("p") {
+        crate::print::run(ui, "page");
+        return true;
+    }
     if ctrl && !alt && !shift && ev.key().eq_ignore_ascii_case("n") {
         crate::appointment::open_new(ui);
         return true;

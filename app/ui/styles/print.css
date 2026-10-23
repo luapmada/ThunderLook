@@ -1,0 +1,64 @@
+/* Impression (lot N) : #print-root est construit par print.rs ; seul visible sous @media print. */
+#print-root {
+  display: none;
+}
+
+@media print {
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  body > *:not(#print-root):not(#print-page) {
+    display: none !important;
+  }
+
+  #print-root {
+    display: block;
+    font: 10pt/1.35 "Segoe UI", Arial, sans-serif;
+    color: #000;
+    background: #fff;
+  }
+
+  #print-root h1 { font-size: 15pt; margin: 0 0 6mm; }
+  #print-root h2 { font-size: 11pt; margin: 4mm 0 2mm; }
+  #print-root p { margin: 0 0 2mm; }
+  #print-root .pre { white-space: pre-wrap; }
+
+  /* Jamais de coupure au milieu d'une ligne de rendez-vous, d'une fiche, d'une note ou d'une ligne de tableau. */
+  #print-root .keep,
+  #print-root .ev,
+  #print-root tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #print-root table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  #print-root th,
+  #print-root td { border: 0.4pt solid #000; padding: 1.5mm 2mm; vertical-align: top; text-align: left; word-wrap: break-word; }
+  #print-root thead { display: table-header-group; }
+
+  #print-root table.list td:first-child { font-weight: 600; }
+  #print-root .ev { margin: 0 0 1mm; }
+  #print-root .when { white-space: nowrap; }
+  #print-root .allday { margin-bottom: 3mm; }
+
+  #print-root table.cal.month td { height: 28mm; font-size: 8pt; }
+  #print-root table.cal.month td.out { color: #555; }
+  #print-root .dn { font-weight: 700; margin-bottom: 1mm; }
+  #print-root table.cal.day th { width: 18mm; font-weight: 400; }
+  #print-root table.cal.day td { height: 9mm; }
+  #print-root table.cal.week td { height: 150mm; font-size: 9pt; }
+
+  #print-root .card dl { display: grid; grid-template-columns: 40mm 1fr; gap: 1mm 4mm; margin: 0; }
+  #print-root .card dt { font-weight: 600; }
+  #print-root .card dd { margin: 0; white-space: pre-wrap; }
+  #print-root .photo { float: right; width: 30mm; height: 30mm; object-fit: cover; }
+
+  #print-root .note { border: 0.4pt solid #000; padding: 3mm; margin: 0 0 4mm; }
+  #print-root .note h2 { margin-top: 0; }
+  #print-root .note .date { font-size: 8pt; }
+}

@@ -283,3 +283,12 @@ Tauri (`mail_cmds.rs`) et l'interface n'ont pas pu être compilés ici pour Wind
   pas de façon groupée avec ce schéma à ma connaissance — non vérifié.
 - **Impression** : `window.print()` du cadre du message (HTML) ou du volet de lecture (texte, règles `@media print`). Pas d'en-têtes
   Outlook (De/À/Date/Objet) dans l'impression du corps HTML seul : à voir à l'écran.
+
+## À vérifier avec REA/Outlook — impression (`app/ui/src/print.rs`, lot N)
+
+Non compilé au-delà de `cargo check` (wasm) ; **jamais vu à l'écran ni à l'aperçu**.
+
+- Rendez-vous **privés** : imprimés « Rendez-vous privé » (objet et lieu masqués). Comportement d'Outlook non vérifié.
+- Impression Tâches/Notes : la liste imprimée est celle affichée (vue, tri, recherche). L'intitulé de la vue n'est pas imprimé.
+- Ctrl+P : câblé seulement dans le Calendrier (ailleurs, bouton « Imprimer » du ruban).
+- `@page` paysage injecté à l'impression ; WebView2 doit le respecter dans l'aperçu (à confirmer).
