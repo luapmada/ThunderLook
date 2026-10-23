@@ -198,8 +198,66 @@ struct Row {
     eml_path: String,
 }
 
+/// Classe d'un rendez-vous : `IPM.Appointment` ou une classe dérivée (`IPM.Appointment.…`). `LIKE` de la requête
+/// ratisse un peu plus large (`IPM.AppointmentX`) pour pouvoir passer par l'index `message_class_nocase`.
+fn is_appointment_class(class: &str) -> bool {
+    class == "IPM.Appointment" || class.get(..16).is_some_and(|p| p.eq_ignore_ascii_case("IPM.Appointment."))
+}
+
 /// Tous les rendez-vous de la base (`IPM.Appointment` et classes dérivées), avec les éléments illisibles.
 pub fn load(conn: &Connection) -> Result<Calendar> {
+    load_where(conn, None)
+}
+
+/// Les rendez-vous `ids` seulement (ceux qui n'existent plus, ou ne sont pas des rendez-vous, sont absents).
+pub fn load_ids(conn: &Connection, ids: &[i64]) -> Result<Calendar> {
+    load_where(conn, Some(ids))
+}
+
+/// Empreinte d'un rendez-vous : dossier, date de modification et taille du sac. Toute écriture (`write`) change l'une
+/// des trois ; elle sert à ne relire que ce qui a changé.
+pub type Stamp = (i64, Option<i64>, i64);
+
+/// Empreintes de tous les rendez-vous de la base, sans lire leurs sacs (`length` ne charge pas la valeur).
+pub fn stamps(conn: &Connection) -> Result<HashMap<i64, Stamp>> {
+    let e = |x: thunderlook_store::rusqlite::Error| x.to_string();
+    let mut stmt = conn
+        .prepare("SELECT m.id, m.folder_id, m.modified_at, length(m.props), m.message_class FROM message m WHERE m.message_class LIKE 'IPM.Appointment%'")
+        .map_err(e)?;
+    let mut rows = stmt.query([]).map_err(e)?;
+    let mut out = HashMap::new();
+    while let Some(r) = rows.next().map_err(e)? {
+        if is_appointment_class(&r.get::<_, String>(4).map_err(e)?) {
+            out.insert(r.get(0).map_err(e)?, (r.get(1).map_err(e)?, r.get(2).map_err(e)?, r.get::<_, Option<i64>>(3).map_err(e)?.unwrap_or(0)));
+        }
+    }
+    Ok(out)
+}
+
+/// Met à jour `cal` (rendez-vous de la base seulement : ceux des calendriers importés, d'identifiant négatif, sont
+/// retirés) d'après les empreintes `old` de sa lecture précédente : seuls les rendez-vous modifiés, ajoutés ou supprimés
+/// depuis sont relus. Le résultat est identique à [`load`] (même ordre, par identifiant). Rend aussi les empreintes
+/// actuelles, à repasser au prochain appel.
+pub fn refresh(mut cal: Calendar, old: &HashMap<i64, Stamp>, conn: &Connection) -> Result<(Calendar, HashMap<i64, Stamp>)> {
+    let now = stamps(conn)?;
+    let changed: Vec<i64> = now.iter().filter(|(id, s)| old.get(id) != Some(s)).map(|(id, _)| *id).collect();
+    let removed = old.keys().filter(|id| !now.contains_key(id)).count();
+    // Rien lu avant, ou presque tout changé : une lecture complète coûte moins qu'un va-et-vient.
+    if old.is_empty() || changed.len() + removed > now.len() / 2 {
+        return Ok((load(conn)?, now));
+    }
+    let fresh = load_ids(conn, &changed)?;
+    let keep = |id: i64| id > 0 && now.contains_key(&id) && !changed.contains(&id);
+    cal.appointments.retain(|a| keep(a.id));
+    cal.issues.retain(|i| keep(i.id));
+    cal.appointments.extend(fresh.appointments);
+    cal.issues.extend(fresh.issues);
+    cal.appointments.sort_by_key(|a| a.id);
+    cal.issues.sort_by_key(|i| i.id);
+    Ok((cal, now))
+}
+
+fn load_where(conn: &Connection, ids: Option<&[i64]>) -> Result<Calendar> {
     let e = |x: thunderlook_store::rusqlite::Error| x.to_string();
     let mut named: HashMap<i64, Ids> = HashMap::new();
     {
@@ -210,10 +268,16 @@ pub fn load(conn: &Connection) -> Result<Calendar> {
             named.insert(r.get(0).map_err(e)?, Ids::new(&Named::parse(&raw)?));
         }
     }
+    // Entiers formatés par nos soins : pas d'injection possible.
+    let only = ids.map(|ids| format!(" AND m.id IN ({})", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")));
+    let only = only.as_deref().unwrap_or("");
     let mut categories: HashMap<i64, Vec<String>> = HashMap::new();
     {
+        // `CROSS JOIN` : on part des rendez-vous (index de classe), pas de toute la table des catégories.
         let mut stmt = conn
-            .prepare("SELECT c.message_id, c.name FROM message_category c JOIN message m ON m.id = c.message_id WHERE m.message_class LIKE 'IPM.Appointment%'")
+            .prepare(&format!(
+                "SELECT c.message_id, c.name FROM message m CROSS JOIN message_category c ON c.message_id = m.id WHERE m.message_class LIKE 'IPM.Appointment%'{only}"
+            ))
             .map_err(e)?;
         let mut rows = stmt.query([]).map_err(e)?;
         while let Some(r) = rows.next().map_err(e)? {
@@ -221,16 +285,19 @@ pub fn load(conn: &Connection) -> Result<Calendar> {
         }
     }
     let mut stmt = conn
-        .prepare(
-            "SELECT m.id, f.source_id, m.folder_id, m.subject, m.from_name, m.to_line, m.sensitivity, m.props, m.importance, m.eml_path
-             FROM message m JOIN folder f ON f.id = m.folder_id
-             WHERE m.message_class = 'IPM.Appointment' OR m.message_class LIKE 'IPM.Appointment.%'",
-        )
+        .prepare(&format!(
+            "SELECT m.id, f.source_id, m.folder_id, m.subject, m.from_name, m.to_line, m.sensitivity, m.props, m.importance, m.eml_path, m.message_class
+             FROM message m CROSS JOIN folder f ON f.id = m.folder_id
+             WHERE m.message_class LIKE 'IPM.Appointment%'{only} ORDER BY m.id"
+        ))
         .map_err(e)?;
     let mut rows = stmt.query([]).map_err(e)?;
     let (mut appointments, mut issues) = (Vec::new(), Vec::new());
     let none = Ids::new(&Named::default());
     while let Some(r) = rows.next().map_err(e)? {
+        if !is_appointment_class(&r.get::<_, String>(10).map_err(e)?) {
+            continue;
+        }
         let row = Row {
             id: r.get(0).map_err(e)?,
             source_id: r.get(1).map_err(e)?,

@@ -13,7 +13,7 @@ pub use rusqlite;
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub const DB_FILE: &str = "thunderlook.db";
-const SCHEMA_VERSION: i32 = 10;
+const SCHEMA_VERSION: i32 = 11;
 
 /// Schéma v1. Les dates sont en millisecondes depuis l'époque Unix (UTC).
 /// `props` : sac de propriétés MAPI brut (format décrit dans `thunderlook-import-pst::propbag`),
@@ -275,6 +275,13 @@ const V9_COLUMNS: &[(&str, &str, &str)] = &[("account", "rules_on_arrival", "INT
 /// tous, 104 transféré ; `PidTagLastVerbExecutionTime`, en millisecondes). Sur le serveur : `\Answered`, `$Forwarded`.
 const V10_COLUMNS: &[(&str, &str, &str)] = &[("message", "last_verb", "INTEGER"), ("message", "last_verb_at", "INTEGER")];
 
+/// v11 (lot F) : index des classes de message. `LIKE 'IPM.Appointment%'` (insensible à la casse) ne passe par un index
+/// que s'il est en `COLLATE NOCASE` ; sans lui, calendrier, contacts, tâches et notes balayaient toute la table
+/// `message` (courrier compris) à chaque ouverture.
+const SCHEMA_V11: &str = r#"
+CREATE INDEX IF NOT EXISTS message_class_nocase ON message(message_class COLLATE NOCASE, folder_id);
+"#;
+
 fn add_missing_columns(conn: &Connection, columns: &[(&str, &str, &str)]) -> rusqlite::Result<()> {
     for (table, column, decl) in columns {
         let exists: bool =
@@ -338,6 +345,7 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
         conn.execute_batch(SCHEMA_V8)?;
         add_missing_columns(&conn, V9_COLUMNS)?;
         add_missing_columns(&conn, V10_COLUMNS)?;
+        conn.execute_batch(SCHEMA_V11)?;
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version < SCHEMA_VERSION {
         // Migrations par ajout uniquement : la base est lue par d'autres outils (ADI Facturation).
@@ -348,6 +356,7 @@ pub fn open(data_dir: &Path) -> rusqlite::Result<Connection> {
         conn.execute_batch(SCHEMA_V8)?;
         add_missing_columns(&conn, V9_COLUMNS)?;
         add_missing_columns(&conn, V10_COLUMNS)?;
+        conn.execute_batch(SCHEMA_V11)?;
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
     } else if version > SCHEMA_VERSION {
         return Err(rusqlite::Error::InvalidParameterName(format!(

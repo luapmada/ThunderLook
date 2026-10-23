@@ -10,3 +10,8 @@ thunderlook-store = { path = "../store" }
 thunderlook-model = { path = "../model" }
 mail-parser = "0.11.9"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+
+# Banc d'essai (`examples/bench.rs`) : lit aussi les contacts et les notes. Cycle permis, réservé aux exemples.
+[dev-dependencies]
+thunderlook-contacts = { path = "../contacts" }
+thunderlook-items = { path = "../items" }

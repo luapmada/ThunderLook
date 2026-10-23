@@ -5086,6 +5086,8 @@ version = "0.10.0"
 dependencies = [
  "chrono",
  "mail-parser",
+ "thunderlook-contacts",
+ "thunderlook-items",
  "thunderlook-model",
  "thunderlook-store",
 ]

@@ -309,6 +309,11 @@ pub struct Contacts {
     pub issues: Vec<Issue>,
 }
 
+/// Classe d'un contact : `IPM.Contact` ou une classe dérivée ; le `LIKE` de la requête est un peu plus large.
+fn is_contact_class(class: &str) -> bool {
+    class == "IPM.Contact" || class.get(..12).is_some_and(|p| p.eq_ignore_ascii_case("IPM.Contact."))
+}
+
 /// Contacts de la base (`IPM.Contact` et classes dérivées) : tous, ceux d'un dossier, ou un seul.
 pub fn load(conn: &Connection, folder: Option<i64>, id: Option<i64>) -> Result<Contacts> {
     let e = |x: thunderlook_store::rusqlite::Error| x.to_string();
@@ -321,17 +326,31 @@ pub fn load(conn: &Connection, folder: Option<i64>, id: Option<i64>) -> Result<C
             named.insert(r.get(0).map_err(e)?, Ids::new(&Named::parse(&raw)?));
         }
     }
+    // Une fiche : accès direct par `m.id` ; sinon l'index de classe (`message_class_nocase`) évite de balayer le courrier.
+    // Les `(?1 IS NULL OR …)` d'avant empêchaient SQLite d'utiliser le moindre index.
+    let filter = match (id, folder) {
+        (Some(_), _) => "m.id = ?1",
+        (None, Some(_)) => "m.folder_id = ?1",
+        (None, None) => "?1 IS NULL",
+    };
     let mut stmt = conn
-        .prepare(
-            "SELECT m.id, f.source_id, m.folder_id, m.subject, m.props, m.eml_path
-             FROM message m JOIN folder f ON f.id = m.folder_id
-             WHERE (m.message_class = 'IPM.Contact' OR m.message_class LIKE 'IPM.Contact.%') AND (?1 IS NULL OR m.folder_id = ?1) AND (?2 IS NULL OR m.id = ?2)",
-        )
+        .prepare(&format!(
+            "SELECT m.id, f.source_id, m.folder_id, m.subject, m.props, m.eml_path, m.message_class
+             FROM message m CROSS JOIN folder f ON f.id = m.folder_id
+             WHERE m.message_class LIKE 'IPM.Contact%' AND {filter} ORDER BY m.id"
+        ))
         .map_err(e)?;
-    let mut rows = stmt.query([folder, id]).map_err(e)?;
+    let mut rows = stmt.query([id.or(folder)]).map_err(e)?;
     let (mut contacts, mut issues) = (Vec::new(), Vec::new());
     let none = Ids::new(&Named::default());
     while let Some(r) = rows.next().map_err(e)? {
+        if !is_contact_class(&r.get::<_, String>(6).map_err(e)?) {
+            continue;
+        }
+        // Une fiche demandée avec un dossier : seulement si elle est bien dans ce dossier.
+        if id.is_some() && folder.is_some_and(|f| r.get::<_, i64>(2).ok() != Some(f)) {
+            continue;
+        }
         let row = Row { id: r.get(0).map_err(e)?, source_id: r.get(1).map_err(e)?, folder_id: r.get(2).map_err(e)?, eml_path: r.get(5).map_err(e)? };
         let subject: String = r.get(3).map_err(e)?;
         let props: Option<Vec<u8>> = r.get(4).map_err(e)?;

@@ -937,9 +937,19 @@ fn save_quick_steps(app: AppHandle, steps: Vec<QuickStep>) -> Result<(), String>
     fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-/// Calendrier (J9, option A : lecture seule) : rendez-vous lus une fois puis gardés, jusqu'à un rechargement.
+/// Calendrier (J9, option A : lecture seule) : rendez-vous lus une fois puis gardés. Une écriture ou un import
+/// (`clear_calendar`) ne vide pas le cache : il est marqué périmé et, à la lecture suivante, seuls les rendez-vous dont
+/// l'empreinte a changé (modifiés, ajoutés, supprimés) sont relus.
 #[derive(Default)]
-struct CalendarCache(Mutex<Option<thunderlook_calendar::Calendar>>);
+struct CalendarCache(Mutex<CalendarState>);
+
+#[derive(Default)]
+struct CalendarState {
+    calendar: Option<thunderlook_calendar::Calendar>,
+    /// Empreintes des rendez-vous de la base au moment de leur lecture.
+    stamps: std::collections::HashMap<i64, thunderlook_calendar::Stamp>,
+    stale: bool,
+}
 
 /// Calendriers affichés : `calendar.json` (identifiants `c<dossier>`) ; absent = calendrier principal seul.
 fn shown_calendars(app: &AppHandle) -> Option<Vec<String>> {
@@ -969,19 +979,37 @@ fn with_calendar<T>(
     dir: &Path,
     f: impl FnOnce(&thunderlook_calendar::Calendar) -> T,
 ) -> Result<T, String> {
-    let mut guard = cache.0.lock().map_err(|_| "verrou du calendrier empoisonné".to_string())?;
-    if guard.is_none() {
-        let mut cal = thunderlook_calendar::load(conn)?;
-        let (imported, errors) = thunderlook_calendar::imported::load(dir);
-        cal.appointments.extend(imported.into_iter().flat_map(|(_, items)| items));
-        cal.issues.extend(errors.into_iter().map(|detail| thunderlook_calendar::Issue { id: 0, subject: String::new(), detail }));
-        *guard = Some(cal);
+    let mut state = cache.0.lock().map_err(|_| "verrou du calendrier empoisonné".to_string())?;
+    if state.calendar.is_none() || state.stale {
+        refresh_calendar(&mut state, conn, dir)?;
     }
-    Ok(f(guard.as_ref().unwrap()))
+    Ok(f(state.calendar.as_ref().unwrap()))
 }
 
+/// Lecture complète au premier appel ; ensuite, relecture des seuls rendez-vous changés (`thunderlook_calendar::refresh`).
+/// Les calendriers importés (fichiers `.ics`) sont relus entiers : un import ou un retrait est la raison d'être du rafraîchissement.
+fn refresh_calendar(state: &mut CalendarState, conn: &thunderlook_store::rusqlite::Connection, dir: &Path) -> Result<(), String> {
+    let old = state.calendar.take().unwrap_or(thunderlook_calendar::Calendar { appointments: Vec::new(), issues: Vec::new() });
+    let (mut cal, stamps) = match thunderlook_calendar::refresh(old, &state.stamps, conn) {
+        Ok(r) => r,
+        Err(e) => {
+            // Cache vidé : la prochaine lecture repart d'une lecture complète.
+            state.stamps.clear();
+            return Err(e);
+        }
+    };
+    let (imported, errors) = thunderlook_calendar::imported::load(dir);
+    cal.appointments.extend(imported.into_iter().flat_map(|(_, items)| items));
+    cal.issues.extend(errors.into_iter().map(|detail| thunderlook_calendar::Issue { id: 0, subject: String::new(), detail }));
+    state.calendar = Some(cal);
+    state.stamps = stamps;
+    state.stale = false;
+    Ok(())
+}
+
+/// Marque le cache périmé (écriture, import, retrait) ; la prochaine lecture ne relira que ce qui a changé.
 fn clear_calendar(cache: &CalendarCache) -> Result<(), String> {
-    *cache.0.lock().map_err(|_| "verrou du calendrier empoisonné".to_string())? = None;
+    cache.0.lock().map_err(|_| "verrou du calendrier empoisonné".to_string())?.stale = true;
     Ok(())
 }
 
@@ -999,7 +1027,6 @@ fn contact_list(app: AppHandle, folder: String) -> Result<thunderlook_model::con
     let conn = thunderlook_store::open(&data_dir(&app)?).map_err(|e| e.to_string())?;
     let all = thunderlook_contacts::load(&conn, Some(id), None)?;
     let mut list = thunderlook_contacts::view::list(&all, id);
-    list.source_note = thunderlook_contacts::source_note(&conn, id)?;
     list.source_note = None;
     Ok(list)
 }
