@@ -15,6 +15,7 @@ mod dialogs;
 mod exchange;
 mod folders;
 mod global_search;
+mod help;
 mod icons;
 mod junk;
 mod ipc;

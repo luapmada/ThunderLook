@@ -253,6 +253,8 @@ pub struct Ui {
     pub phone_exchange: RwSignal<bool>,
     /// Écran « Sauvegardes » ouvert (menu Fichier).
     pub backups: RwSignal<bool>,
+    /// Aide intégrée ouverte (F1, onglet Aide) : rubrique à atteindre, vide pour le haut.
+    pub help: RwSignal<Option<String>>,
     pub refs: Refs,
 }
 
@@ -326,6 +328,7 @@ impl Ui {
             reminders_open: RwSignal::new(false),
             phone_exchange: RwSignal::new(false),
             backups: RwSignal::new(false),
+            help: RwSignal::new(None),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),
