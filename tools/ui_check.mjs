@@ -1,71 +1,41 @@
 // Vérification d'interface des jalons, sur l'application réelle et ses données.
 // Lance ThunderLook avec le port de débogage de WebView2 (CDP), pilote la page de l'intérieur (aucune entrée
 // système, rien ne peut atteindre une autre application), contrôle, puis remet les réglages et ferme l'application.
+//
 // Usage : node tools/ui_check.mjs [chemin\thunderlook.exe]      (code de sortie 1 si une vérification échoue)
-// Chaque jalon ajoute ses vérifications dans CHECKS.
-import { spawn } from 'node:child_process';
+//   UI_ONLY=J9            seulement les vérifications dont le nom commence ainsi (UI_ONLY=J9,Clic : plusieurs préfixes).
+//   UI_ONLY=L             seulement les cas du lot L (tools/ui_cases/*.mjs) ; UI_ONLY=L-contacts : un seul.
+//
+// Cas du lot L : ils CRÉENT puis suppriment des éléments « ZZ-L… » (contacts, rendez-vous, tâches, notes). Ils n'écrivent
+// que si THUNDERLOOK_DATA désigne une copie de test (autre que la base habituelle) ; sinon ils se sautent avec un message.
+// Les réglages d'affichage (type de vue du calendrier, portée de la recherche) sont partagés avec la vraie installation :
+// chaque cas les remet, mais ne lancez pas ThunderLook ailleurs pendant l'essai. Exemple (PowerShell) :
+//   $env:THUNDERLOOK_DATA = "C:\chemin\copie-de-test"; $env:UI_ONLY = "L"; node tools/ui_check.mjs target\release\thunderlook.exe
+// Les cas qui n'écrivent rien (J…, Clic droit, L-échange) tournent aussi sans THUNDERLOOK_DATA.
+// Chaque jalon ajoute ses vérifications dans CHECKS ; chaque cas du lot L est un fichier de ui_cases/ (exports name, run).
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import { launch, connect, js, key, until, clickTab } from './ui_cases/lib.mjs';
+import * as contacts from './ui_cases/contacts.mjs';
+import * as appointments from './ui_cases/appointments.mjs';
+import * as tasks from './ui_cases/tasks.mjs';
+import * as notes from './ui_cases/notes.mjs';
+import * as exchange from './ui_cases/exchange.mjs';
+import * as globalSearch from './ui_cases/global_search.mjs';
+import * as reminders from './ui_cases/reminders.mjs';
+import * as calendarLayout from './ui_cases/calendar_layout.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const exe = process.argv[2] ?? path.join(root, 'target', 'release', 'thunderlook.exe');
-const port = 9333;
 
-// --- Client CDP minimal ---------------------------------------------------------------------------
-async function connect() {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-      const page = targets.find((t) => t.type === 'page' && !t.url.startsWith('devtools'));
-      if (page) {
-        const ws = new WebSocket(page.webSocketDebuggerUrl);
-        await new Promise((ok, ko) => { ws.onopen = ok; ws.onerror = ko; });
-        let id = 0;
-        const pending = new Map();
-        ws.onmessage = (m) => {
-          const msg = JSON.parse(m.data);
-          if (pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
-        };
-        const send = (method, params = {}) =>
-          new Promise((ok) => { const i = ++id; pending.set(i, ok); ws.send(JSON.stringify({ id: i, method, params })); });
-        return { ws, send };
-      }
-    } catch { /* pas encore prêt */ }
-    await sleep(500);
-  }
-  throw new Error(`pas de page CDP sur le port ${port}`);
-}
-
+// Le moteur (lancement, client CDP, js, until, key, press) est dans ui_cases/lib.mjs.
 let cdp;
-async function js(expression) {
-  const r = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-  if (r.result?.exceptionDetails) throw new Error(`JS : ${r.result.exceptionDetails.exception?.description ?? expression}`);
-  return r.result?.result?.value;
-}
-const KEYS = { ArrowRight: 39, ArrowLeft: 37, ArrowDown: 40, ArrowUp: 38, Enter: 13, Escape: 27, Home: 36, End: 35 };
-async function key(name) {
-  for (const type of ['rawKeyDown', 'keyUp']) {
-    await cdp.send('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: KEYS[name] ?? 0 });
-  }
-}
-/** Attend que `expression` soit vraie (5 s au plus). */
-async function until(expression, what) {
-  for (let i = 0; i < 50; i++) {
-    if (await js(expression)) return;
-    await sleep(100);
-  }
-  throw new Error(`délai dépassé : ${what}`);
-}
 
 // --- Aides propres à ThunderLook ------------------------------------------------------------------
 const ROW = (pos) => `document.querySelector('.msg[aria-posinset="${pos}"]')`;
 const settingsOn = () => js(`document.querySelector('[aria-label="Afficher en tant que conversations"]')?.getAttribute('aria-pressed') === 'true'`);
-async function clickTab(label) {
-  await js(`[...document.querySelectorAll('[role=tab]')].find(t => t.textContent.trim() === ${JSON.stringify(label)}).click()`);
-  await sleep(200);
-}
 async function toggleConversations(on) {
   await clickTab('Affichage');
   if ((await settingsOn()) !== on) {
@@ -638,11 +608,11 @@ CHECKS.push(['J10 : contacts (dossiers, liste triée, fiche, filtre)', async (lo
   }
 }]);
 
+// Lot L : un cas par fichier de ui_cases/. Les cas qui écrivent se sautent sans THUNDERLOOK_DATA.
+for (const c of [contacts, appointments, tasks, notes, exchange, globalSearch, reminders, calendarLayout]) CHECKS.push([c.name, c.run]);
+
 // --- Exécution ------------------------------------------------------------------------------------
-const app = spawn(exe, [], {
-  env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
-  stdio: 'ignore',
-});
+const app = launch(exe);
 let failed = 0;
 let initialConversations;
 let initialMarkRead;
