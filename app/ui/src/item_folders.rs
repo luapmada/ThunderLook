@@ -42,10 +42,22 @@ impl FolderKind {
 pub struct FolderRow {
     pub id: String,
     pub source_id: i64,
+    /// Nom affiché.
     pub name: String,
+    /// Nom enregistré (renommage).
+    #[serde(default)]
+    pub raw_name: String,
     pub section: String,
     pub count: u32,
+    /// Teinte du fichier de données (0 à 7).
+    #[serde(default)]
+    pub account: u8,
     pub color: Option<u8>,
+}
+
+/// Pastille de couleur propre à un compte, pour les distinguer dans les sélecteurs.
+pub fn account_dot(account: u8) -> &'static str {
+    ["🔵", "🟠", "🟢", "🟣", "🔴", "🟡", "🟤", "⚪"][usize::from(account % 8)]
 }
 
 /// Palette des 25 couleurs de catégorie d'Outlook (`notes/outlook-couleurs-menus.md`), dans l'ordre 0 à 24.
@@ -338,7 +350,7 @@ fn NameDialog(f: FolderUi, on_change: Callback<()>) -> impl IntoView {
     });
     Effect::new(move |_| {
         if let Some(Dlg::Name { rename, .. }) = dlg.get() {
-            name.set(rename.map(|r| r.name).unwrap_or_default());
+            name.set(rename.map(|r| if r.raw_name.is_empty() { r.name } else { r.raw_name }).unwrap_or_default());
             error.set(None);
             request_animation_frame(move || {
                 if let Some(i) = input.get() {
@@ -544,7 +556,7 @@ pub fn FolderPicker(
             {all_label.map(|l| view! { <option value="" selected=move || value.get().is_empty()>{l}</option> })}
             {move || f.list.get().into_iter().map(|d| {
                 let id = d.id.clone();
-                view! { <option value=d.id.clone() selected=move || value.get() == id>{format!("{} — {}", d.section, d.name)}</option> }
+                view! { <option value=d.id.clone() selected=move || value.get() == id>{format!("{} {} — {}", account_dot(d.account), d.section, d.name)}</option> }
             }).collect_view()}
             <option value=NEW>{format!("＋ {}…", f.kind.new_label())}</option>
         </select>

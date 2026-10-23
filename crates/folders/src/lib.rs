@@ -6,6 +6,10 @@
 //! - Suppression refusée tant que le dossier contient des éléments ou des sous-dossiers, sauf [`Content::MoveTo`] ou
 //!   [`Content::Delete`]. Chaque élément déplacé ou supprimé passe d'abord par `thunderlook_safety` (corbeille interne,
 //!   annulation) ; si cet instantané échoue, rien n'est touché.
+//! - Affichage seulement (rien n'est supprimé ni fusionné) : un nom technique du PST (`Calendar3098`) devient le nom
+//!   générique de la sorte (« Calendrier ») ; deux dossiers de même nom affiché reçoivent le fichier de données en suffixe
+//!   (« Calendrier (Pro.pst) »), puis un numéro s'ils sont dans le même fichier ; un dossier technique vide d'un PST est
+//!   masqué de [`list`] (il reste dans la base et dans [`all`]).
 //! - Couleur d'un calendrier : `calendar-colors.json` du dossier de données ({ "c12": 7 }, 0 à 24 = palette des catégories
 //!   d'Outlook).
 
@@ -68,11 +72,18 @@ impl Kind {
 pub struct FolderInfo {
     pub id: i64,
     pub source_id: i64,
+    /// Nom affiché : lisible, jamais technique, distinct des autres dossiers de la même sorte.
     pub name: String,
+    /// Nom enregistré dans la base (celui que l'on renomme).
+    pub raw_name: String,
     /// Fichier de données.
     pub section: String,
     /// Éléments directement dans le dossier.
     pub count: u32,
+    /// Rang du fichier de données (0 à 7, stable : ordre des fichiers), pour une teinte propre à chaque compte.
+    pub account: u8,
+    /// Dossier technique vide d'un PST : masqué de [`list`].
+    pub masked: bool,
 }
 
 /// Ce que devient le contenu d'un dossier supprimé.
@@ -142,20 +153,87 @@ fn duplicate(name: &str) -> String {
     format!("Un dossier nommé « {name} » existe déjà dans ce fichier de données.")
 }
 
-/// Dossiers de cette sorte, y compris les vides, dans l'ordre d'affichage.
-pub fn list(conn: &Connection, kind: Kind) -> Result<Vec<FolderInfo>> {
+/// Noms que le PST donne aux dossiers sans nom lisible, suivis d'un numéro (`Calendar3098`).
+const TECHNICAL_STEMS: [&str; 14] =
+    ["calendar", "calendrier", "contact", "contacts", "task", "tasks", "tache", "taches", "tâche", "tâches", "note", "notes", "appointment", "journal"];
+
+/// Nom technique du PST : mot de dossier collé à un numéro (`Calendar3098`), classe de conteneur (`IPF.Appointment`)
+/// ou identifiant entre accolades.
+pub fn is_technical(name: &str) -> bool {
+    let n = name.trim();
+    if n.starts_with("IPF.") || (n.len() > 2 && n.starts_with('{') && n.ends_with('}')) {
+        return true;
+    }
+    let digits = n.chars().rev().take_while(char::is_ascii_digit).count();
+    let stem = n[..n.len() - digits].to_lowercase();
+    digits >= 2 && TECHNICAL_STEMS.contains(&stem.as_str())
+}
+
+/// Nom générique d'une sorte, quand le nom du PST est technique.
+fn generic(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Calendar => "Calendrier",
+        Kind::Contact => "Contacts",
+        Kind::Task => "Tâches",
+        Kind::Note => "Notes",
+    }
+}
+
+/// Tous les dossiers de cette sorte, masqués compris, dans l'ordre d'affichage (fichier de données, parent, position).
+pub fn all(conn: &Connection, kind: Kind) -> Result<Vec<FolderInfo>> {
+    let ranks: Vec<i64> = {
+        let mut stmt = conn.prepare("SELECT id FROM source ORDER BY id").map_err(e)?;
+        stmt.query_map([], |r| r.get(0)).map_err(e)?.collect::<std::result::Result<_, _>>().map_err(e)?
+    };
     let mut stmt = conn
         .prepare(
-            "SELECT f.id, f.source_id, f.name, s.display_name, (SELECT COUNT(*) FROM message m WHERE m.folder_id = f.id)
+            "SELECT f.id, f.source_id, f.name, s.display_name, (SELECT COUNT(*) FROM message m WHERE m.folder_id = f.id),
+                    s.kind, f.nid, (SELECT COUNT(*) FROM folder c WHERE c.parent_id = f.id)
              FROM folder f JOIN source s ON s.id = f.source_id
              WHERE f.container_class LIKE ?1 AND f.hidden = 0
              ORDER BY f.source_id, f.parent_id, f.position, f.id",
         )
         .map_err(e)?;
-    stmt.query_map([kind.like()], |r| Ok(FolderInfo { id: r.get(0)?, source_id: r.get(1)?, name: r.get(2)?, section: r.get(3)?, count: r.get(4)? }))
+    let mut out: Vec<FolderInfo> = stmt
+        .query_map([kind.like()], |r| {
+            let (id, source_id, raw, section, count, origin, nid, children): (i64, i64, String, String, u32, String, i64, i64) =
+                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?);
+            let technical = is_technical(&raw);
+            let account = ranks.iter().position(|&s| s == source_id).unwrap_or(0) % 8;
+            Ok(FolderInfo {
+                id,
+                source_id,
+                name: if technical { generic(kind).to_string() } else { raw.trim().to_string() },
+                raw_name: raw,
+                section,
+                count,
+                account: account as u8,
+                masked: technical && count == 0 && children == 0 && origin == "pst" && nid < FIRST_NID,
+            })
+        })
         .map_err(e)?
         .collect::<std::result::Result<_, _>>()
-        .map_err(e)
+        .map_err(e)?;
+    // Noms identiques (sans tenir compte de la casse) : fichier de données en suffixe, puis numéro dans un même fichier.
+    let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (i, f) in out.iter().enumerate().filter(|(_, f)| !f.masked) {
+        groups.entry(f.name.to_lowercase()).or_default().push(i);
+    }
+    for idx in groups.into_values().filter(|g| g.len() > 1) {
+        let mut seen: BTreeMap<i64, u32> = BTreeMap::new();
+        for i in idx {
+            let n = seen.entry(out[i].source_id).or_insert(0);
+            *n += 1;
+            let f = &mut out[i];
+            f.name = if *n > 1 { format!("{} ({}) {}", f.name, f.section, *n) } else { format!("{} ({})", f.name, f.section) };
+        }
+    }
+    Ok(out)
+}
+
+/// Dossiers de cette sorte à afficher, y compris les vides (hors dossiers techniques vides masqués).
+pub fn list(conn: &Connection, kind: Kind) -> Result<Vec<FolderInfo>> {
+    Ok(all(conn, kind)?.into_iter().filter(|f| !f.masked).collect())
 }
 
 /// Crée un dossier ; `source` : fichier de données (celui du premier dossier de cette sorte si absent). Rend son `id`.
@@ -354,7 +432,7 @@ mod tests {
         let nid = |id: i64| conn.query_row("SELECT nid FROM folder WHERE id = ?1", [id], |r| r.get::<_, i64>(0)).unwrap();
         assert_eq!(nid(a), FIRST_NID);
         assert_eq!(nid(b), FIRST_NID + 1);
-        let names: Vec<String> = list(&conn, Kind::Calendar).unwrap().into_iter().filter(|f| f.source_id == 1).map(|f| f.name).collect();
+        let names: Vec<String> = list(&conn, Kind::Calendar).unwrap().into_iter().filter(|f| f.source_id == 1).map(|f| f.raw_name).collect();
         assert_eq!(names, ["Calendrier", "Chantiers", "Famille"]);
         let c = create(&conn, Kind::Note, Some(1), "Idées").unwrap();
         assert_eq!(list(&conn, Kind::Note).unwrap()[0].id, c);
@@ -449,6 +527,69 @@ mod tests {
         assert_eq!(colors(&dir).len(), 1);
         set_color(&conn, &dir, 1, None).unwrap();
         assert!(colors(&dir).is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn technical_names_are_detected() {
+        for n in ["Calendar3098", "calendar12", "Calendrier0042", " Tasks77 ", "Notes123", "IPF.Appointment", "{1A2B}"] {
+            assert!(is_technical(n), "{n}");
+        }
+        for n in ["Calendrier", "Calendar 2", "Budget2024", "Calendar1", "Famille", "Contacts"] {
+            assert!(!is_technical(n), "{n}");
+        }
+    }
+
+    #[test]
+    fn technical_and_duplicate_names_get_readable_labels() {
+        let (dir, conn) = fixture("labels");
+        // Fichier A : « Calendar3098 » rempli, « Calendar77 » vide ; fichier B : « Calendrier » existe déjà (id 5).
+        for (id, source, nid, name) in [(6, 1, 200, "Calendar3098"), (7, 1, 201, "Calendar77"), (8, 2, 200, "Calendar4001")] {
+            conn.execute(
+                "INSERT INTO folder (id, source_id, nid, name, role, container_class, hidden, position) VALUES (?1, ?2, ?3, ?4, 'folder', 'IPF.Appointment', 0, ?1)",
+                params![id, source, nid, name],
+            )
+            .unwrap();
+        }
+        add_item(&conn, 6, 1, "IPM.Appointment", "Rdv");
+        add_item(&conn, 8, 1, "IPM.Appointment", "Rdv B");
+        let shown = list(&conn, Kind::Calendar).unwrap();
+        let names: Vec<(i64, &str)> = shown.iter().map(|f| (f.id, f.name.as_str())).collect();
+        // Jamais de nom technique ; « Calendar77 » (vide, PST) masqué ; doublons suffixés par le fichier de données.
+        assert_eq!(names, [(1, "Calendrier (A)"), (6, "Calendrier (A) 2"), (5, "Calendrier (B)"), (8, "Calendrier (B) 2")]);
+        assert!(shown.iter().all(|f| !is_technical(&f.name)));
+        assert_eq!(shown[1].raw_name, "Calendar3098");
+        // Masqué mais intact dans la base et dans `all`.
+        assert!(all(&conn, Kind::Calendar).unwrap().iter().any(|f| f.id == 7 && f.masked));
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM folder WHERE id = 7", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        // Comptes distincts = teintes distinctes.
+        assert_ne!(shown[0].account, shown[2].account);
+        assert_eq!(shown[0].account, shown[1].account);
+        // Ordre stable d'un appel à l'autre.
+        assert_eq!(list(&conn, Kind::Calendar).unwrap(), shown);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn same_name_in_different_files_is_suffixed_only_when_duplicated() {
+        let (dir, conn) = fixture("suffix");
+        create(&conn, Kind::Contact, Some(1), "Clients").unwrap();
+        create(&conn, Kind::Contact, Some(2), "Contacts").unwrap();
+        let names: Vec<String> = list(&conn, Kind::Contact).unwrap().into_iter().map(|f| f.name).collect();
+        assert_eq!(names, ["Contacts (A)", "Clients", "Contacts (B)"]);
+        // Renommer agit sur le nom enregistré, pas sur le libellé.
+        let id = list(&conn, Kind::Contact).unwrap()[0].id;
+        rename(&conn, Kind::Contact, id, "Perso").unwrap();
+        let names: Vec<String> = list(&conn, Kind::Contact).unwrap().into_iter().map(|f| f.name).collect();
+        assert_eq!(names, ["Perso", "Clients", "Contacts"]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folders_made_by_thunderlook_are_never_masked() {
+        let (dir, conn) = fixture("nomask");
+        let f = create(&conn, Kind::Calendar, Some(1), "Calendar9999").unwrap();
+        assert!(list(&conn, Kind::Calendar).unwrap().iter().any(|x| x.id == f && x.name.starts_with("Calendrier")));
         let _ = fs::remove_dir_all(dir);
     }
 }

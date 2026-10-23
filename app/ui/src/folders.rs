@@ -64,10 +64,17 @@ struct Row {
     parent: Option<String>,
     /// Nom de la section (fichier de données ou compte) : `data-source`.
     source: String,
+    /// Rang de la section (stable) : teinte du filet de gauche, pour distinguer les comptes.
+    account: usize,
+}
+
+/// Filet de gauche propre à un compte (huit teintes, réparties sur le cercle).
+fn account_style(account: usize) -> String {
+    format!("border-left: 3px solid hsl({} 55% 50%)", (account % 8) * 45 + 210)
 }
 
 fn flatten(tree: &FolderTree, collapsed: &HashSet<String>, expanded_set: &HashSet<String>) -> Vec<Row> {
-    fn push_folders(rows: &mut Vec<Row>, folders: &[Folder], level: u32, parent: &str, expanded_set: &HashSet<String>, source: &str) {
+    fn push_folders(rows: &mut Vec<Row>, folders: &[Folder], level: u32, parent: &str, expanded_set: &HashSet<String>, source: &str, account: usize) {
         for f in folders {
             let expanded = expanded_set.contains(&f.id);
             rows.push(Row {
@@ -81,14 +88,15 @@ fn flatten(tree: &FolderTree, collapsed: &HashSet<String>, expanded_set: &HashSe
                 badge_total: f.role.shows_total(),
                 parent: Some(parent.to_string()),
                 source: source.to_string(),
+                account,
             });
             if expanded {
-                push_folders(rows, &f.children, level + 1, &f.id, expanded_set, source);
+                push_folders(rows, &f.children, level + 1, &f.id, expanded_set, source, account);
             }
         }
     }
     let mut rows = Vec::new();
-    for s in &tree.sections {
+    for (account, s) in tree.sections.iter().enumerate() {
         let expanded = !collapsed.contains(&s.id);
         rows.push(Row {
             id: s.id.clone(),
@@ -101,9 +109,10 @@ fn flatten(tree: &FolderTree, collapsed: &HashSet<String>, expanded_set: &HashSe
             badge_total: false,
             parent: None,
             source: s.name.clone(),
+            account,
         });
         if expanded {
-            push_folders(&mut rows, &s.folders, 2, &s.id, expanded_set, &s.name);
+            push_folders(&mut rows, &s.folders, 2, &s.id, expanded_set, &s.name, account);
         }
     }
     rows
@@ -245,7 +254,7 @@ pub fn FolderPane() -> impl IntoView {
                                     move || drop_over.get().as_deref() == Some(id.as_str())
                                 };
                                 let draggable = (!section && is_plain(ui, &row.id)).then_some("true");
-                                let indent = format!("padding-left: {}px", 4 + (row.level.saturating_sub(1)) * 16);
+                                let indent = format!("padding-left: {}px; {}", 4 + (row.level.saturating_sub(1)) * 16, account_style(row.account));
                                 view! {
                                     <div
                                         role="treeitem"
