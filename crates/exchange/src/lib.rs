@@ -26,7 +26,7 @@ use thunderlook_model::{contacts::ContactForm, items::{NoteForm, TaskForm}};
 use thunderlook_store::rusqlite::Connection;
 
 pub use conflict::{Origin, Resolution};
-pub use import::{ApplyReport, apply, import_changes, last_undo, undo};
+pub use import::{ApplyReport, apply, import_changes, import_changes_with, last_undo, undo};
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -175,6 +175,21 @@ impl Change {
     /// Coché d'office dans la liste ? Jamais une suppression.
     pub fn default_selected(&self) -> bool {
         self.kind != ChangeKind::Deleted && self.conflict.is_none()
+    }
+}
+
+/// Réglages de la lecture des fichiers du téléphone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportOptions {
+    /// Les notes viennent du téléphone (`NoteSyncMode=2` de MPE, forcé téléphone → PC) : une note du fichier différente
+    /// de celle de la base la remplace sans conflit, même si ThunderLook l'a modifiée depuis l'export. Les autres
+    /// éléments restent bidirectionnels. Vrai par défaut.
+    pub notes_from_phone: bool,
+}
+
+impl Default for ImportOptions {
+    fn default() -> Self {
+        ImportOptions { notes_from_phone: true }
     }
 }
 

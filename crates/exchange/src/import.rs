@@ -23,7 +23,7 @@ use thunderlook_model::{contacts::ContactForm, items::{NoteForm, TaskForm}};
 use thunderlook_store::rusqlite::Connection;
 
 use crate::conflict::{self, Resolution, Verdict};
-use crate::{Change, ChangeKind, EventData, IdMap, ImportReport, ItemKind, Manifest, Payload, Result, event_uid, read_manifest, sha256, undo_dir};
+use crate::{Change, ChangeKind, EventData, IdMap, ImportOptions, ImportReport, ItemKind, Manifest, Payload, Result, event_uid, read_manifest, sha256, undo_dir};
 
 /// Champs jamais comparés ni écrasés : l'identité de l'élément et sa photo.
 const SKIP: [&str; 3] = ["id", "folderId", "photo"];
@@ -180,6 +180,11 @@ impl Ctx<'_> {
 
 /// Changements entre les fichiers de `in_dir` et la base. N'écrit rien.
 pub fn import_changes(conn: &Connection, data_dir: &Path, in_dir: &Path) -> Result<ImportReport> {
+    import_changes_with(conn, data_dir, in_dir, &ImportOptions::default())
+}
+
+/// Comme [`import_changes`], avec des réglages (notes « venues du téléphone » ou bidirectionnelles).
+pub fn import_changes_with(conn: &Connection, data_dir: &Path, in_dir: &Path, opts: &ImportOptions) -> Result<ImportReport> {
     let manifest: Option<Manifest> = read_manifest(in_dir);
     let maps: IdMap = crate::read_map(data_dir);
     let mut rep = ImportReport::default();
@@ -192,7 +197,9 @@ pub fn import_changes(conn: &Connection, data_dir: &Path, in_dir: &Path) -> Resu
         found = true;
         let bytes = fs::read(&path).map_err(|e| format!("{} : {e}", path.display()))?;
         let info = manifest.as_ref().and_then(|m| m.file(kind.file()));
-        if info.is_some_and(|i| i.sha256 == sha256::hex(&bytes)) {
+        // Notes forcées par le téléphone : le fichier intact est quand même relu, une note modifiée ici doit être ramenée à lui.
+        let forced = kind == ItemKind::Note && opts.notes_from_phone;
+        if !forced && info.is_some_and(|i| i.sha256 == sha256::hex(&bytes)) {
             // Fichier intact depuis l'export : rien n'a pu changer côté téléphone.
             rep.unchanged += info.map_or(0, |i| i.count);
             continue;
@@ -202,7 +209,7 @@ pub fn import_changes(conn: &Connection, data_dir: &Path, in_dir: &Path) -> Resu
         match kind {
             ItemKind::Contact => contacts(conn, data_dir, &text, &ctx, &mut rep)?,
             ItemKind::Task => tasks(conn, data_dir, &text, &ctx, &mut rep)?,
-            ItemKind::Note => notes(conn, data_dir, &text, &ctx, &mut rep)?,
+            ItemKind::Note => notes(conn, data_dir, &text, &ctx, forced, &mut rep)?,
             ItemKind::Event => events(conn, data_dir, &text, &ctx, &mut rep)?,
         }
     }
@@ -339,7 +346,7 @@ pub(crate) fn canon_note(f: &NoteForm) -> String {
     thunderlook_items::vnote::parse(&thunderlook_items::vnote::export(std::slice::from_ref(f))).ok().and_then(|mut v| v.pop()).map_or_else(|| body_of(&f.body), |p| body_of(&p.form.body))
 }
 
-fn notes(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut ImportReport) -> Result<()> {
+fn notes(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, forced: bool, rep: &mut ImportReport) -> Result<()> {
     let (mut exs, mut data) = (Vec::new(), HashMap::new());
     for r in thunderlook_items::notes(conn, dir)?.rows {
         let Some(n) = r.id.strip_prefix('n').and_then(|n| n.parse::<i64>().ok()) else { continue };
@@ -365,7 +372,13 @@ fn notes(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut ImportR
                     rep.unchanged += 1;
                 } else {
                     let merged = NoteForm { body: body.clone(), ..existing.clone() };
-                    ctx.propose(rep, &id, format!("{} : texte", note_title(&body)), uid.as_deref(), Payload::Note(merged), canon, &body);
+                    let summary = format!("{} : texte", note_title(&body));
+                    if forced {
+                        // Le téléphone fait foi : remplacement coché d'office, la couleur existante est gardée (`..existing`).
+                        rep.changes.push(ctx.change(ChangeKind::Modified, &id, summary, uid.as_deref(), Payload::Note(merged)));
+                    } else {
+                        ctx.propose(rep, &id, summary, uid.as_deref(), Payload::Note(merged), canon, &body);
+                    }
                 }
             }
             None => {
