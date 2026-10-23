@@ -1690,6 +1690,57 @@ input {
 
 .cal-timed .cal-ev {
   height: 100%;
+  min-height: 0;
+}
+
+/* Rendez-vous de moins d'une demi-heure : une ligne, sans marge, pour rester dans sa case (aucun recouvrement). */
+.cal-timed.short .cal-ev {
+  flex-wrap: nowrap;
+  align-items: center;
+  padding-block: 0;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.cal-body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cal-body.dragging {
+  cursor: grabbing;
+}
+
+.cal-timed.dragging {
+  opacity: 0.35;
+}
+
+/* Poignée du bas : change l'heure de fin. */
+.cal-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: min(6px, 35%);
+  cursor: ns-resize;
+}
+
+/* Fantôme pendant un glissement ou la création d'un créneau. */
+.cal-ghost {
+  position: absolute;
+  left: 1px;
+  right: 2px;
+  display: flex;
+  gap: var(--u);
+  padding: 1px calc(var(--u) + 2px);
+  border: 1px dashed var(--accent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 3;
 }
 
 /* Rendez-vous classé : rempli de la couleur de sa catégorie, bande de disponibilité éclaircie (relevé d'Outlook). */
@@ -1820,9 +1871,20 @@ input {
 }
 
 .cal-more {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  font: inherit;
   font-size: var(--fs-sm);
   color: var(--text-2);
   padding: 0 var(--u);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cal-more:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 
 .cal-details {
