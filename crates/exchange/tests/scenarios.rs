@@ -427,8 +427,6 @@ fn deux_milliers_de_contacts_synthetiques_sans_doublon() {
 }
 
 #[test]
-#[ignore = "ÉCART : le rappel d'une tâche n'est pas écrit dans `taches.ics` (pas de VALARM dans `thunderlook_items::vtodo::export`, hors \
-            périmètre) : le téléphone ne le voit pas. Le rappel n'est pas perdu côté ThunderLook (la comparaison ignore ce que le format ne porte pas)."]
 fn rappel_de_tache_exporte() {
     let mut w = world("rappel-tache");
     rich(&mut w);
