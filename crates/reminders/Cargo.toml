@@ -1,0 +1,13 @@
+[package]
+name = "thunderlook-reminders"
+version = "0.10.0"
+edition = "2024"
+publish = false
+description = "Rappels de ThunderLook : rendez-vous (par occurrence) et tâches à échéance, rappels reportés ou ignorés"
+
+[dependencies]
+thunderlook-store = { path = "../store" }
+thunderlook-calendar = { path = "../calendar" }
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

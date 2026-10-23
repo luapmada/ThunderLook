@@ -5073,6 +5073,7 @@ dependencies = [
  "thunderlook-items",
  "thunderlook-mailbox",
  "thunderlook-model",
+ "thunderlook-reminders",
  "thunderlook-store",
  "thunderlook-sync",
  "tokio",
@@ -5159,6 +5160,17 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "thunderlook-reminders"
+version = "0.10.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thunderlook-calendar",
+ "thunderlook-store",
 ]
 
 [[package]]
