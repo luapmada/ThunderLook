@@ -57,7 +57,35 @@ fn row(c: &Contact) -> ContactRow {
     } else {
         c.emails.first().map(|e| e.address.clone()).unwrap_or_default()
     };
-    ContactRow { id: format!("p{}", c.id), title, subtitle, initials: initials(c), letter }
+    let mut search: Vec<String> = vec![c.company.clone()];
+    search.extend(c.emails.iter().map(|e| e.address.clone()));
+    for (_, v) in &c.phones {
+        search.push(v.clone());
+        search.push(v.chars().filter(char::is_ascii_digit).collect());
+    }
+    let search = search.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n").to_lowercase();
+    ContactRow { id: format!("p{}", c.id), title, subtitle, initials: initials(c), letter, search, ..Default::default() }
+}
+
+/// Listes de distribution d'un dossier, en lignes `d<message>` (membres dans `members`), triées par nom.
+pub fn dist_rows(conn: &Connection, folder_id: i64) -> Result<Vec<ContactRow>> {
+    Ok(crate::distlist::find(conn, Some(folder_id))?
+        .into_iter()
+        .map(|f| {
+            let n = f.list.members.len();
+            let unresolved = if f.unresolved > 0 { format!(" ({} non résolu{})", f.unresolved, if f.unresolved > 1 { "s" } else { "" }) } else { String::new() };
+            ContactRow {
+                title: f.list.name.clone(),
+                subtitle: format!("{n} membre{}{unresolved}", if n > 1 { "s" } else { "" }),
+                initials: f.list.name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_default(),
+                search: f.list.members.iter().flat_map(|m| [m.name.as_str(), m.email.as_str()]).collect::<Vec<_>>().join("\n").to_lowercase(),
+                id: f.list.id,
+                kind: thunderlook_model::contacts::ContactRowKind::DistList,
+                members: f.list.members,
+                ..Default::default()
+            }
+        })
+        .collect())
 }
 
 /// Liste d'un dossier, triée.
@@ -137,5 +165,27 @@ pub fn card(c: &Contact, notes: Option<String>, photo: Option<String>) -> Contac
         sections,
         categories: c.categories.clone(),
         notes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Email;
+
+    #[test]
+    fn la_recherche_couvre_societe_courriel_telephone() {
+        let c = Contact {
+            id: 3,
+            surname: "Martin".into(),
+            company: "Affûtage Charentes".into(),
+            emails: vec![Email { address: "Lea@Exemple.fr".into(), display: String::new() }],
+            phones: vec![("Mobile", "06 12 34 56 78".into())],
+            ..Default::default()
+        };
+        let r = row(&c);
+        for needle in ["affûtage", "lea@exemple", "06 12 34", "0612345678"] {
+            assert!(r.search.contains(needle), "{needle} dans {:?}", r.search);
+        }
     }
 }

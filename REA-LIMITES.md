@@ -199,3 +199,25 @@ Non vérifié sur un blob réel (pas de fixture avec objet ou lieu d'exception) 
   recréer ou réclamer ce message à l'ouverture : à voir.
 - **Changement de périodicité** (`update_series`) : exceptions et suppressions abandonnées (comptées dans le retour).
   « Même périodicité » = fréquence, motif, période, fin et dates de début/fin identiques.
+
+## À vérifier avec REA/Outlook — contacts : photo, catégories, listes de distribution (`crates/contacts`, 23/10)
+
+Écrit et testé sous Linux sur des bases de test uniquement ; **aucune écriture dans Outlook, aucun PST réel relu**.
+
+- **`PidLidHasPicture` (named 0x8015) après suppression de la photo** : ThunderLook écrit « faux » (propriété conservée,
+  pas retirée). Je ne sais pas ce qu'Outlook écrit (faux, ou propriété absente). Sans effet à la lecture ici (absente =
+  faux ; la photo se lit dans le `.eml`). Si la source n'a pas la propriété dans sa table de noms, rien n'est écrit.
+- **Photo** : seul le JPEG est accepté (magic `FF D8 FF`), en formulaire comme en vCard (une PHOTO PNG ou une URL est
+  ignorée avec avertissement). Pas vérifié : qu'Outlook relise `ContactPicture.jpg` d'un `.eml` écrit par ThunderLook.
+- **Catégories** : écrites dans `Keywords` (jeu `PS_PUBLIC_STRINGS`), comme le calendrier ; couleurs/catégories maîtresses
+  d'Outlook non touchées. Vide → propriété retirée.
+- **Listes de distribution** (lecture seule, `distlist.rs`). Lu : `PidLidDistributionListName` (0x8053, sinon objet),
+  `…OneOffMembers` (0x8054) puis, à défaut, `…Members` (0x8055), tableaux `PtypMultipleBinary` (0x1102) ; seuls les
+  EntryID **one-off** ([MS-OXCDATA] 2.2.5.1 : fournisseur `812B1FA4-BEA3-1019-9D6E-00DD010F5402`, drapeau Unicode `0x8000`
+  après la version, puis nom, type, adresse) sont décodés. Vérifié seulement sur des EntryID fabriqués d'après le
+  document, **pas sur les 3 listes réelles**. Incertain :
+  - un EntryID de membre renvoyant à un contact ou une liste (autre fournisseur) n'est **pas résolu** : compté, affiché
+    « n non résolu(s) », jamais deviné ;
+  - si 0x8054 liste bien **tous** les membres (contacts compris) comme je le lis : non confirmé ;
+  - si l'import PST conserve les propriétés `PtypMultipleBinary` dans `message.props` (sinon la liste s'affiche vide) ;
+  - `PidLidDistributionListStream` (0x8064, ordre et noms de repli) non lu.

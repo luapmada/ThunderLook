@@ -3,6 +3,7 @@
 
 #[allow(dead_code)]
 mod textfmt;
+pub mod distlist;
 pub mod vcard;
 pub mod view;
 pub mod write;
@@ -381,6 +382,36 @@ pub fn day(ms: i64) -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+/// Listes de distribution (`IPM.DistList`) de la base : nom et membres lisibles (nom et adresse), lecture seule.
+pub fn dist_lists(conn: &Connection) -> Result<Vec<thunderlook_model::contacts::DistList>> {
+    Ok(distlist::find(conn, None)?.into_iter().map(|f| f.list).collect())
+}
+
+/// Octets d'une photo JPEG `data:image/jpeg;base64,…` (espaces et retours ignorés).
+pub fn photo_bytes(data_uri: &str) -> Result<Vec<u8>> {
+    use base64::Engine;
+    let (head, data) = data_uri.trim().strip_prefix("data:").and_then(|r| r.split_once(',')).ok_or("photo : adresse data: attendue")?;
+    if !head.to_ascii_lowercase().contains("base64") {
+        return Err("photo : l'encodage base64 est attendu".into());
+    }
+    let clean: String = data.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = base64::engine::general_purpose::STANDARD_NO_PAD.decode(clean.trim_end_matches('=')).map_err(|x| format!("photo : base64 invalide ({x})"))?;
+    if !is_jpeg(&bytes) {
+        return Err("La photo doit être une image JPEG.".into());
+    }
+    Ok(bytes)
+}
+
+pub fn is_jpeg(b: &[u8]) -> bool {
+    b.len() > 4 && b[..3] == [0xFF, 0xD8, 0xFF]
+}
+
+/// `data:image/jpeg;base64,…` d'octets JPEG.
+pub fn photo_uri(jpeg: &[u8]) -> String {
+    use base64::Engine;
+    format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpeg))
 }
 
 /// Notes (texte du `.eml`) et photo (pièce jointe `ContactPicture.jpg` : type MIME et octets) d'un contact.
