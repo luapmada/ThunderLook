@@ -190,4 +190,26 @@ mod tests {
         assert_eq!(parse("").unwrap().len(), 0);
         assert!(parse("n'importe quoi").is_err());
     }
+
+    #[test]
+    fn corps_long_lignes_vides_et_retours_chariot() {
+        let body = format!("Titre « été »\r\n\r\n\r\n{}\r\n\n\nFin : a=b ; 5 €", "Ligne très longue é è à œ ".repeat(60));
+        let items = vec![(note(&body), Meta { uid: Some("U1".into()), created: Some("20261001T080000".into()), modified: Some("20261022T101500Z".into()) })];
+        let out = export_with_meta(&items);
+        assert!(out.lines().all(|l| l.len() <= 76));
+        let p = parse(&out).unwrap();
+        assert!(p[0].warnings.is_empty());
+        // Les retours chariot sont normalisés en fin de ligne `\n` ; lignes vides et texte restent intacts.
+        assert_eq!(p[0].form.body, body.replace('\r', ""));
+        assert_eq!(p[0].meta, items[0].1);
+    }
+
+    #[test]
+    fn charset_sans_qp_et_dates_conservees() {
+        let txt = "BEGIN:VNOTE\r\nVERSION:1.1\r\nBODY;CHARSET=UTF-8:Idée\\n\\nsuite\r\nDCREATED:20260101T000000Z\r\nLAST-MODIFIED:20260102T030405Z\r\nEND:VNOTE\r\n";
+        let p = parse(txt).unwrap();
+        assert_eq!(p[0].form.body, "Idée\n\nsuite");
+        assert_eq!(p[0].meta.created.as_deref(), Some("20260101T000000Z"));
+        assert_eq!(p[0].meta.modified.as_deref(), Some("20260102T030405Z"));
+    }
 }
