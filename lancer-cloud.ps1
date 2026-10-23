@@ -1,11 +1,13 @@
-# Lance les lots cloud F à J, un par un, et ouvre l'onglet de suivi de chaque session.
+# Lance les lots cloud demandes (par defaut K a O), un par un, et ouvre l'onglet de suivi de chaque session.
+# Usage : .\lancer-cloud.ps1 [K L M N O]
+param([string[]]$Lots = @('K','L','M','N','O'))
 Set-Location $PSScriptRoot
 $urls = @()
 foreach ($l in $Lots) {
     Write-Host "== Lot $l" -ForegroundColor Cyan
     $log = Join-Path $env:TEMP "cloud-lot-$l.txt"
     Start-Transcript -Path $log -Force | Out-Null
-    claude --cloud "Sur main, lis notes/cloud/lot-$l.md et exécute-le."
+    claude --cloud "Sur main, lis notes/cloud/lot-$l.md et execute-le."
     Stop-Transcript | Out-Null
     $m = Select-String -Path $log -Pattern 'View:\s*(https://\S+)' | Select-Object -Last 1
     if ($m) {
@@ -17,4 +19,4 @@ foreach ($l in $Lots) {
     }
 }
 if ($urls.Count -lt $Lots.Count) { Start-Process "https://claude.ai/code" }
-Write-Host "Sessions lancées : $($urls.Count)/$($Lots.Count). Quand elles ont fini, dis à Claude : lots $($Lots -join ' ') terminés." -ForegroundColor Green
+Write-Host "Sessions lancees : $($urls.Count)/$($Lots.Count). Quand elles ont fini, dis a Claude : lots $($Lots -join ' ') termines." -ForegroundColor Green
