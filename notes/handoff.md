@@ -1,3 +1,12 @@
+# Passation — état au 2026-10-24 (nuit)
+
+## État du 24/10 (lire d'abord)
+- `main` = lots A à AH fusionnés (U à Z, AA à AH). 281 tests passent. Build OK ; `ui_check` complet non relancé après AD à AH (ThunderLook était ouvert chez Paul, instance unique). Cas qui échouent en enchaînement mais passent isolés : J5 (délai à froid) et « Clic droit » (dossier « Éléments envoyés » hérité).
+- **MPE / S20 FE** : le S20 est à 192.168.1.189 (débogage sans fil actif, port inconnu : adb ne le voit pas). Paul a synchronisé le S20 avec un faux rendez-vous « Testy » (24/10 01 h) : il est dans `Organizer.dat` du S20 et dans Outlook (profil MPE du S20 = `pop-original`), PAS dans ThunderLook : MPE n'écrit jamais dans ThunderLook. Cible « fichier » (vCard/iCal/vNote) de MPE non réglée : les valeurs de `SyncApp`/`usedSyncApp` ne sont nulle part sur le disque, les outils REA de pilotage natif sont macOS seulement ; réglage à faire dans l'interface de MPE (Paul). Dossier d'échange créé : `A:\AI_related\Claude_Code_Work\mpe-test\`. Paul ne veut PAS faire les démarches à notre place.
+- Lot AI (cloud, lancé 24/10) : « Importer depuis MPE » = lecture seule des `Phonebook.dat`/`Organizer.dat`/`Notes.dat` du dossier MPE (sens téléphone → ThunderLook). À fusionner à l'arrivée de la branche `lot-ai`.
+- Paul : tâches presque inutilisées (1 VTODO) ; synchronise contacts (2 139, bidirectionnel), rendez-vous (±90 j), notes (46, forcé téléphone → PC), appels, SMS, journaux. S23 = téléphone de fonctionnement : ne pas y toucher pour l'instant.
+- Piège adb : `A:\Android\ADBdb.exe` (PATH) ; ne pas utiliser celui de MPE. Ne jamais balayer 20 000 ports d'un coup (sockets saturés).
+
 # Passation — état au 2026-10-22 au soir (fin de contexte)
 
 ## À reprendre en premier
