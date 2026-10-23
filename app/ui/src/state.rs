@@ -240,6 +240,13 @@ pub struct Ui {
     pub note_form: RwSignal<Option<thunderlook_model::items::NoteForm>>,
     pub notes_epoch: RwSignal<u64>,
     pub contact_filter: RwSignal<String>,
+    /// Recherche globale : portée « Tout » choisie, résultats affichés, sélection à faire à l'arrivée dans un module.
+    pub search_all: RwSignal<bool>,
+    pub global: RwSignal<Option<crate::global_search::Results>>,
+    pub pending_open: RwSignal<Option<crate::global_search::Pending>>,
+    /// Rappels dus (barre d'état) et panneau ouvert.
+    pub reminders: RwSignal<Vec<crate::reminders::Reminder>>,
+    pub reminders_open: RwSignal<bool>,
     pub refs: Refs,
 }
 
@@ -306,6 +313,11 @@ impl Ui {
             note_form: RwSignal::new(None),
             notes_epoch: RwSignal::new(0),
             contact_filter: RwSignal::new(String::new()),
+            search_all: RwSignal::new(false),
+            global: RwSignal::new(None),
+            pending_open: RwSignal::new(None),
+            reminders: RwSignal::new(Vec::new()),
+            reminders_open: RwSignal::new(false),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),

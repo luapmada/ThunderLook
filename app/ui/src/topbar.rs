@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::{actions, icons::*, state::use_ui};
+use crate::{actions, global_search, icons::*, state::use_ui};
 
 /// Délai avant de lancer la recherche pendant la frappe.
 const DEBOUNCE_MS: u64 = 350;
@@ -12,7 +12,14 @@ pub fn TopBar() -> impl IntoView {
     let ui = use_ui();
     // Génération de frappe : seule la dernière déclenche la recherche.
     let typing = StoredValue::new(0u64);
-    let commit = move |text: String| ui.search_text.set(text.trim().to_string());
+    let commit = move |text: String| {
+        let text = text.trim().to_string();
+        if ui.search_all.get_untracked() {
+            global_search::run(ui, text);
+        } else {
+            ui.search_text.set(text);
+        }
+    };
     let on_input = move |ev: leptos::ev::Event| {
         let text = event_target_value(&ev);
         let generation = typing.get_value() + 1;
@@ -38,6 +45,7 @@ pub fn TopBar() -> impl IntoView {
                 s.set_value("");
             }
             ui.search_text.set(String::new());
+            global_search::close(ui);
             if let Some(l) = ui.refs.list.get_untracked() {
                 let _ = l.focus();
             }
@@ -72,6 +80,7 @@ pub fn TopBar() -> impl IntoView {
                     on:input=on_input
                     on:keydown=on_key
                 />
+                <global_search::ScopeMenu />
             </div>
             <div></div>
         </div>

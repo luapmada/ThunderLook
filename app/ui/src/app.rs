@@ -218,6 +218,8 @@ pub fn App() -> impl IntoView {
     contacts::watch(ui);
     crate::tasks::watch(ui);
     crate::notes::watch(ui);
+    crate::global_search::watch(ui);
+    crate::reminders::watch(ui);
 
     // Envoi et réception (J7) : barre d'état, puis liste et arborescence rafraîchies à la fin d'un passage.
     ipc::on_sync(move |e| {
@@ -488,6 +490,8 @@ pub fn App() -> impl IntoView {
             <crate::tasks::TaskDialog />
             <crate::notes::NoteDialog />
             <JunkOptionsDialog />
+            <crate::global_search::GlobalSearchPanel />
+            <crate::reminders::RemindersPanel />
         </div>
     }
 }

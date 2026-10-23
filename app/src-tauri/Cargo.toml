@@ -27,6 +27,7 @@ thunderlook-calendar = { path = "../../crates/calendar" }
 thunderlook-contacts = { path = "../../crates/contacts" }
 thunderlook-items = { path = "../../crates/items" }
 thunderlook-reminders = { path = "../../crates/reminders" }
+thunderlook-search = { path = "../../crates/search" }
 base64 = "0.22.1"
 tokio = { version = "1", features = ["rt"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }

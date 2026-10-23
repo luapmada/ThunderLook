@@ -630,3 +630,55 @@ pub fn on_open_item(f: impl Fn(OpenItem) + 'static) {
 pub async fn perf_mark(label: &str, ms: f64) {
     let _ = call::<_, ()>("perf_mark", &PerfArg { label, ms }).await;
 }
+
+#[derive(Serialize)]
+struct TextArg<'a> {
+    text: &'a str,
+}
+
+/// Recherche globale (rendez-vous, contacts, tâches, notes).
+pub async fn global_search(text: &str) -> Result<Vec<crate::global_search::Hit>, String> {
+    call("global_search", &TextArg { text }).await
+}
+
+pub async fn reminders_due() -> Result<Vec<crate::reminders::Reminder>, String> {
+    call("reminders_due", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct ReminderIdArg<'a> {
+    id: &'a str,
+}
+
+pub async fn reminder_dismiss(id: &str) -> Result<(), String> {
+    call("reminder_dismiss", &ReminderIdArg { id }).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SnoozeArg<'a> {
+    id: &'a str,
+    until_ms: i64,
+}
+
+pub async fn reminder_snooze(id: &str, until_ms: i64) -> Result<(), String> {
+    call("reminder_snooze", &SnoozeArg { id, until_ms }).await
+}
+
+#[derive(serde::Deserialize)]
+struct RemindersEnvelope {
+    payload: Vec<crate::reminders::Reminder>,
+}
+
+/// Suit l'événement « reminders-due » du cœur (rappels échus pas encore signalés).
+pub fn on_reminders_due(f: impl Fn(Vec<crate::reminders::Reminder>) + 'static) {
+    let handler = Closure::<dyn FnMut(JsValue)>::new(move |v: JsValue| {
+        if let Ok(e) = serde_wasm_bindgen::from_value::<RemindersEnvelope>(v) {
+            f(e.payload);
+        }
+    });
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = tauri_listen("reminders-due", &handler).await;
+        handler.forget();
+    });
+}
