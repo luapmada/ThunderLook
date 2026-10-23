@@ -6,6 +6,7 @@
 mod calendar_cmds;
 mod contacts_cmds;
 mod exchange_cmds;
+mod from_mail_cmds;
 mod items_cmds;
 mod mail_cmds;
 mod options_cmds;
@@ -1549,6 +1550,10 @@ pub fn run() {
             open_attachment,
             save_attachment,
             mail_cmds::save_all_attachments,
+            from_mail_cmds::from_mail_appointment,
+            from_mail_cmds::from_mail_task,
+            from_mail_cmds::from_mail_note,
+            from_mail_cmds::from_mail_contact,
             load_settings,
             save_settings,
             load_quick_steps,

@@ -768,3 +768,28 @@ pub async fn backup_restore(name: &str, mode: &str) -> Result<String, String> {
 pub async fn backups_open_folder() -> Result<(), String> {
     call("backups_open_folder", &NoArgs {}).await
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FromMailAppointmentArg<'a> {
+    id: &'a str,
+    calendar_id: &'a str,
+}
+
+/// Rendez-vous pré-rempli d'après un message (rien n'est écrit avant l'enregistrement).
+pub async fn from_mail_appointment(id: &str, calendar_id: &str) -> Result<AppointmentForm, String> {
+    call("from_mail_appointment", &FromMailAppointmentArg { id, calendar_id }).await
+}
+
+pub async fn from_mail_task(id: &str) -> Result<thunderlook_model::items::TaskForm, String> {
+    call("from_mail_task", &IdArg { id }).await
+}
+
+pub async fn from_mail_note(id: &str) -> Result<thunderlook_model::items::NoteForm, String> {
+    call("from_mail_note", &IdArg { id }).await
+}
+
+/// Contact de l'expéditeur : le contact existant de même adresse, sinon un nouveau pré-rempli.
+pub async fn from_mail_contact(id: &str) -> Result<thunderlook_model::contacts::ContactForm, String> {
+    call("from_mail_contact", &IdArg { id }).await
+}

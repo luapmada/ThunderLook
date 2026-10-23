@@ -26,7 +26,7 @@ const BUSY: [(i32, &str); 5] = [(0, "Disponible"), (4, "Travail ailleurs"), (1, 
 
 /// Calendrier commun où créer : celui du rendez-vous sélectionné s'il l'est, sinon le calendrier par défaut d'Outlook,
 /// sinon le premier affiché.
-fn target_calendar(ui: Ui) -> Option<String> {
+pub(crate) fn target_calendar(ui: Ui) -> Option<String> {
     ui.cal_view.with_untracked(|v| {
         let v = v.as_ref()?;
         let selected = ui.cal_selected.with_untracked(|s| s.as_ref().map(|e| e.calendar_id.clone()));

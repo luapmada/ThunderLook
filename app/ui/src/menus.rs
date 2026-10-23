@@ -165,7 +165,7 @@ pub fn junk_entries(ui: Ui) -> Vec<MenuEntry> {
 }
 
 pub fn message_context(ui: Ui) -> Vec<MenuEntry> {
-    vec![
+    let mut v = vec![
         MenuEntry::action("Répondre", move || actions::compose(ui, ComposeKind::Reply)),
         MenuEntry::action("Répondre à tous", move || actions::compose(ui, ComposeKind::ReplyAll)),
         MenuEntry::action("Transférer", move || actions::compose(ui, ComposeKind::Forward)),
@@ -180,7 +180,11 @@ pub fn message_context(ui: Ui) -> Vec<MenuEntry> {
         MenuEntry::action("Archiver", move || actions::run(ui, MessageOp::Archive)),
         MenuEntry::action("Supprimer", move || actions::delete(ui, false)).separated(),
         MenuEntry::action("Supprimer définitivement", move || actions::delete(ui, true)),
-    ]
+    ];
+    // « Créer un rendez-vous / une tâche / une note / un contact » : après « Actions rapides ».
+    let at = v.iter().position(|e| e.label == "Actions rapides").map_or(v.len(), |i| i + 1);
+    v.splice(at..at, crate::from_mail::entries(ui));
+    v
 }
 
 /// Sous-menu « Règles » d'Outlook : créer une règle d'après le message, ou gérer les règles.
@@ -196,6 +200,7 @@ fn quick_step_entries(ui: Ui) -> Vec<MenuEntry> {
     let mut v: Vec<MenuEntry> =
         steps.iter().enumerate().map(|(i, s)| MenuEntry::action(crate::quicksteps::step_label(s), move || crate::quicksteps::run(ui, i))).collect();
     v.push(MenuEntry::action("Gérer les actions rapides…", move || ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false }))).separated());
+    v.extend(crate::from_mail::entries(ui));
     v
 }
 

@@ -14,6 +14,7 @@ mod create_rule;
 mod dialogs;
 mod exchange;
 mod folders;
+mod from_mail;
 mod global_search;
 mod icons;
 mod junk;

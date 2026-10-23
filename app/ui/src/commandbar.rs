@@ -207,6 +207,7 @@ fn menu_entries(ui: Ui, action: Action) -> Vec<MenuEntry> {
                 steps.iter().enumerate().map(|(i, s)| MenuEntry::action(crate::quicksteps::step_label(s), move || crate::quicksteps::run(ui, i))).collect();
             v.push(MenuEntry::action("Créer une action rapide…", move || ui.dialog.set(Some(Dialog::QuickSteps { edit: Some(n), first_use: false }))).separated());
             v.push(MenuEntry::action("Gérer les actions rapides…", move || ui.dialog.set(Some(Dialog::QuickSteps { edit: None, first_use: false }))));
+            v.extend(crate::from_mail::entries(ui));
             v
         }
         Action::NewItemsMenu => vec![

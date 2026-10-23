@@ -5073,6 +5073,7 @@ dependencies = [
  "thunderlook-exchange",
  "thunderlook-items",
  "thunderlook-mailbox",
+ "thunderlook-mime",
  "thunderlook-model",
  "thunderlook-reminders",
  "thunderlook-safety",
