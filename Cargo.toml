@@ -1,9 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["app/src-tauri", "app/ui", "crates/model", "crates/mime", "crates/store", "crates/import-pst", "crates/mailbox", "crates/rules", "crates/sync", "crates/calendar", "crates/contacts", "crates/items", "crates/reminders"]
-default-members = ["app/src-tauri", "crates/model", "crates/mime", "crates/store", "crates/import-pst", "crates/mailbox", "crates/rules", "crates/sync", "crates/calendar", "crates/contacts", "crates/items", "crates/reminders"]
-members = ["app/src-tauri", "app/ui", "crates/model", "crates/mime", "crates/store", "crates/import-pst", "crates/mailbox", "crates/rules", "crates/sync", "crates/calendar", "crates/contacts", "crates/items", "crates/search"]
-default-members = ["app/src-tauri", "crates/model", "crates/mime", "crates/store", "crates/import-pst", "crates/mailbox", "crates/rules", "crates/sync", "crates/calendar", "crates/contacts", "crates/items", "crates/search"]
+members = ["app/src-tauri", "app/ui", "crates/model", "crates/mime", "crates/store", "crates/import-pst", "crates/mailbox", "crates/rules", "crates/sync", "crates/calendar", "crates/contacts", "crates/items", "crates/reminders", "crates/search"]
+default-members = ["app/src-tauri", "crates/model", "crates/mime", "crates/store", "crates/import-pst", "crates/mailbox", "crates/rules", "crates/sync", "crates/calendar", "crates/contacts", "crates/items", "crates/reminders", "crates/search"]
 exclude = ["tools/pst-probe", "vendor/outlook-pst"]
 
 [profile.release]
