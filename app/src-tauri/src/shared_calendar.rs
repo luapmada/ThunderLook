@@ -232,7 +232,3 @@ pub fn appointment_delete(app: AppHandle, id: String, series: bool) -> Result<St
         _ => done(&app, thunderlook_calendar::write::delete(&mut conn, n), "Rendez-vous supprimé"),
     }
 }
-
-/// Demande de l'interface à l'ouverture du calendrier (ancienne synchronisation avec Outlook) : rien à faire.
-#[tauri::command(async)]
-pub fn outlook_sync(_app: AppHandle) {}

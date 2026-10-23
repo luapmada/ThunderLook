@@ -1570,7 +1570,6 @@ pub fn run() {
             shared_calendar::appointment_form,
             shared_calendar::appointment_save,
             shared_calendar::appointment_delete,
-            shared_calendar::outlook_sync,
             calendar_cmds::appointment_shift,
             reminders_cmds::reminders_due,
             reminders_cmds::reminder_dismiss,
