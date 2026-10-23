@@ -30,6 +30,7 @@ thunderlook-reminders = { path = "../../crates/reminders" }
 thunderlook-search = { path = "../../crates/search" }
 thunderlook-exchange = { path = "../../crates/exchange" }
 thunderlook-safety = { path = "../../crates/safety" }
+thunderlook-folders = { path = "../../crates/folders" }
 base64 = "0.22.1"
 tokio = { version = "1", features = ["rt"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }

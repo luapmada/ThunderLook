@@ -7,6 +7,7 @@ use wasm_bindgen::JsCast;
 
 use crate::{
     ipc,
+    item_folders::{FolderHost, FolderKind, FolderPicker, FolderUi},
     tasks::call,
     state::{Module, Ui, use_ui},
 };
@@ -84,6 +85,8 @@ pub fn NotesPane() -> impl IntoView {
     let ui = use_ui();
     let selected = RwSignal::new(None::<String>);
     let (text, sort, shown) = (RwSignal::new(String::new()), RwSignal::new("recent".to_string()), RwSignal::new(None::<NoteList>));
+    let (fu, folder) = (FolderUi::new(FolderKind::Note), RwSignal::new(String::new()));
+    fu.refresh();
     // Recherche dans le texte entier et tri calculés par le cœur (`notes_query`), rechargés après chaque modification.
     Effect::new(move |_| {
         ui.notes_epoch.track();
@@ -104,7 +107,14 @@ pub fn NotesPane() -> impl IntoView {
     });
     view! {
         <section class="pane notes" aria-label="Notes">
+            <FolderHost f=fu on_change=move |()| {
+                if !fu.list.with_untracked(|l| l.iter().any(|d| d.id == folder.get_untracked())) {
+                    folder.set(String::new());
+                }
+                changed(ui);
+            } />
             <div class="task-views">
+                <FolderPicker f=fu value=folder on_pick=move |v| folder.set(v) all_label="Tous les dossiers" />
                 <input type="search" placeholder="Rechercher dans les notes" aria-label="Rechercher dans les notes"
                     prop:value=move || text.get() on:input=move |ev| text.set(event_target_value(&ev)) />
                 <select aria-label="Trier par" on:change=move |ev| sort.set(event_target_value(&ev))>
@@ -115,7 +125,8 @@ pub fn NotesPane() -> impl IntoView {
             {move || match shown.with(Option::is_none) {
                 true => view! { <div class="placeholder">"Chargement des notes…"</div> }.into_any(),
                 false => {
-                    let rows = shown.with(|l| l.as_ref().map(|l| l.rows.clone()).unwrap_or_default());
+                    let wanted = folder.get();
+                    let rows = shown.with(|l| l.as_ref().map(|l| l.rows.iter().filter(|r| wanted.is_empty() || r.folder == wanted).cloned().collect::<Vec<_>>()).unwrap_or_default());
                     if rows.is_empty() {
                         return view! { <div class="placeholder">"Aucune note."</div> }.into_any();
                     }
@@ -156,6 +167,7 @@ pub fn NoteDialog() -> impl IntoView {
     let root: NodeRef<html::Div> = NodeRef::new();
     let busy = RwSignal::new(false);
     let note = RwSignal::new(None::<String>);
+    let fu = FolderUi::new(FolderKind::Note);
     let form = move || ui.note_form.get();
     let set = move |f: &dyn Fn(&mut NoteForm)| {
         ui.note_form.update(|c| {
@@ -167,6 +179,7 @@ pub fn NoteDialog() -> impl IntoView {
     Effect::new(move |_| {
         if ui.note_form.with(Option::is_some) {
             note.set(None);
+            fu.refresh();
             request_animation_frame(move || {
                 if let Some(r) = root.get_untracked() {
                     if let Ok(Some(el)) = r.query_selector("textarea") {
@@ -214,20 +227,11 @@ pub fn NoteDialog() -> impl IntoView {
                         _ => {}
                     }>
                     <h2 id="note-title">{move || if form().is_some_and(|f| f.id.is_some()) { "Note" } else { "Nouvelle note" }}</h2>
-                    <Show when=move || form().is_some_and(|f| f.id.is_none()) && ui.notes.with(|l| l.as_ref().is_some_and(|l| l.folders.len() > 1))>
+                    <Show when=move || form().is_some_and(|f| f.id.is_none())>
                         <label class="field">
                             <span>"Dossier"</span>
-                            <select aria-label="Dossier" on:change=move |ev| { let v = event_target_value(&ev); set(&|f| f.folder_id = v.clone()); }>
-                                {move || {
-                                    ui.notes.with(|l| l.as_ref().map(|l| l.folders.clone()).unwrap_or_default())
-                                        .into_iter()
-                                        .map(|d| {
-                                            let id = d.id.clone();
-                                            view! { <option value=d.id.clone() selected=move || form().is_some_and(|f| f.folder_id == id)>{format!("{} — {}", d.section, d.name)}</option> }
-                                        })
-                                        .collect_view()
-                                }}
-                            </select>
+                            <FolderPicker f=fu value=Signal::derive(move || form().map(|f| f.folder_id).unwrap_or_default())
+                                on_pick=move |v: String| set(&|f| f.folder_id = v.clone()) />
                         </label>
                     </Show>
                     <label class="field">
@@ -249,5 +253,6 @@ pub fn NoteDialog() -> impl IntoView {
                 </div>
             </div>
         </Show>
+        <FolderHost f=fu on_change=move |()| changed(ui) />
     }
 }

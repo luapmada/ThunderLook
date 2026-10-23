@@ -6,6 +6,7 @@
 mod calendar_cmds;
 mod contacts_cmds;
 mod exchange_cmds;
+mod folders_cmds;
 mod items_cmds;
 mod mail_cmds;
 mod options_cmds;
@@ -975,6 +976,11 @@ fn all_calendars(app: &AppHandle, conn: &thunderlook_store::rusqlite::Connection
     let shown = shown_calendars(app).unwrap_or_else(|| thunderlook_calendar::view::default_shown(&calendars));
     calendars.iter_mut().for_each(|c| c.shown = shown.contains(&c.id));
     shared_calendar::mark_shared(app, conn, &mut calendars);
+    for (id, c) in thunderlook_folders::colors(dir) {
+        if let Some(cal) = calendars.iter_mut().find(|k| k.id == id) {
+            cal.color = folders_cmds::CUSTOM_COLOR_BASE + c;
+        }
+    }
     Ok(calendars)
 }
 
@@ -1602,7 +1608,12 @@ pub fn run() {
             safety_cmds::backups_list,
             safety_cmds::backup_now,
             safety_cmds::backup_restore,
-            safety_cmds::backups_open_folder
+            safety_cmds::backups_open_folder,
+            folders_cmds::item_folders,
+            folders_cmds::item_folder_create,
+            folders_cmds::item_folder_rename,
+            folders_cmds::item_folder_delete,
+            folders_cmds::calendar_folder_color
         ])
         .run(tauri::generate_context!())
         .expect("échec du démarrage de ThunderLook");

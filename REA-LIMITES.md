@@ -299,3 +299,14 @@ Non compilé au-delà de `cargo check` (wasm) ; **jamais vu à l'écran ni à l'
 - Annulation : pile en mémoire (perdue à la fermeture) ; les instantanés restent 60 jours dans `data_dir/trash/` et se remettent via `thunderlook_safety::restore` (pas d'écran pour l'instant).
 - Non vérifié : la création d'un élément n'est pas annulable (périmètre : suppressions et modifications). Une suppression faite par « Échange avec le téléphone » (annuler l'import) passe aussi par la corbeille interne.
 - Non compilé ici : `app/src-tauri` (bibliothèques GTK absentes sous Linux cloud). L'interface (`app/ui`) compile pour `wasm32-unknown-unknown`.
+
+## À vérifier avec REA/Outlook — dossiers de calendriers, contacts, tâches, notes (`crates/folders`, 23/10)
+
+Testé sous Linux sur une base fabriquée uniquement ; **aucune écriture dans Outlook, aucun PST réel touché**.
+- Les nouveaux dossiers (NID ≥ 0x7000_0000, classe `IPF.Appointment` / `IPF.Contact` / `IPF.Task` / `IPF.StickyNote`) vivent
+  dans la base ThunderLook : on ne sait pas comment Outlook réagit s'il relit un jour ce fichier (non vérifié).
+- Menu clic droit d'un calendrier : libellés (Nouveau calendrier, Renommer, Couleur ›, Supprimer) repris du cahier des charges ;
+  le menu réel d'Outlook sur le navigateur de calendriers n'a pas été relevé.
+- Couleurs : les 25 couleurs de la palette des catégories ; Outlook n'en propose que 9 + Automatique pour un calendrier.
+- Nom unique comparé sans casse sur tout le fichier de données, pas seulement parmi les dossiers de même parent : règle plus
+  stricte que celle d'Outlook (non vérifiée).
