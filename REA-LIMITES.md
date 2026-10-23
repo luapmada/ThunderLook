@@ -351,3 +351,13 @@ complète (exceptions et dates supprimées) : même format que `update_series`, 
   rappel ou des catégories **retirés** sur le téléphone ne sont donc pas retirés dans ThunderLook.
 - Annuler un import qui a modifié une série la rétablit depuis son export `.ics` : les champs que l'export ne porte
   pas (disponibilité / rappel propres à une occurrence modifiée) ne sont pas rétablis.
+
+## À vérifier avec le S20 FE / MPE — vCalendar 1.0 (`crates/exchange/src/vcal10.rs`, lot AE)
+Lu d'après la description de `Organizer.dat` (docs/mpe-fichiers.md § 1.5) et des échantillons synthétiques ; **aucun fichier réel de MPE n'a été lu**.
+- **Journée entière** : lue si `DTSTART`/`DTEND` sont des dates seules (`DTEND` égal ou antérieur au début = un jour). Si MPE écrit une journée entière en UTC (`…T220000Z`→`…T220000Z`), elle est lue comme un rendez-vous de 24 h ou de 0 h, pas comme une journée entière. `DTEND` de plusieurs jours : lu exclusif (norme iCal 2.0) ; en 1.0 il est peut-être inclusif (un jour de trop ou de moins).
+- **Heures sans `Z`** : lues en heure de Paris ; `TZ:`/`DAYLIGHT:` du fichier ne sont pas appliqués (avertissement).
+- **Séries en UTC sans fin** (`W1 TU #0`) : refusées par le lecteur de séries (répétition à heure locale fixe, changement d'heure) ; avec fin avant le changement d'heure, acceptées.
+- **Règles** : `D`, `W`, `MD`, `MP`, `YM`, `YD` (jour du début seulement). Refusés avec avertissement : plusieurs règles, `RDATE`, `EXRULE`, `MP` avec rang 2- à 4-/plusieurs jours, `MD` à plusieurs jours, jours 29-31. Sans fin explicite, 1.0 compte 2 occurrences (appliqué).
+- **Rappel** : seul le premier `AALARM`/`DALARM`/`PALARM`/`MALARM` est lu, en minutes avant le début ; répétition/sonnerie ignorées. Rappel en repère différent du début (UTC/local) ou après le début : non importé, avec avertissement.
+- **Écartés** : `ATTENDEE` (signalé), tâches `VTODO` du calendrier (signalées ; elles se lisent dans `taches.ics`), propriétés `X-*` autres que les identifiants. Identifiant retenu : `UID`, sinon `X-OUTLOOK-UID`, sinon `X-IRMC-LUID`.
+- **Photos de contacts** : le lecteur de vCard 2.1 lit `PHOTO;ENCODING=BASE64` (JPEG) mais l'import d'échange ne reprend jamais les photos (comportement existant, `norm_contact`).

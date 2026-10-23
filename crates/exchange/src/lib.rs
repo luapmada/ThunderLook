@@ -13,6 +13,7 @@
 mod conflict;
 mod import;
 mod sha256;
+pub mod vcal10;
 
 use std::{
     collections::HashMap,

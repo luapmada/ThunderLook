@@ -456,6 +456,16 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
         }
     }
     let mut m = Matcher::new(exs, ctx.map.clone());
+    // vCalendar 1.0 (MPE) : converti en iCalendar 2.0 ; les refus et pertes sont des avertissements.
+    let converted;
+    let text = if crate::vcal10::is_vcal10(text) {
+        let c = crate::vcal10::to_ical(text);
+        rep.warnings.extend(c.warnings.iter().map(|w| format!("{} : vCalendar 1.0, {w}", crate::CALENDAR_FILE)));
+        converted = c.ics;
+        converted.as_str()
+    } else {
+        text
+    };
     let split = ics_series::split(text);
     let (_, phone) = thunderlook_calendar::ics::parse(&split.rest, 0, 0)?;
     for (n, a) in phone.iter().enumerate() {
