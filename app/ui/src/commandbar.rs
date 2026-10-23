@@ -83,6 +83,7 @@ pub enum Action {
     TaskDelete,
     NoteNew,
     NoteDelete,
+    Exchange(&'static str, bool),
 }
 
 impl Action {
@@ -162,6 +163,7 @@ fn perform(ui: Ui, action: Action) {
         Action::TaskComplete => crate::tasks::toggle_selected(ui),
         Action::TaskDelete => crate::tasks::delete_selected(ui),
         Action::NoteNew => crate::notes::open_new(ui),
+        Action::Exchange(kind, import) => crate::contact_form::exchange(ui, kind, import),
         Action::NoteDelete => crate::notes::delete_selected(ui),
         Action::ContactDelete => {
             if let Some(id) = ui.contact_selected.get_untracked() {
@@ -491,6 +493,10 @@ const CALENDAR_HOME: &[Group] = &[
 const CONTACTS_HOME: &[Group] = &[
     Group { label: "Nouveau", cmds: &[wired("Nouveau contact", PLUS, Some("Ctrl+N"), true, true, Action::ContactNew)] },
     Group { label: "Supprimer", cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::ContactDelete)] },
+    Group {
+        label: "Téléphone",
+        cmds: &[wired("Importer (.vcf)", DOWNLOAD, None, true, true, Action::Exchange("contacts", true)), wired("Exporter (.vcf)", DOWNLOAD, None, true, true, Action::Exchange("contacts", false))],
+    },
     Group { label: "Communiquer", cmds: &[cmd("Nouveau message", MAIL_PLUS, None, false, true, true)] },
     Group { label: "Indicateurs", cmds: &[cmd("Catégories", TAGS, None, true, true, false), cmd("Suivi", FLAG, None, true, true, false)] },
 ];
@@ -504,11 +510,19 @@ const TASKS_HOME: &[Group] = &[
             wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::TaskDelete),
         ],
     },
+    Group {
+        label: "Téléphone",
+        cmds: &[wired("Importer (.ics)", DOWNLOAD, None, true, true, Action::Exchange("tasks", true)), wired("Exporter (.ics)", DOWNLOAD, None, true, true, Action::Exchange("tasks", false))],
+    },
 ];
 
 const NOTES_HOME: &[Group] = &[
     Group { label: "Nouveau", cmds: &[wired("Nouvelle note", STICKY_NOTE, Some("Ctrl+N"), true, true, Action::NoteNew)] },
     Group { label: "Gérer", cmds: &[wired("Supprimer", TRASH, Some("Suppr"), true, true, Action::NoteDelete)] },
+    Group {
+        label: "Téléphone",
+        cmds: &[wired("Importer (.vnt)", DOWNLOAD, None, true, true, Action::Exchange("notes", true)), wired("Exporter (.vnt)", DOWNLOAD, None, true, true, Action::Exchange("notes", false))],
+    },
 ];
 
 pub fn groups(module: Module, tab: Tab) -> &'static [Group] {

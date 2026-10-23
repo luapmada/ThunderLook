@@ -286,6 +286,20 @@ pub async fn note_delete(id: &str) -> Result<(), String> {
     call("note_delete", &IdArg { id }).await
 }
 
+#[derive(Serialize)]
+struct ExchangeArg<'a> {
+    kind: &'a str,
+    folder: Option<&'a str>,
+}
+
+pub async fn exchange_export(kind: &str, folder: Option<&str>) -> Result<Option<String>, String> {
+    call("exchange_export", &ExchangeArg { kind, folder }).await
+}
+
+pub async fn exchange_import(kind: &str, folder: Option<&str>) -> Result<Option<String>, String> {
+    call("exchange_import", &ExchangeArg { kind, folder }).await
+}
+
 pub async fn contact_folders() -> Result<Vec<ContactFolder>, String> {
     call("contact_folders", &NoArgs {}).await
 }

@@ -171,3 +171,21 @@ pub fn ContactDialog() -> impl IntoView {
         </Show>
     }
 }
+
+/// Échange avec le téléphone par fichiers : exporte ou importe les contacts du dossier affiché, les tâches ou les notes.
+pub fn exchange(ui: Ui, kind: &'static str, import: bool) {
+    let folder = ui.contact_folder.get_untracked();
+    spawn_local(async move {
+        let folder = (kind == "contacts").then_some(folder.as_str());
+        let r = if import { ipc::exchange_import(kind, folder).await } else { ipc::exchange_export(kind, folder).await };
+        match r {
+            Ok(Some(m)) => {
+                ui.status.set(Some(m));
+                ui.tasks_epoch.update(|e| *e += 1);
+                ui.notes_epoch.update(|e| *e += 1);
+            }
+            Ok(None) => {}
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}

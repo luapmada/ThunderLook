@@ -29,12 +29,17 @@ fn join(parts: &[&str], sep: &str) -> String {
 /// Formulaire d'un contact existant (`p<message>`), avec ses notes.
 pub fn form_of(conn: &Connection, data_dir: &Path, id: i64) -> Result<ContactForm> {
     let all = load(conn, None, Some(id))?;
-    let c: &Contact = all.contacts.first().ok_or("contact introuvable")?;
+    Ok(form_from(all.contacts.first().ok_or("contact introuvable")?, data_dir))
+}
+
+/// Formulaire d'un contact déjà lu (export en série : un seul chargement pour tout le dossier).
+pub fn form_from(c: &Contact, data_dir: &Path) -> ContactForm {
+    let id = c.id;
     let (notes, _) = extras(c, data_dir);
     let phone = |label: &str| c.phones.iter().find(|(l, _)| *l == label).map(|(_, v)| v.clone()).unwrap_or_default();
     let email = |i: usize| c.emails.get(i).map(|m| m.address.clone()).unwrap_or_default();
     let (y, m, d) = c.birthday_ms.map(crate::day).unwrap_or((0, 0, 0));
-    Ok(ContactForm {
+    ContactForm {
         id: Some(format!("p{id}")),
         folder_id: format!("k{}", c.folder_id),
         given_name: c.given_name.clone(),
@@ -59,7 +64,7 @@ pub fn form_of(conn: &Connection, data_dir: &Path, id: i64) -> Result<ContactFor
         web_page: c.web_page.clone(),
         birthday: if y > 0 { format!("{y:04}-{m:02}-{d:02}") } else { String::new() },
         notes: notes.unwrap_or_default(),
-    })
+    }
 }
 
 fn named_of(conn: &Connection, source_id: i64) -> Result<Named> {

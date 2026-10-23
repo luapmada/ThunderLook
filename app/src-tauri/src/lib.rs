@@ -1088,6 +1088,119 @@ fn note_delete(app: AppHandle, id: String) -> Result<(), String> {
     thunderlook_items::note_delete(&mut conn, note_num(&id)?)
 }
 
+/// Échange avec le téléphone par fichiers : exporte (`.vcf`, `.ics` de tâches, `.vnt`) tous les contacts du dossier affiché,
+/// toutes les tâches ou toutes les notes. `None` si l'utilisateur annule.
+#[tauri::command(async)]
+fn exchange_export(app: AppHandle, kind: String, folder: Option<String>) -> Result<Option<String>, String> {
+    let dir = data_dir(&app)?;
+    let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    let (text, count, ext, filter, name) = match kind.as_str() {
+        "contacts" => {
+            let folder: i64 = folder.as_deref().and_then(|f| f.strip_prefix('k')).and_then(|f| f.parse().ok()).ok_or("choisissez un dossier de contacts")?;
+            let all = thunderlook_contacts::load(&conn, Some(folder), None)?;
+            let forms: Vec<_> = all.contacts.iter().map(|c| thunderlook_contacts::write::form_from(c, &dir)).collect();
+            (thunderlook_contacts::vcard::export(&forms, thunderlook_contacts::vcard::Version::V30), forms.len(), "vcf", "vCard", "contacts")
+        }
+        "tasks" => {
+            let list = thunderlook_items::tasks(&conn)?;
+            let forms: Vec<_> = list.rows.iter().filter_map(|r| r.id.strip_prefix('t').and_then(|n| n.parse().ok())).map(|n| thunderlook_items::task_form(&conn, &dir, n)).collect::<Result<_, _>>()?;
+            (thunderlook_items::vtodo::export(&forms), forms.len(), "ics", "Tâches (iCalendar)", "taches")
+        }
+        "notes" => {
+            let list = thunderlook_items::notes(&conn, &dir)?;
+            let forms: Vec<_> = list.rows.iter().filter_map(|r| r.id.strip_prefix('n').and_then(|n| n.parse().ok())).map(|n| thunderlook_items::note_form(&conn, &dir, n)).collect::<Result<_, _>>()?;
+            (thunderlook_items::vnote::export(&forms), forms.len(), "vnt", "Notes (vNote)", "notes")
+        }
+        _ => return Err("type d'échange inconnu".into()),
+    };
+    let Some(target) = app.dialog().file().add_filter(filter, &[ext]).set_file_name(format!("{name}.{ext}")).blocking_save_file() else { return Ok(None) };
+    let path = target.into_path().map_err(|e| e.to_string())?;
+    fs::write(&path, text).map_err(|e| format!("{} : {e}", path.display()))?;
+    Ok(Some(format!("{count} élément(s) exporté(s) dans {}", path.display())))
+}
+
+/// Importe un fichier du téléphone dans la base : les éléments déjà présents (même nom et même adresse, même objet) sont
+/// ignorés. `None` si l'utilisateur annule.
+#[tauri::command(async)]
+fn exchange_import(app: AppHandle, kind: String, folder: Option<String>) -> Result<Option<String>, String> {
+    let (filter, exts): (&str, &[&str]) = match kind.as_str() {
+        "contacts" => ("vCard", &["vcf"]),
+        "tasks" => ("Tâches (iCalendar)", &["ics"]),
+        "notes" => ("Notes (vNote)", &["vnt", "vnote"]),
+        _ => return Err("type d'échange inconnu".into()),
+    };
+    let Some(file) = app.dialog().file().add_filter(filter, exts).blocking_pick_file() else { return Ok(None) };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    let bytes = fs::read(&path).map_err(|e| format!("{} : {e}", path.display()))?;
+    let text = String::from_utf8(bytes.clone()).unwrap_or_else(|_| bytes.iter().map(|&b| b as char).collect());
+    let (dir, mut conn) = items_conn(&app)?;
+    let (mut added, mut skipped, mut warnings) = (0usize, 0usize, 0usize);
+    match kind.as_str() {
+        "contacts" => {
+            let folder_id = folder.filter(|f| !f.is_empty()).ok_or("choisissez un dossier de contacts")?;
+            let k: i64 = folder_id.strip_prefix('k').and_then(|f| f.parse().ok()).ok_or("dossier inconnu")?;
+            let existing = thunderlook_contacts::load(&conn, Some(k), None)?;
+            let key = |g: &str, s: &str, m: &str| format!("{}|{}|{}", g.trim().to_lowercase(), s.trim().to_lowercase(), m.trim().to_lowercase());
+            let mut seen: std::collections::HashSet<String> = existing.contacts.iter().map(|c| key(&c.given_name, &c.surname, c.emails.first().map_or("", |e| e.address.as_str()))).collect();
+            for p in thunderlook_contacts::vcard::parse(&text)? {
+                warnings += p.warnings.len();
+                let mut f = p.form;
+                if f == thunderlook_model::contacts::ContactForm::default() {
+                    continue;
+                }
+                if !seen.insert(key(&f.given_name, &f.surname, &f.email1)) {
+                    skipped += 1;
+                    continue;
+                }
+                f.id = None;
+                f.folder_id = folder_id.clone();
+                thunderlook_contacts::write::create(&mut conn, &dir, k, &f)?;
+                added += 1;
+            }
+        }
+        "tasks" => {
+            let folder_id = thunderlook_items::default_folder(&conn, "IPM.Task%")?.ok_or("aucun dossier de tâches")?;
+            let mut seen: std::collections::HashSet<String> = thunderlook_items::tasks(&conn)?.rows.iter().map(|r| format!("{}|{}", r.title.to_lowercase(), r.due)).collect();
+            for p in thunderlook_items::vtodo::parse(&text)? {
+                warnings += p.warnings.len();
+                let mut f = p.form;
+                if f == thunderlook_model::items::TaskForm::default() {
+                    continue;
+                }
+                if !seen.insert(format!("{}|{}", f.subject.to_lowercase(), f.due)) {
+                    skipped += 1;
+                    continue;
+                }
+                f.id = None;
+                f.folder_id = folder_id.clone();
+                thunderlook_items::task_save(&mut conn, &dir, &f)?;
+                added += 1;
+            }
+        }
+        _ => {
+            let folder_id = thunderlook_items::default_folder(&conn, "IPM.StickyNote%")?.ok_or("aucun dossier de notes")?;
+            let mut seen: std::collections::HashSet<String> = thunderlook_items::notes(&conn, &dir)?.rows.iter().map(|r| r.text.trim().to_string()).collect();
+            for p in thunderlook_items::vnote::parse(&text)? {
+                warnings += p.warnings.len();
+                let mut f = p.form;
+                if f == thunderlook_model::items::NoteForm::default() {
+                    continue;
+                }
+                if !seen.insert(f.body.trim().to_string()) {
+                    skipped += 1;
+                    continue;
+                }
+                f.id = None;
+                f.folder_id = folder_id.clone();
+                thunderlook_items::note_save(&mut conn, &dir, &f)?;
+                added += 1;
+            }
+        }
+    }
+    let _ = app.emit("contacts-changed", ());
+    Ok(Some(format!("{added} ajouté(s), {skipped} déjà présent(s){}", if warnings > 0 { format!(", {warnings} avertissement(s)") } else { String::new() })))
+}
+
 /// Boîte « Contact » : contact existant (`id`), ou nouveau dans le dossier `folder`.
 #[tauri::command(async)]
 fn contact_form(app: AppHandle, id: Option<String>, folder: Option<String>) -> Result<thunderlook_model::contacts::ContactForm, String> {
@@ -1401,6 +1514,8 @@ pub fn run() {
             contact_folders,
             contact_list,
             contact_card,
+            exchange_export,
+            exchange_import,
             tasks_list,
             task_form,
             task_save,
