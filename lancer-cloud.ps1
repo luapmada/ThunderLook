@@ -1,7 +1,7 @@
 # Lance les lots cloud F à J, un par un, et ouvre l'onglet de suivi de chaque session.
 Set-Location $PSScriptRoot
 $urls = @()
-foreach ($l in "F","G","H","I","J") {
+foreach ($l in $Lots) {
     Write-Host "== Lot $l" -ForegroundColor Cyan
     $log = Join-Path $env:TEMP "cloud-lot-$l.txt"
     Start-Transcript -Path $log -Force | Out-Null
@@ -16,5 +16,5 @@ foreach ($l in "F","G","H","I","J") {
         Write-Host "Lot $l : adresse de suivi introuvable." -ForegroundColor Yellow
     }
 }
-if ($urls.Count -lt 5) { Start-Process "https://claude.ai/code" }
-Write-Host "Sessions lancées : $($urls.Count)/5. Quand elles ont fini, dis à Claude : lots F à J terminés." -ForegroundColor Green
+if ($urls.Count -lt $Lots.Count) { Start-Process "https://claude.ai/code" }
+Write-Host "Sessions lancées : $($urls.Count)/$($Lots.Count). Quand elles ont fini, dis à Claude : lots $($Lots -join ' ') terminés." -ForegroundColor Green
