@@ -27,6 +27,42 @@ pub struct ContactRow {
     pub initials: String,
     /// Lettre de l'index (A à Z, « # » pour le reste).
     pub letter: String,
+    /// Texte du filtre de la liste : société, adresses électroniques, téléphones (tels quels, puis chiffres seuls), en minuscules.
+    #[serde(default)]
+    pub search: String,
+    /// Nature de la ligne : contact ou liste de distribution.
+    #[serde(default)]
+    pub kind: ContactRowKind,
+    /// Membres d'une liste de distribution (vide pour un contact).
+    #[serde(default)]
+    pub members: Vec<DistMember>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ContactRowKind {
+    #[default]
+    Contact,
+    /// `IPM.DistList` : `id` = `d<message>`, lecture seule.
+    DistList,
+}
+
+/// Membre d'une liste de distribution.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DistMember {
+    pub name: String,
+    pub email: String,
+}
+
+/// Liste de distribution (`IPM.DistList`), en lecture seule.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DistList {
+    /// `d<message>`.
+    pub id: String,
+    pub name: String,
+    pub members: Vec<DistMember>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,4 +144,11 @@ pub struct ContactForm {
     /// `AAAA-MM-JJ`, vide si inconnu.
     pub birthday: String,
     pub notes: String,
+    /// `data:image/jpeg;base64,…`. Absent (`None`) en modification : la photo existante est conservée ;
+    /// `Some("")` : la retirer. À la lecture d'un contact, la photo actuelle y est rendue.
+    #[serde(default)]
+    pub photo: Option<String>,
+    /// Catégories séparées par des virgules (propriété `Keywords`).
+    #[serde(default)]
+    pub categories: String,
 }

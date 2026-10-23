@@ -35,7 +35,7 @@ pub fn form_of(conn: &Connection, data_dir: &Path, id: i64) -> Result<ContactFor
 /// Formulaire d'un contact déjà lu (export en série : un seul chargement pour tout le dossier).
 pub fn form_from(c: &Contact, data_dir: &Path) -> ContactForm {
     let id = c.id;
-    let (notes, _) = extras(c, data_dir);
+    let (notes, photo) = extras(c, data_dir);
     let phone = |label: &str| c.phones.iter().find(|(l, _)| *l == label).map(|(_, v)| v.clone()).unwrap_or_default();
     let email = |i: usize| c.emails.get(i).map(|m| m.address.clone()).unwrap_or_default();
     let (y, m, d) = c.birthday_ms.map(crate::day).unwrap_or((0, 0, 0));
@@ -64,6 +64,8 @@ pub fn form_from(c: &Contact, data_dir: &Path) -> ContactForm {
         web_page: c.web_page.clone(),
         birthday: if y > 0 { format!("{y:04}-{m:02}-{d:02}") } else { String::new() },
         notes: notes.unwrap_or_default(),
+        photo: photo.filter(|(_, b)| crate::is_jpeg(b)).map(|(_, b)| crate::photo_uri(&b)),
+        categories: c.categories.join(", "),
     }
 }
 
@@ -148,8 +150,34 @@ fn props_of(named: &Named, f: &ContactForm, n: &Names) -> Result<Vec<(u16, Optio
     }
     text(&mut v, Some(0x3A51), &f.web_page);
     text(&mut v, ids.html, "");
+    let cats: Vec<String> = f.categories.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    if let Some(id) = ids.keywords {
+        v.push((id, if cats.is_empty() { None } else { Some(Value::Strings(cats)) }));
+    }
     v.push((0x3A42, if f.birthday.trim().is_empty() { None } else { Some(Value::time_ms(day_ms(f.birthday.trim())?)) }));
     Ok(v)
+}
+
+/// Ce que le formulaire demande pour la photo.
+enum PhotoOp {
+    Keep,
+    Remove,
+    Set(Vec<u8>),
+}
+
+fn photo_op(f: &ContactForm) -> Result<PhotoOp> {
+    match f.photo.as_deref().map(str::trim) {
+        None => Ok(PhotoOp::Keep),
+        Some("") => Ok(PhotoOp::Remove),
+        Some(uri) => crate::photo_bytes(uri).map(PhotoOp::Set),
+    }
+}
+
+/// `PidLidHasPicture` (named 0x8015) ; absente de la table de noms de la source : rien à écrire.
+fn has_picture(named: &Named, set: &mut Vec<(u16, Option<Value>)>, on: bool) {
+    if let Some(id) = Ids::new(named).has_picture {
+        set.push((id, Some(Value::Bool(on))));
+    }
 }
 
 fn write_eml(data_dir: &Path, source_id: i64, id: i64, subject: &str, body: &str, photo: Option<&[u8]>) -> Result<String> {
@@ -190,8 +218,15 @@ pub fn create(conn: &mut Connection, data_dir: &Path, folder_id: i64, f: &Contac
     let source_id: i64 = conn.query_row("SELECT source_id FROM folder WHERE id = ?1", [folder_id], |r| r.get(0)).map_err(|_| "dossier de contacts inconnu".to_string())?;
     let named = named_of(conn, source_id)?;
     let n = names(f);
+    let photo = match photo_op(f)? {
+        PhotoOp::Set(b) => Some(b),
+        _ => None,
+    };
     let mut set = props_of(&named, f, &n)?;
     set.retain(|(_, v)| v.is_some());
+    if photo.is_some() {
+        has_picture(&named, &mut set, true);
+    }
     if let Some(id) = Ids::new(&named).file_under_id {
         // Classer sous « Nom, Prénom » (comme le choix par défaut d'Outlook).
         set.push((id, Some(Value::Long(0x8017))));
@@ -208,7 +243,7 @@ pub fn create(conn: &mut Connection, data_dir: &Path, folder_id: i64, f: &Contac
     )
     .map_err(e)?;
     let id = tx.last_insert_rowid();
-    let eml = write_eml(data_dir, source_id, id, &n.file_as, &f.notes, None)?;
+    let eml = write_eml(data_dir, source_id, id, &n.file_as, &f.notes, photo.as_deref())?;
     tx.execute("UPDATE message SET eml_path = ?2 WHERE id = ?1", params![id, eml]).map_err(e)?;
     tx.commit().map_err(e)?;
     Ok(id)
@@ -224,10 +259,23 @@ pub fn update(conn: &mut Connection, data_dir: &Path, message_id: i64, f: &Conta
     let (source_id, old) = row.ok_or("contact introuvable")?;
     let named = named_of(conn, source_id)?;
     let n = names(f);
-    let set = props_of(&named, f, &n)?;
+    let mut set = props_of(&named, f, &n)?;
+    let photo = match photo_op(f)? {
+        PhotoOp::Set(b) => {
+            has_picture(&named, &mut set, true);
+            Some(b)
+        }
+        // Retrait : valeur de `PidLidHasPicture` après suppression non établie (REA-LIMITES.md) ; on écrit « faux ».
+        PhotoOp::Remove => {
+            has_picture(&named, &mut set, false);
+            None
+        }
+        PhotoOp::Keep => {
+            let all = load(conn, None, Some(message_id))?;
+            all.contacts.first().and_then(|c| extras(c, data_dir).1).map(|(_, bytes)| bytes)
+        }
+    };
     let props = bag::merge(&old, &set)?;
-    let all = load(conn, None, Some(message_id))?;
-    let photo = all.contacts.first().and_then(|c| extras(c, data_dir).1).map(|(_, bytes)| bytes);
     let eml = write_eml(data_dir, source_id, message_id, &n.file_as, &f.notes, photo.as_deref())?;
     conn.execute(
         "UPDATE message SET subject = ?2, modified_at = ?3, preview = ?4, eml_path = ?5, props = ?6, indexed = 0 WHERE id = ?1",
@@ -262,5 +310,81 @@ mod tests {
     fn birthday_round_trip() {
         assert_eq!(day_ms("1970-01-02").unwrap(), 86_400_000);
         assert_eq!(crate::day(day_ms("1985-04-23").unwrap()), (1985, 4, 23));
+    }
+
+    /// Base de test : une source dont la table de noms a `PidLidHasPicture` et `Keywords`, un dossier de contacts.
+    fn fixture(name: &str) -> (std::path::PathBuf, Connection) {
+        let dir = std::env::temp_dir().join(format!("tl-contacts-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let conn = thunderlook_store::open(&dir).unwrap();
+        let mut names = Vec::new();
+        names.extend_from_slice(&0x8000u16.to_le_bytes());
+        names.extend_from_slice(crate::PSETID_ADDRESS.as_bytes());
+        names.push(0);
+        names.extend_from_slice(&0x8015u32.to_le_bytes());
+        names.extend_from_slice(&0x8001u16.to_le_bytes());
+        names.extend_from_slice(thunderlook_calendar::named::PS_PUBLIC_STRINGS.as_bytes());
+        names.push(1);
+        names.extend_from_slice(&8u32.to_le_bytes());
+        names.extend_from_slice(b"Keywords");
+        conn.execute("INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at, props) VALUES (1, 'tl', '', '', 't', 0, 0, ?1)", [names]).unwrap();
+        conn.execute("INSERT INTO folder (id, source_id, nid, name, role, hidden, position) VALUES (1, 1, 1, 'Contacts', 'folder', 0, 0)", []).unwrap();
+        (dir, conn)
+    }
+
+    fn jpeg(seed: u8) -> String {
+        crate::photo_uri(&(0..64u8).fold(vec![0xFF, 0xD8, 0xFF, 0xE0], |mut v, i| {
+            v.push(i.wrapping_mul(seed));
+            v
+        }))
+    }
+
+    #[test]
+    fn photo_et_categories_aller_retour() {
+        let (dir, mut conn) = fixture("photo");
+        let f = ContactForm { given_name: "Léa".into(), surname: "Martin".into(), notes: "Une note".into(), photo: Some(jpeg(3)), categories: "Clients, VIP,, ".into(), ..Default::default() };
+        let id = create(&mut conn, &dir, 1, &f).unwrap();
+        let c = load(&conn, None, Some(id)).unwrap().contacts.remove(0);
+        assert!(c.has_picture);
+        assert_eq!(c.categories, ["Clients", "VIP"]);
+        let back = form_of(&conn, &dir, id).unwrap();
+        assert_eq!((back.photo.as_deref(), back.categories.as_str(), back.notes.as_str()), (f.photo.as_deref(), "Clients, VIP", "Une note"));
+
+        // Modification sans photo dans le formulaire : conservée ; les notes changent, la photo reste.
+        let edit = ContactForm { photo: None, notes: "Autre note".into(), categories: "VIP".into(), ..back.clone() };
+        update(&mut conn, &dir, id, &edit).unwrap();
+        let again = form_of(&conn, &dir, id).unwrap();
+        assert_eq!((again.photo.as_deref(), again.notes.as_str(), again.categories.as_str()), (f.photo.as_deref(), "Autre note", "VIP"));
+
+        // Remplacement.
+        update(&mut conn, &dir, id, &ContactForm { photo: Some(jpeg(5)), ..again.clone() }).unwrap();
+        assert_eq!(form_of(&conn, &dir, id).unwrap().photo, Some(jpeg(5)));
+
+        // Retrait (`Some("")`), catégories vidées.
+        update(&mut conn, &dir, id, &ContactForm { photo: Some(String::new()), categories: String::new(), ..again }).unwrap();
+        let c = load(&conn, None, Some(id)).unwrap().contacts.remove(0);
+        assert!(!c.has_picture && c.categories.is_empty());
+        let gone = form_of(&conn, &dir, id).unwrap();
+        assert_eq!((gone.photo, gone.notes.as_str()), (None, "Autre note"));
+
+        // Pas un JPEG : refusé, rien n'est écrit.
+        let bad = ContactForm { surname: "X".into(), photo: Some("data:image/png;base64,iVBORw0KGgo=".into()), ..Default::default() };
+        assert!(create(&mut conn, &dir, 1, &bad).is_err());
+    }
+
+    #[test]
+    fn photo_dans_l_export_vcard() {
+        let (dir, mut conn) = fixture("vcf");
+        let f = ContactForm { surname: "Dupont".into(), photo: Some(jpeg(7)), categories: "A, B".into(), ..Default::default() };
+        let id = create(&mut conn, &dir, 1, &f).unwrap();
+        let all = load(&conn, Some(1), None).unwrap();
+        let forms: Vec<_> = all.contacts.iter().map(|c| form_from(c, &dir)).collect();
+        let vcf = crate::vcard::export(&forms, crate::vcard::Version::V30);
+        let parsed = crate::vcard::parse(&vcf).unwrap();
+        assert_eq!((parsed[0].form.photo.as_deref(), parsed[0].form.categories.as_str()), (f.photo.as_deref(), "A, B"));
+        // Import : le contact recréé a sa photo.
+        let id2 = create(&mut conn, &dir, 1, &ContactForm { id: None, folder_id: String::new(), ..parsed[0].form.clone() }).unwrap();
+        assert_ne!(id, id2);
+        assert_eq!(form_of(&conn, &dir, id2).unwrap().photo, f.photo);
     }
 }

@@ -2,16 +2,36 @@
 //! dans le volet de gauche, liste filtrable au centre, fiche à droite (vue « Personnes » d'Outlook).
 
 use leptos::{prelude::*, task::spawn_local};
+use serde::Serialize;
 use thunderlook_model::{
     ComposeKind,
-    contacts::{ContactCard, ContactFieldKind, ContactRow},
+    contacts::{ContactCard, ContactFieldKind, ContactRow, ContactRowKind},
 };
+use wasm_bindgen::prelude::*;
 
 use crate::{
     icons::*,
     ipc,
     state::{Module, Ui, use_ui},
 };
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], catch)]
+    async fn invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
+}
+
+#[derive(Serialize)]
+struct FolderArg<'a> {
+    folder: &'a str,
+}
+
+/// Listes de distribution d'un dossier (commande `contact_dist_lists`), lecture seule.
+async fn dist_lists(folder: &str) -> Result<Vec<ContactRow>, String> {
+    let args = (FolderArg { folder }).serialize(&serde_wasm_bindgen::Serializer::json_compatible()).map_err(|e| e.to_string())?;
+    let out = invoke("contact_dist_lists", args).await.map_err(|e| e.as_string().unwrap_or_else(|| format!("contact_dist_lists : {e:?}")))?;
+    serde_wasm_bindgen::from_value(out).map_err(|e| format!("contact_dist_lists : {e}"))
+}
 
 /// Charge les dossiers à la première ouverture du module, la liste à chaque changement de dossier, la fiche à chaque
 /// changement de sélection.
@@ -50,9 +70,14 @@ pub fn watch(ui: Ui) {
         }
         spawn_local(async move {
             match ipc::contact_list(&folder).await {
-                Ok(l) if ui.contact_folder.get_untracked() == folder => {
+                Ok(mut l) if ui.contact_folder.get_untracked() == folder => {
+                    // Les listes de distribution viennent après les contacts ; une erreur ne masque pas les contacts.
+                    match dist_lists(&folder).await {
+                        Ok(d) => l.rows.extend(d),
+                        Err(e) => l.issues.push(e),
+                    }
                     if !refresh || ui.contact_selected.get_untracked().is_none() {
-                        ui.contact_selected.set(l.rows.first().map(|r| r.id.clone()));
+                        ui.contact_selected.set(l.rows.iter().find(|r| r.kind == ContactRowKind::Contact).map(|r| r.id.clone()));
                     }
                     ui.contact_list.set(Some(l));
                 }
@@ -76,7 +101,18 @@ pub fn watch(ui: Ui) {
     });
 }
 
-/// Lignes de la liste après le filtre (sur le libellé et le sous-titre, sans tenir compte de la casse).
+/// Le filtre retrouve la ligne par son libellé, son sous-titre, sa société, ses adresses électroniques ou ses
+/// téléphones (casse sans effet ; pour un numéro, espaces et points sans effet non plus).
+fn matches(r: &ContactRow, filter: &str) -> bool {
+    if filter.is_empty() || r.title.to_lowercase().contains(filter) || r.subtitle.to_lowercase().contains(filter) || r.search.contains(filter) {
+        return true;
+    }
+    let digits: String = filter.chars().filter(char::is_ascii_digit).collect();
+    let phone_like = filter.chars().all(|c| c.is_ascii_digit() || " .-+()".contains(c));
+    phone_like && digits.len() >= 3 && r.search.contains(&digits)
+}
+
+/// Lignes de la liste après le filtre (contacts et listes de distribution, sans tenir compte de la casse).
 fn visible(ui: Ui) -> Vec<ContactRow> {
     let filter = ui.contact_filter.get().trim().to_lowercase();
     ui.contact_list.with(|l| {
@@ -84,7 +120,7 @@ fn visible(ui: Ui) -> Vec<ContactRow> {
             .map(|l| {
                 l.rows
                     .iter()
-                    .filter(|r| filter.is_empty() || r.title.to_lowercase().contains(&filter) || r.subtitle.to_lowercase().contains(&filter))
+                    .filter(|r| matches(r, &filter))
                     .cloned()
                     .collect()
             })
@@ -159,7 +195,7 @@ pub fn ContactsPane() -> impl IntoView {
             _ => return,
         };
         ev.prevent_default();
-        let rows = visible(ui);
+        let rows: Vec<ContactRow> = visible(ui).into_iter().filter(|r| r.kind == ContactRowKind::Contact).collect();
         let cur = ui.contact_selected.get_untracked();
         let pos = rows.iter().position(|r| Some(&r.id) == cur.as_ref()).map_or(0, |p| (p as i32 + step).clamp(0, rows.len() as i32 - 1) as usize);
         if let Some(r) = rows.get(pos) {
@@ -169,6 +205,8 @@ pub fn ContactsPane() -> impl IntoView {
             }
         }
     };
+    // Listes de distribution dépliées (`d<id>`).
+    let opened = RwSignal::new(Vec::<String>::new());
     view! {
         <section class="pane contacts" aria-label="Contacts">
             <div class="contact-list-pane">
@@ -192,7 +230,52 @@ pub fn ContactsPane() -> impl IntoView {
                             if rows.is_empty() {
                                 return view! { <div class="placeholder">"Aucun contact."</div> }.into_any();
                             }
-                            rows.into_iter()
+                            let (lists, rows): (Vec<_>, Vec<_>) = rows.into_iter().partition(|r| r.kind == ContactRowKind::DistList);
+                            let dist = (!lists.is_empty()).then(|| {
+                                let items = lists
+                                    .into_iter()
+                                    .map(|r| {
+                                        let (id, aria, shown) = (r.id.clone(), r.id.clone(), r.id.clone());
+                                        let members = r.members.clone();
+                                        view! {
+                                            <div
+                                                class="contact-row"
+                                                role="option"
+                                                aria-expanded=move || opened.with(|o| o.contains(&aria)).to_string()
+                                                on:click=move |_| opened.update(|o| match o.iter().position(|x| *x == id) {
+                                                    Some(p) => { o.remove(p); }
+                                                    None => o.push(id.clone()),
+                                                })
+                                            >
+                                                <span class="avatar small" aria-hidden="true"><Svg icon=USERS size=14 /></span>
+                                                <span class="contact-text">
+                                                    <span class="contact-title">{r.title.clone()}</span>
+                                                    <span class="contact-sub">{r.subtitle.clone()}</span>
+                                                </span>
+                                            </div>
+                                            <Show when=move || opened.with(|o| o.contains(&shown))>
+                                                {members
+                                                    .iter()
+                                                    .map(|m| {
+                                                        let (name, addr) = (m.name.clone(), m.email.clone());
+                                                        let label = if m.name.is_empty() { m.email.clone() } else { format!("{} — {}", m.name, m.email) };
+                                                        view! {
+                                                            <div class="contact-row" style="padding-left: 56px">
+                                                                <button class="link-btn" title="Nouveau message à ce membre" on:click=move |_| write_to(ui, name.clone(), addr.clone())>{label}</button>
+                                                            </div>
+                                                        }
+                                                    })
+                                                    .collect_view()}
+                                            </Show>
+                                        }
+                                    })
+                                    .collect_view();
+                                view! {
+                                    <div class="contact-letter" aria-hidden="true">"Listes de distribution"</div>
+                                    {items}
+                                }
+                            });
+                            let contacts = rows.into_iter()
                                 .map(|r| {
                                     let head = (r.letter != letter).then(|| {
                                         letter = r.letter.clone();
@@ -217,8 +300,8 @@ pub fn ContactsPane() -> impl IntoView {
                                         </div>
                                     }
                                 })
-                                .collect_view()
-                                .into_any()
+                                .collect_view();
+                            view! { {contacts} {dist} }.into_any()
                         }
                     }}
                 </div>

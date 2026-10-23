@@ -2,7 +2,7 @@
 //!
 //! Écriture : 2.1 ou 3.0. Lecture : 2.1, 3.0 et 4.0 (le format exact qu'écrit MPE n'est pas établi). L'identifiant du
 //! formulaire part dans `UID` ; à la lecture, `UID` ou à défaut `X-OUTLOOK-UID` va dans [`Parsed::uid`] et le formulaire
-//! rendu a `id: None` et `folder_id` vide (à remplir par l'appelant). La photo n'a pas de champ : ignorée, avec avertissement.
+//! rendu a `id: None` et `folder_id` vide (à remplir par l'appelant). `PHOTO` (JPEG en base64) et `CATEGORIES` sont lus et écrits ; une photo qui n'est pas un JPEG intégré est ignorée, avec avertissement.
 
 use thunderlook_model::contacts::ContactForm;
 
@@ -101,6 +101,24 @@ pub fn export(forms: &[ContactForm], version: Version) -> String {
         if !f.notes.is_empty() {
             w.line("NOTE", &[], &w.esc(&f.notes));
         }
+        let cats: Vec<String> = f.categories.split(',').map(|c| textfmt::escape(c.trim(), true, true)).filter(|c| !c.is_empty()).collect();
+        if !cats.is_empty() {
+            w.line("CATEGORIES", &[], &cats.join(","));
+        }
+        if let Some(jpeg) = f.photo.as_deref().and_then(|p| crate::photo_bytes(p).ok()) {
+            use base64::Engine;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(jpeg);
+            match version {
+                Version::V21 => {
+                    w.out.push_str(&textfmt::fold(&format!("PHOTO;ENCODING=BASE64;JPEG:{b64}")));
+                    w.out.push_str("\r\n\r\n");
+                }
+                Version::V30 => {
+                    w.out.push_str(&textfmt::fold(&format!("PHOTO;ENCODING=b;TYPE=JPEG:{b64}")));
+                    w.out.push_str("\r\n");
+                }
+            }
+        }
         if let Some(id) = f.id.as_deref().filter(|s| !s.is_empty()) {
             w.line("UID", &[], &w.esc(id));
         }
@@ -166,7 +184,7 @@ fn record(n: usize, props: Vec<Prop>, truncated: bool) -> Parsed {
     let (mut uid, mut x_uid) = (None, None);
     let mut emails: Vec<(bool, String)> = Vec::new();
     let (mut fn_name, mut got_n) = (String::new(), false);
-    let (mut photo, mut cats, mut urls) = (false, false, 0);
+    let mut urls = 0;
     let mut notes: Vec<String> = Vec::new();
     for p in &props {
         let mut pw = Vec::new();
@@ -283,16 +301,30 @@ fn record(n: usize, props: Vec<Prop>, truncated: bool) -> Parsed {
                     w.push(format!("deuxième adresse du même type ignorée ({})", a.1));
                 }
             }
-            "PHOTO" | "LOGO" => photo = true,
-            "CATEGORIES" => cats = true,
+            "PHOTO" => {
+                let v = p.value.trim();
+                let enc = p.param("ENCODING").map(str::to_uppercase).unwrap_or_default();
+                let bytes = if let Some(uri) = v.strip_prefix("data:").map(|_| v) {
+                    // vCard 4.0 : adresse data:.
+                    crate::photo_bytes(uri).ok()
+                } else if enc == "B" || enc == "BASE64" {
+                    crate::photo_bytes(&format!("data:image/jpeg;base64,{v}")).ok()
+                } else {
+                    None
+                };
+                match bytes {
+                    Some(b) if f.photo.is_none() => f.photo = Some(crate::photo_uri(&b)),
+                    Some(_) => w.push("deuxième photo ignorée".into()),
+                    None => w.push("PHOTO ignorée (seul un JPEG en base64 est repris)".into()),
+                }
+            }
+            "LOGO" => w.push("LOGO ignoré".into()),
+            "CATEGORIES" => {
+                let cats: Vec<String> = textfmt::split_unescaped(&raw, ',').iter().map(|c| textfmt::unescape(c).trim().to_string()).filter(|c| !c.is_empty()).collect();
+                f.categories = cats.join(", ");
+            }
             _ => {}
         }
-    }
-    if photo {
-        w.push("photo ignorée (le formulaire n'a pas de champ photo)".into());
-    }
-    if cats {
-        w.push("CATEGORIES ignoré (le formulaire n'a pas de champ catégories)".into());
     }
     if !got_n && !fn_name.is_empty() && fn_name != f.company {
         match fn_name.rsplit_once(' ') {
@@ -350,6 +382,11 @@ mod tests {
             web_page: "https://example.fr/a?b=c;d".into(),
             birthday: "1961-04-12".into(),
             notes: "Ligne 1, avec virgule ; point-virgule \\ antislash\nLigne 2 : œuf à 3 €\n\nLigne 4 très longue pour forcer le repliement des lignes de la fiche, au moins une fois.".into(),
+            categories: "Clients, VIP".into(),
+            photo: Some(crate::photo_uri(&(0..200u8).fold(vec![0xFF, 0xD8, 0xFF, 0xE0], |mut v, i| {
+                v.push(i.wrapping_mul(7));
+                v
+            }))),
             ..ContactForm::default()
         }
     }
@@ -370,6 +407,28 @@ mod tests {
         for v in [Version::V21, Version::V30] {
             assert_eq!(back(&forms, v), forms, "{v:?}");
         }
+    }
+
+    #[test]
+    fn photo_et_categories_dans_la_fiche() {
+        let f = full();
+        let v30 = export(&[f.clone()], Version::V30);
+        assert!(v30.contains("PHOTO;ENCODING=b;TYPE=JPEG:") && v30.contains("CATEGORIES:Clients,VIP"), "{v30}");
+        let v21 = export(&[f.clone()], Version::V21);
+        assert!(v21.contains("PHOTO;ENCODING=BASE64;JPEG:") && v21.contains("CATEGORIES:Clients,VIP"), "{v21}");
+        for v in [Version::V21, Version::V30] {
+            let p = &parse(&export(&[f.clone()], v)).unwrap()[0];
+            assert_eq!(p.form.photo, f.photo);
+            assert_eq!(p.form.categories, "Clients, VIP");
+            assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+        }
+        // vCard 4.0 : adresse data: ; PNG ou URL : ignorés avec avertissement.
+        let uri = f.photo.clone().unwrap();
+        let v4 = parse(&format!("BEGIN:VCARD\nVERSION:4.0\nFN:A B\nPHOTO:{uri}\nEND:VCARD\n")).unwrap();
+        assert_eq!(v4[0].form.photo.as_deref(), Some(uri.as_str()));
+        let png = parse("BEGIN:VCARD\nVERSION:3.0\nFN:A B\nPHOTO;ENCODING=b;TYPE=PNG:iVBORw0KGgo=\nPHOTO;VALUE=URI:http://x/y.jpg\nEND:VCARD\n").unwrap();
+        assert_eq!(png[0].form.photo, None);
+        assert_eq!(png[0].warnings.iter().filter(|w| w.contains("PHOTO ignorée")).count(), 2);
     }
 
     #[test]
@@ -408,7 +467,7 @@ UID:abc-1\r\nEND:VCARD\r\n";
         assert_eq!(f.notes, "Ligne un\nà rappeler\net une très longue suite");
         assert_eq!(f.web_page, "https://example.fr/une/adresse/tres/longue/qui/est/repliee/sur/deux/lignes");
         assert_eq!(p[0].uid.as_deref(), Some("abc-1"));
-        assert!(p[0].warnings.iter().any(|w| w.contains("photo")), "{:?}", p[0].warnings);
+        assert!(p[0].warnings.iter().any(|w| w.contains("PHOTO")), "{:?}", p[0].warnings);
         assert!(p[0].warnings.iter().any(|w| w.contains("FAX")));
     }
 

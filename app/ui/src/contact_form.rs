@@ -2,12 +2,47 @@
 
 use leptos::{html, prelude::*, task::spawn_local};
 use thunderlook_model::contacts::ContactForm;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
 
 use crate::{
     ipc,
     state::{Ui, use_ui},
 };
+
+// Choix de l'image : lecture du fichier, réduction à `max` pixels de côté au plus et recodage en JPEG par un canvas
+// (rien d'autre n'est envoyé au cœur). Rend l'adresse `data:image/jpeg;base64,…`, ou une chaîne vide si rien n'est choisi.
+#[wasm_bindgen(inline_js = r##"
+export async function pick_photo(input, max) {
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return "";
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise((ok, ko) => { img.onload = ok; img.onerror = () => ko("Image illisible."); img.src = url; });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * k));
+    const h = Math.max(1, Math.round(img.naturalHeight * k));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const g = canvas.getContext("2d");
+    g.fillStyle = "#fff";
+    g.fillRect(0, 0, w, h);
+    g.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+"##)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    async fn pick_photo(input: &JsValue, max: u32) -> Result<JsValue, JsValue>;
+}
+
+/// Côté maximal de la photo envoyée au cœur.
+const PHOTO_SIDE: u32 = 256;
 
 /// Nouveau contact dans le dossier affiché.
 pub fn open_new(ui: Ui) {
@@ -97,6 +132,20 @@ pub fn ContactDialog() -> impl IntoView {
             </label>
         }
     };
+    let choose = move |ev: leptos::ev::Event| {
+        let Some(input) = ev.target() else { return };
+        spawn_local(async move {
+            match pick_photo(&input.into(), PHOTO_SIDE).await {
+                Ok(v) => {
+                    if let Some(uri) = v.as_string().filter(|s| !s.is_empty()) {
+                        set(&|f| f.photo = Some(uri.clone()));
+                    }
+                }
+                Err(e) => note.set(Some(e.as_string().unwrap_or_else(|| "Image illisible.".into()))),
+            }
+        });
+    };
+    let has_photo = move || form().is_some_and(|f| f.photo.as_deref().is_some_and(|p| !p.is_empty()));
     view! {
         <Show when=move || ui.contact_form.with(Option::is_some)>
             <div class="modal-backdrop" on:pointerdown=move |ev| {
@@ -117,6 +166,17 @@ pub fn ContactDialog() -> impl IntoView {
                         _ => {}
                     }>
                     <h2 id="contact-title">{move || if form().is_some_and(|f| f.id.is_some()) { "Contact" } else { "Nouveau contact" }}</h2>
+                    <div class="appt-row">
+                        {move || match form().and_then(|f| f.photo).filter(|p| !p.is_empty()) {
+                            Some(src) => view! { <img class="avatar large" src=src alt="Photo du contact" /> }.into_any(),
+                            None => view! { <span class="avatar large" aria-hidden="true">"?"</span> }.into_any(),
+                        }}
+                        <label class="field">
+                            <span>"Photo"</span>
+                            <input type="file" accept="image/*" aria-label="Choisir une photo" on:change=choose />
+                        </label>
+                        <button class="btn" type="button" prop:disabled=move || !has_photo() on:click=move |_| set(&|f| f.photo = Some(String::new()))>"Retirer la photo"</button>
+                    </div>
                     <div class="appt-row">
                         {field("Prénom", |f| f.given_name.clone(), |f, v| f.given_name = v)}
                         {field("Nom", |f| f.surname.clone(), |f, v| f.surname = v)}
@@ -156,6 +216,7 @@ pub fn ContactDialog() -> impl IntoView {
                                 on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.birthday = v.clone()); } />
                         </label>
                     </div>
+                    {field("Catégories (séparées par des virgules)", |f| f.categories.clone(), |f, v| f.categories = v)}
                     <label class="field">
                         <span>"Notes"</span>
                         <textarea class="ar-text" aria-label="Notes" rows="5" prop:value=move || form().map(|f| f.notes).unwrap_or_default()
