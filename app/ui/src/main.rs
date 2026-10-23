@@ -17,6 +17,7 @@ mod folders;
 mod from_mail;
 mod global_search;
 mod icons;
+mod item_folders;
 mod junk;
 mod ipc;
 mod list;

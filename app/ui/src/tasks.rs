@@ -9,6 +9,7 @@ use wasm_bindgen::{JsCast, prelude::*};
 use crate::{
     icons::*,
     ipc,
+    item_folders::{FolderHost, FolderKind, FolderPicker, FolderUi},
     state::{Module, Ui, use_ui},
 };
 
@@ -124,6 +125,8 @@ fn today() -> String {
 pub fn TasksPane() -> impl IntoView {
     let ui = use_ui();
     let (view_sel, sort, shown) = (RwSignal::new("all".to_string()), RwSignal::new("due".to_string()), RwSignal::new(None::<TaskList>));
+    let fu = FolderUi::new(FolderKind::Task);
+    fu.refresh();
     // Vue, tri et recherche sont calculés par le cœur (`tasks_query`) ; rechargés aussi après chaque modification.
     Effect::new(move |_| {
         ui.tasks_epoch.track();
@@ -142,18 +145,17 @@ pub fn TasksPane() -> impl IntoView {
     });
     view! {
         <section class="pane tasks" aria-label="Tâches">
+            <FolderHost f=fu on_change=move |()| {
+                if view_sel.get_untracked().starts_with('f') && !fu.list.with_untracked(|l| l.iter().any(|d| d.id == view_sel.get_untracked())) {
+                    view_sel.set("all".into());
+                }
+                changed(ui);
+            } />
             <div class="task-views">
+                <FolderPicker f=fu value=Signal::derive(move || Some(view_sel.get()).filter(|v| v.starts_with('f')).unwrap_or_default())
+                    on_pick=move |v: String| view_sel.set(if v.is_empty() { "all".into() } else { v }) all_label="Tous les dossiers" />
                 <select aria-label="Afficher" on:change=move |ev| view_sel.set(event_target_value(&ev))>
                     {VIEWS.iter().map(|&(v, l)| view! { <option value=v selected=move || view_sel.get() == v>{l}</option> }).collect_view()}
-                    {move || {
-                        shown.with(|l| l.as_ref().map(|l| l.folders.clone()).unwrap_or_default())
-                            .into_iter()
-                            .map(|f| {
-                                let id = f.id.clone();
-                                view! { <option value=f.id.clone() selected=move || view_sel.get() == id>{format!("Dossier : {} ({})", f.name, f.count)}</option> }
-                            })
-                            .collect_view()
-                    }}
                 </select>
                 <select aria-label="Trier par" on:change=move |ev| sort.set(event_target_value(&ev))>
                     {SORTS.iter().map(|&(v, l)| view! { <option value=v selected=move || sort.get() == v>{format!("Tri : {l}")}</option> }).collect_view()}

@@ -9,6 +9,7 @@ use thunderlook_model::calendar::{CalendarDay, CalendarEvent, CalendarQuery, Cal
 use crate::{
     icons::*,
     ipc,
+    item_folders::{FolderHost, FolderKind, FolderUi},
     state::{ContextMenuAt, ContextTarget, Module, Ui, use_ui},
 };
 
@@ -750,6 +751,7 @@ pub fn CalendarPane() -> impl IntoView {
 #[component]
 pub fn CalendarNav() -> impl IntoView {
     let ui = use_ui();
+    let fu = FolderUi::new(FolderKind::Calendar);
     let toggle = move |id: String, shown: bool| {
         spawn_local(async move {
             match ipc::set_calendar_shown(&id, shown).await {
@@ -760,6 +762,7 @@ pub fn CalendarNav() -> impl IntoView {
     };
     view! {
         <div class="cal-nav">
+            <FolderHost f=fu on_change=move |()| ui.cal_epoch.update(|e| *e += 1) />
             {move || {
                 ui.cal_view.get().map(|v| {
                     let months = v.navigator.clone();
@@ -834,7 +837,7 @@ pub fn CalendarNav() -> impl IntoView {
                                 })
                                 .collect_view()}
                         </div>
-                        <div class="cal-list" role="group" aria-label="Mes calendriers">
+                        <div class="cal-list" role="group" aria-label="Mes calendriers" on:contextmenu=move |ev| fu.open_menu(&ev, "")>
                             {let mut section = String::new();
                             v.calendars
                                 .into_iter()
@@ -846,9 +849,10 @@ pub fn CalendarNav() -> impl IntoView {
                                     let (id, shown) = (c.id.clone(), c.shown);
                                     let imported = c.id.starts_with("c-");
                                     let (remove_id, remove_name) = (c.id.clone(), c.name.clone());
+                                    let menu_id = c.id.clone();
                                     view! {
                                         {head}
-                                        <label class="cal-item">
+                                        <label class="cal-item" on:contextmenu=move |ev| fu.open_menu(&ev, &menu_id)>
                                             <input type="checkbox" prop:checked=shown on:change=move |_| toggle(id.clone(), !shown) />
                                             <span class=format!("cal-swatch cal-c{}", c.color)></span>
                                             <span class="name">{c.name.clone()}</span>

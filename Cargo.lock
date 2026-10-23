@@ -5071,6 +5071,7 @@ dependencies = [
  "thunderlook-calendar",
  "thunderlook-contacts",
  "thunderlook-exchange",
+ "thunderlook-folders",
  "thunderlook-items",
  "thunderlook-mailbox",
  "thunderlook-mime",
@@ -5120,6 +5121,16 @@ dependencies = [
  "thunderlook-contacts",
  "thunderlook-items",
  "thunderlook-model",
+ "thunderlook-store",
+]
+
+[[package]]
+name = "thunderlook-folders"
+version = "0.10.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thunderlook-safety",
  "thunderlook-store",
 ]
 

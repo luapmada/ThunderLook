@@ -12,6 +12,7 @@ use wasm_bindgen::prelude::*;
 use crate::{
     icons::*,
     ipc,
+    item_folders::{FolderHost, FolderKind, FolderUi},
     state::{Module, Ui, use_ui},
 };
 
@@ -42,7 +43,7 @@ pub fn watch(ui: Ui) {
             return;
         }
         spawn_local(async move {
-            match ipc::contact_folders().await {
+            match crate::item_folders::contact_folders().await {
                 Ok(f) => {
                     if ui.contact_folder.get_untracked().is_empty() {
                         if let Some(first) = f.first() {
@@ -147,8 +148,25 @@ fn write_to(ui: Ui, name: String, address: String) {
 #[component]
 pub fn ContactNav() -> impl IntoView {
     let ui = use_ui();
+    let fu = FolderUi::new(FolderKind::Contact);
+    // Après création, renommage ou suppression : liste des dossiers relue (le dossier affiché peut avoir disparu).
+    let changed = move |()| {
+        spawn_local(async move {
+            match crate::item_folders::contact_folders().await {
+                Ok(f) => {
+                    if !f.iter().any(|x| x.id == ui.contact_folder.get_untracked()) {
+                        ui.contact_folder.set(f.first().map(|x| x.id.clone()).unwrap_or_default());
+                    }
+                    ui.contact_folders.set(f);
+                    ui.contacts_epoch.update(|e| *e += 1);
+                }
+                Err(e) => ui.error.set(Some(e)),
+            }
+        });
+    };
     view! {
-        <div class="cal-nav contact-nav" role="listbox" aria-label="Mes contacts">
+        <FolderHost f=fu on_change=changed />
+        <div class="cal-nav contact-nav" role="listbox" aria-label="Mes contacts" on:contextmenu=move |ev| fu.open_menu(&ev, "")>
             {move || {
                 let mut section = String::new();
                 ui.contact_folders
@@ -159,10 +177,11 @@ pub fn ContactNav() -> impl IntoView {
                             section = f.section.clone();
                             view! { <div class="cal-section">{f.section.clone()}</div> }
                         });
-                        let (id, sel) = (f.id.clone(), f.id.clone());
+                        let (id, sel, menu_id) = (f.id.clone(), f.id.clone(), f.id.clone());
                         view! {
                             {head}
                             <div
+                                on:contextmenu=move |ev| fu.open_menu(&ev, &menu_id)
                                 class="cal-item"
                                 role="option"
                                 class:selected=move || ui.contact_folder.get() == sel
