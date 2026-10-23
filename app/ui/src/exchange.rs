@@ -23,6 +23,7 @@ pub struct ExchangeState {
     pub can_undo: bool,
 }
 
+#[allow(dead_code)] // remplacé par `DetailRow` ; gardé avec `ipc::phone_exchange_check`
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRow {
@@ -33,11 +34,56 @@ pub struct ChangeRow {
     pub selected: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CheckResult {
     pub changes: Vec<ChangeRow>,
     pub unchanged: usize,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldDiff {
+    pub label: String,
+    pub old: String,
+    pub new: String,
+}
+
+/// Un changement ou un conflit avec ses valeurs (reflet de `exchange_cmds::DetailRow`).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetailRow {
+    pub key: String,
+    pub kind: String,
+    pub item: String,
+    pub summary: String,
+    pub selected: bool,
+    #[serde(default)]
+    pub conflict: Option<String>,
+    #[serde(default)]
+    pub fields: Vec<FieldDiff>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DetailCheck {
+    pub changes: Vec<DetailRow>,
+    pub conflicts: Vec<DetailRow>,
+    pub unchanged: usize,
+    pub warnings: Vec<String>,
+}
+
+/// Récapitulatif d'une application (reflet de `exchange_cmds::ApplySummary`).
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ApplySummary {
+    pub created: usize,
+    pub modified: usize,
+    pub deleted: usize,
+    pub kept: usize,
+    pub ignored: usize,
     pub warnings: Vec<String>,
 }
 
@@ -58,12 +104,37 @@ fn item_label(item: &str) -> &'static str {
     }
 }
 
+/// Modules dans l'ordre de l'écran : (identifiant, titre).
+const MODULES: [(&str, &str); 4] = [("contact", "Contacts"), ("event", "Rendez-vous"), ("note", "Notes"), ("task", "Tâches")];
+
+/// Ancienne et nouvelle valeur de chaque champ qui change.
+fn fields_view(fields: &[FieldDiff]) -> impl IntoView + use<> {
+    let items = fields
+        .iter()
+        .map(|f| {
+            let (old, new) = (f.old.clone(), f.new.clone());
+            let value = match (old.is_empty(), new.is_empty()) {
+                (true, _) => view! { <ins>{new}</ins> }.into_any(),
+                (_, true) => view! { <del>{old}</del> }.into_any(),
+                _ => view! { <del>{old}</del>" → "<ins>{new}</ins> }.into_any(),
+            };
+            view! { <li><strong>{f.label.clone()}" : "</strong>{value}</li> }
+        })
+        .collect_view();
+    view! { <ul class="exchange-fields">{items}</ul> }
+}
+
 #[component]
 pub fn ExchangeDialog() -> impl IntoView {
     let ui = use_ui();
     let root: NodeRef<html::Div> = NodeRef::new();
     let state = RwSignal::new(ExchangeState::default());
-    let rows = RwSignal::new(Vec::<ChangeRow>::new());
+    let rows = RwSignal::new(Vec::<DetailRow>::new());
+    let conflicts = RwSignal::new(Vec::<DetailRow>::new());
+    // Choix par conflit : "thunderlook", "phone" ou absent (= ignorer). Jamais renseigné d'office.
+    let choices = RwSignal::new(std::collections::HashMap::<String, String>::new());
+    let confirming = RwSignal::new(false);
+    let summary = RwSignal::new(Option::<ApplySummary>::None);
     let checked_once = RwSignal::new(false);
     let note = RwSignal::new(String::new());
     let warnings = RwSignal::new(Vec::<String>::new());
@@ -76,6 +147,10 @@ pub fn ExchangeDialog() -> impl IntoView {
             return;
         }
         rows.set(Vec::new());
+        conflicts.set(Vec::new());
+        choices.set(Default::default());
+        confirming.set(false);
+        summary.set(None);
         checked_once.set(false);
         note.set(String::new());
         warnings.set(Vec::new());
@@ -120,6 +195,8 @@ pub fn ExchangeDialog() -> impl IntoView {
                 Ok(Some(s)) => {
                     state.set(s);
                     rows.set(Vec::new());
+                    conflicts.set(Vec::new());
+                    confirming.set(false);
                     checked_once.set(false);
                 }
                 Ok(None) => {}
@@ -146,11 +223,20 @@ pub fn ExchangeDialog() -> impl IntoView {
     };
     let check = move || {
         busy.set(true);
+        confirming.set(false);
+        summary.set(None);
         spawn_local(async move {
-            match ipc::phone_exchange_check().await {
+            match ipc::phone_exchange_check_detail().await {
                 Ok(r) => {
-                    note.set(if r.changes.is_empty() { format!("Aucun changement ({} élément(s) identiques).", r.unchanged) } else { format!("{} changement(s) proposé(s), {} identique(s).", r.changes.len(), r.unchanged) });
+                    let total = r.changes.len() + r.conflicts.len();
+                    note.set(if total == 0 {
+                        format!("Aucun changement ({} élément(s) identiques).", r.unchanged)
+                    } else {
+                        format!("{} changement(s) et {} conflit(s) proposés, {} identique(s).", r.changes.len(), r.conflicts.len(), r.unchanged)
+                    });
                     warnings.set(r.warnings);
+                    choices.set(Default::default());
+                    conflicts.set(r.conflicts);
                     rows.set(r.changes);
                     checked_once.set(true);
                 }
@@ -161,16 +247,23 @@ pub fn ExchangeDialog() -> impl IntoView {
     };
     let apply = move || {
         let keys: Vec<String> = rows.with_untracked(|r| r.iter().filter(|c| c.selected).map(|c| c.key.clone()).collect());
-        if keys.is_empty() {
+        let picks: Vec<(String, String)> = choices.with_untracked(|c| c.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+        confirming.set(false);
+        if keys.is_empty() && picks.is_empty() {
             return;
         }
         busy.set(true);
         spawn_local(async move {
-            match ipc::phone_exchange_apply(&keys).await {
-                Ok(m) => {
-                    ui.status.set(Some(m.clone()));
-                    note.set(m);
+            match ipc::phone_exchange_apply_detail(&keys, &picks).await {
+                Ok(sum) => {
+                    ui.status.set(Some(format!("Échange : {} créé(s), {} modifié(s), {} supprimé(s)", sum.created, sum.modified, sum.deleted)));
+                    note.set(String::new());
+                    summary.set(Some(sum));
                     rows.set(Vec::new());
+                    conflicts.set(Vec::new());
+                    choices.set(Default::default());
+                    warnings.set(Vec::new());
+                    checked_once.set(false);
                     reload_lists();
                     refresh_state();
                 }
@@ -187,6 +280,9 @@ pub fn ExchangeDialog() -> impl IntoView {
                     ui.status.set(Some(m.clone()));
                     note.set(m);
                     rows.set(Vec::new());
+                    conflicts.set(Vec::new());
+                    summary.set(None);
+                    confirming.set(false);
                     reload_lists();
                 }
                 Err(e) => ui.error.set(Some(e)),
@@ -205,7 +301,28 @@ pub fn ExchangeDialog() -> impl IntoView {
     };
 
     let has_dir = move || state.with(|s| !s.settings.dir.is_empty());
-    let selected_count = move || rows.with(|r| r.iter().filter(|c| c.selected).count());
+    // (créations, modifications, suppressions) cochées, plus les conflits tranchés pour le téléphone.
+    let counts = move || {
+        let (mut n, mut m, mut d) = (0, 0, 0);
+        rows.with(|r| {
+            for c in r.iter().filter(|c| c.selected) {
+                match c.kind.as_str() {
+                    "new" => n += 1,
+                    "modified" => m += 1,
+                    _ => d += 1,
+                }
+            }
+        });
+        m += choices.with(|c| c.values().filter(|v| v.as_str() == "phone").count());
+        (n, m, d)
+    };
+    let kept_count = move || choices.with(|c| c.values().filter(|v| v.as_str() == "thunderlook").count());
+    let apply_count = move || {
+        let (n, m, d) = counts();
+        n + m + d
+    };
+    let can_apply = move || apply_count() > 0 || kept_count() > 0;
+    let ignored_count = move || rows.with(|r| r.iter().filter(|c| !c.selected).count()) + conflicts.with(Vec::len) - choices.with(|c| c.len());
 
     view! {
         <Show when=move || ui.phone_exchange.get()>
@@ -246,45 +363,146 @@ pub fn ExchangeDialog() -> impl IntoView {
                             <button class="btn" on:click=move |_| export(true)>"Exporter quand même"</button>
                         </p>
                     </Show>
-                    <Show when=move || checked_once.get() && !rows.with(Vec::is_empty)>
-                        <ul class="exchange-changes" aria-label="Changements proposés" style="max-height: 16em; overflow: auto; list-style: none; padding: 0; margin: 0.5em 0;">
-                            {move || {
-                                rows.get()
-                                    .into_iter()
-                                    .enumerate()
-                                    .map(|(i, c)| {
-                                        let label = format!("{} — {} : {}", kind_label(&c.kind), item_label(&c.item), c.summary);
-                                        let deletion = c.kind == "deleted";
-                                        view! {
-                                            <li>
-                                                <label class="check">
-                                                    <input type="checkbox" prop:checked=c.selected
-                                                        on:change=move |ev| {
-                                                            let on = event_target_checked(&ev);
-                                                            rows.update(|r| {
-                                                                if let Some(c) = r.get_mut(i) {
-                                                                    c.selected = on;
-                                                                }
-                                                            });
-                                                        } />
-                                                    <span>{label}</span>
-                                                    {deletion.then(|| view! { <em>" (proposée, jamais appliquée d'office)"</em> })}
-                                                </label>
-                                            </li>
-                                        }
-                                    })
-                                    .collect_view()
-                            }}
-                        </ul>
-                    </Show>
                     <Show when=move || !warnings.with(Vec::is_empty)>
-                        <ul class="dialog-note" aria-label="Avertissements">
-                            {move || warnings.get().into_iter().map(|w| view! { <li>{w}</li> }).collect_view()}
-                        </ul>
+                        <div class="exchange-warnings" role="alert">
+                            <strong>{move || format!("{} avertissement(s) de l'import — à lire avant d'appliquer", warnings.with(Vec::len))}</strong>
+                            <ul>{move || warnings.get().into_iter().map(|w| view! { <li>{w}</li> }).collect_view()}</ul>
+                        </div>
                     </Show>
+                    <Show when=move || checked_once.get() && !conflicts.with(Vec::is_empty)>
+                        <section class="exchange-conflicts" aria-label="Conflits">
+                            <h3>{move || format!("Conflits ({}) — modifiés des deux côtés", conflicts.with(Vec::len))}</h3>
+                            <p class="dialog-note">"Rien n'est choisi d'office : sans choix, l'élément est ignoré."</p>
+                            <ul class="exchange-changes">
+                                {move || {
+                                    conflicts
+                                        .get()
+                                        .into_iter()
+                                        .map(|c| {
+                                            let why = if c.conflict.as_deref() == Some("unknown") { "valeur exportée inconnue : impossible de savoir qui a changé" } else { "modifié dans ThunderLook et sur le téléphone" };
+                                            let name = format!("{group}_{key}", group = "conflit", key = c.key);
+                                            let radio = |value: &'static str, label: &'static str| {
+                                                let key = c.key.clone();
+                                                let key2 = c.key.clone();
+                                                let name = name.clone();
+                                                view! {
+                                                    <label class="check">
+                                                        <input type="radio" name=name
+                                                            prop:checked=move || choices.with(|m| m.get(&key).map(String::as_str) == if value.is_empty() { None } else { Some(value) })
+                                                            on:change=move |_| choices.update(|m| {
+                                                                if value.is_empty() {
+                                                                    m.remove(&key2);
+                                                                } else {
+                                                                    m.insert(key2.clone(), value.to_string());
+                                                                }
+                                                            }) />
+                                                        <span>{label}</span>
+                                                    </label>
+                                                }
+                                            };
+                                            view! {
+                                                <li>
+                                                    <div><strong>{item_label(&c.item)}" : "{c.summary.clone()}</strong>" — "<em>{why}</em></div>
+                                                    {fields_view(&c.fields)}
+                                                    <div class="exchange-choice" role="radiogroup" aria-label="Choix pour ce conflit">
+                                                        {radio("thunderlook", "Garder ThunderLook")}
+                                                        {radio("phone", "Garder le téléphone")}
+                                                        {radio("", "Ignorer")}
+                                                    </div>
+                                                </li>
+                                            }
+                                        })
+                                        .collect_view()
+                                }}
+                            </ul>
+                        </section>
+                    </Show>
+                    <Show when=move || checked_once.get() && !rows.with(Vec::is_empty)>
+                        <div class="exchange-groups">
+                            {MODULES
+                                .iter()
+                                .map(|&(module, title)| {
+                                    let count = move || rows.with(|r| r.iter().filter(|c| c.item == module).count());
+                                    view! {
+                                        <Show when=move || { count() > 0 }>
+                                            <section aria-label=title>
+                                                <h3>{move || format!("{title} ({})", count())}</h3>
+                                                <ul class="exchange-changes">
+                                                    {move || {
+                                                        rows.get()
+                                                            .into_iter()
+                                                            .enumerate()
+                                                            .filter(|(_, c)| c.item == module)
+                                                            .map(|(i, c)| {
+                                                                let deletion = c.kind == "deleted";
+                                                                view! {
+                                                                    <li>
+                                                                        <label class="check">
+                                                                            <input type="checkbox" prop:checked=c.selected
+                                                                                on:change=move |ev| {
+                                                                                    let on = event_target_checked(&ev);
+                                                                                    rows.update(|r| {
+                                                                                        if let Some(c) = r.get_mut(i) {
+                                                                                            c.selected = on;
+                                                                                        }
+                                                                                    });
+                                                                                } />
+                                                                            <span><strong>{kind_label(&c.kind)}</strong>" — "{c.summary.clone()}</span>
+                                                                            {deletion.then(|| view! { <em>" (suppression : à cocher vous-même)"</em> })}
+                                                                        </label>
+                                                                        {fields_view(&c.fields)}
+                                                                    </li>
+                                                                }
+                                                            })
+                                                            .collect_view()
+                                                    }}
+                                                </ul>
+                                            </section>
+                                        </Show>
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
+                    </Show>
+                    <Show when=move || checked_once.get() && (!rows.with(Vec::is_empty) || !conflicts.with(Vec::is_empty))>
+                        <p class="exchange-count" aria-live="polite">
+                            {move || {
+                                let (n, m, d) = counts();
+                                format!("Sera appliqué : {n} création(s), {m} modification(s), {d} suppression(s). Gardés côté ThunderLook : {}. Ignorés : {}.", kept_count(), ignored_count())
+                            }}
+                        </p>
+                    </Show>
+                    <Show when=move || confirming.get()>
+                        <div class="exchange-confirm" role="alertdialog" aria-label="Confirmation">
+                            <p>{move || {
+                                let (_, _, d) = counts();
+                                let tail = if d > 0 { format!(", dont {d} suppression(s)") } else { String::new() };
+                                format!("Appliquer {} élément(s) dans ThunderLook{tail} ? L'import pourra être annulé ensuite.", apply_count())
+                            }}</p>
+                            <button class="btn primary" prop:disabled=move || busy.get() on:click=move |_| apply()>"Confirmer"</button>
+                            " "
+                            <button class="btn" on:click=move |_| confirming.set(false)>"Retour"</button>
+                        </div>
+                    </Show>
+                    {move || summary.get().map(|sum| view! {
+                        <div class="exchange-summary" role="status">
+                            <strong>"Import terminé"</strong>
+                            <ul>
+                                <li>{format!("Créés : {}", sum.created)}</li>
+                                <li>{format!("Modifiés : {}", sum.modified)}</li>
+                                <li>{format!("Supprimés : {}", sum.deleted)}</li>
+                                <li>{format!("Gardés côté ThunderLook : {}", sum.kept)}</li>
+                                <li>{format!("Ignorés : {}", sum.ignored)}</li>
+                                <li>{format!("Avertissements : {}", sum.warnings.len())}</li>
+                            </ul>
+                            {(!sum.warnings.is_empty()).then(|| view! {
+                                <ul class="exchange-warnings">{sum.warnings.iter().map(|w| view! { <li>{w.clone()}</li> }).collect_view()}</ul>
+                            })}
+                        </div>
+                    })}
                     <div class="dialog-buttons">
-                        <button class="btn primary" prop:disabled=move || busy.get() || selected_count() == 0 on:click=move |_| apply()>
-                            {move || format!("Appliquer ({})", selected_count())}
+                        <button class="btn primary" prop:disabled=move || busy.get() || !can_apply() on:click=move |_| confirming.set(true)>
+                            {move || format!("Appliquer ({})", apply_count() + kept_count())}
                         </button>
                         <button class="btn" prop:disabled=move || busy.get() || !state.with(|s| s.can_undo) on:click=move |_| undo()>"Annuler le dernier import"</button>
                     </div>

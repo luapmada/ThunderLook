@@ -761,6 +761,7 @@ pub async fn phone_exchange_export(force: bool) -> Result<String, String> {
     call("phone_exchange_export", &ForceArg { force }).await
 }
 
+#[allow(dead_code)]
 pub async fn phone_exchange_check() -> Result<CheckResult, String> {
     call("phone_exchange_check", &NoArgs {}).await
 }
@@ -770,12 +771,35 @@ struct KeysArg<'a> {
     keys: &'a [String],
 }
 
+#[allow(dead_code)]
 pub async fn phone_exchange_apply(keys: &[String]) -> Result<String, String> {
     call("phone_exchange_apply", &KeysArg { keys }).await
 }
 
 pub async fn phone_exchange_undo() -> Result<String, String> {
     call("phone_exchange_undo", &NoArgs {}).await
+}
+
+pub async fn phone_exchange_check_detail() -> Result<crate::exchange::DetailCheck, String> {
+    call("phone_exchange_check_detail", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct ChoiceArg<'a> {
+    key: &'a str,
+    choice: &'a str,
+}
+
+#[derive(Serialize)]
+struct ApplyDetailArgs<'a> {
+    keys: &'a [String],
+    choices: Vec<ChoiceArg<'a>>,
+}
+
+/// `picks` : (clé du conflit, "thunderlook" | "phone") ; un conflit absent est ignoré.
+pub async fn phone_exchange_apply_detail(keys: &[String], picks: &[(String, String)]) -> Result<crate::exchange::ApplySummary, String> {
+    let choices = picks.iter().map(|(key, choice)| ChoiceArg { key, choice }).collect();
+    call("phone_exchange_apply_detail", &ApplyDetailArgs { keys, choices }).await
 }
 
 // --- Annulation et sauvegardes (lot O) --------------------------------------------------------------------------------
