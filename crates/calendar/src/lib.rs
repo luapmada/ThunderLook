@@ -5,6 +5,7 @@ pub mod bag;
 pub mod csv;
 pub mod expand;
 pub mod ics;
+pub mod ics_series;
 pub mod imported;
 pub mod named;
 pub mod recur;

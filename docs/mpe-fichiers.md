@@ -17,7 +17,7 @@ tant que l'étape 5 du plan n'est pas faite.
 | `contacts.vcf` | oui (vCard 3.0, UTF-8) | contacts, avec photo JPEG et catégories | oui |
 | `taches.ics` | oui (iCalendar 2.0, VTODO) | tâches (sans rappel, voir § 6) | oui |
 | `notes.vnt` | oui (vNote 1.1, texte en quoted-printable UTF-8) | notes (sans couleur) | oui |
-| `calendrier.ics` | oui (iCalendar 2.0) | rendez-vous, rappels, catégories, séries et exceptions | rendez-vous simples seulement |
+| `calendrier.ics` | oui (iCalendar 2.0) | rendez-vous, rappels, catégories, séries et exceptions | oui, séries comprises (RRULE, EXDATE, RECURRENCE-ID) ; ce qui n'est pas représentable est refusé avec un avertissement (§ 6) |
 | `manifest.json` | oui | date, nombre d'éléments, SHA-256 et identifiants de chaque fichier | oui |
 
 - Le téléphone ne doit modifier que les quatre premiers ; **jamais `manifest.json`** (c'est lui qui permet de savoir ce que le téléphone a changé).
@@ -58,8 +58,7 @@ Constaté par tests automatisés sur des fichiers simulés (pas par MPE) :
 
 | Écart | Effet | Où se corrige |
 |---|---|---|
-| Série **modifiée** sur le téléphone : non relue (avertissement) | modification perdue côté ThunderLook | `thunderlook-calendar` (écriture d'exceptions importées) |
-| Série **créée** sur le téléphone : ignorée | série absente de ThunderLook | idem (RRULE → `Repeat`) |
+| Série **modifiée** / **créée** sur le téléphone (lot AA) | relue : remplacée (même identifiant) en gardant catégories et rappel que le téléphone n'envoie pas ; nouvelle série créée ; série retirée du fichier = suppression proposée (jamais cochée) | **Refusées avec un avertissement visible (rien n'est importé de travers)** : fréquence autre que jour/semaine/mois/an, `BYxxx` hors `BYDAY`/`BYMONTHDAY`/`BYSETPOS`/`BYMONTH`, `BYDAY` sans rang en mensuel, `RDATE`, « cette occurrence et les suivantes », fuseau hors heure de Paris, heure fixe en UTC qui traverse un changement d'heure, occurrence modifiée avec une autre description/catégorie/confidentialité. **Cas inexacts** (jour 29-31 du mois, 29 février annuel : la RFC saute les périodes trop courtes, ThunderLook tombe sur le dernier jour) : refusés sauf s'ils sont identiques à ce que ThunderLook a exporté |
 | Élément modifié dans ThunderLook et resté intact sur le téléphone, alors que le téléphone modifie un autre élément du même fichier : proposé « modifié » (valeur ancienne) | si accepté, écrase la modification faite dans ThunderLook | `crates/exchange` : demande de retenir la valeur exportée de chaque élément dans le manifeste ; non fait ici (changement de format du manifeste, à décider). **Relire la liste avant « Appliquer »** |
 | Listes de distribution : non exportées | le téléphone ne les voit pas ; rien n'est perdu dans ThunderLook (lecture seule) | décision de Paul |
 | Rappel d'une **tâche** : non écrit dans `taches.ics` | le téléphone ne le voit pas | `thunderlook-items` (`vtodo::export`) |

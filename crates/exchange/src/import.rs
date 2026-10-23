@@ -17,7 +17,7 @@ use std::{
 
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use thunderlook_calendar::{Appointment, Busy, tz::TimeZone};
+use thunderlook_calendar::{Appointment, Busy, ics_series, tz::TimeZone};
 use thunderlook_contacts::vcard;
 use thunderlook_model::{contacts::ContactForm, items::{NoteForm, TaskForm}};
 use thunderlook_store::rusqlite::Connection;
@@ -384,6 +384,7 @@ fn event_of(a: &Appointment, body: Option<String>) -> EventData {
         body: body.map(|b| b.trim_end().to_string()).unwrap_or_default(),
         categories: a.categories.join(", "),
         private: a.private,
+        series: None,
     }
 }
 
@@ -410,28 +411,44 @@ fn canon_event(a: &Appointment, dir: &Path) -> EventData {
     }
 }
 
+/// Rendez-vous périodique, de `ics` (son VCALENDAR) : début et fin de la première occurrence.
+fn series_event(a: &Appointment, ics: String) -> EventData {
+    EventData { series: Some(ics), ..norm_event(event_of(a, a.description.clone())) }
+}
+
 fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut ImportReport) -> Result<()> {
     let cal = thunderlook_calendar::load(conn)?;
+    let describe = |a: &Appointment| thunderlook_calendar::description(a, dir);
     let (mut exs, mut data) = (Vec::new(), HashMap::new());
-    for a in cal.appointments.iter().filter(|a| a.recurrence.is_none()) {
-        let e = event_of(a, thunderlook_calendar::description(a, dir));
+    // Séries de la base : leur forme relue après un export (référence de la comparaison), et pourquoi elle n'est pas
+    // relisible le cas échéant.
+    let mut series_base: HashMap<String, (Appointment, Option<String>)> = HashMap::new();
+    for a in &cal.appointments {
+        let e = event_of(a, describe(a));
         let id = format!("a{}", a.id);
         exs.push(Ex { id: id.clone(), uid: event_uid(a), key: event_key(&e), title: a.subject.clone() });
-        data.insert(id, (canon_event(a, dir), e));
+        if a.recurrence.is_some() {
+            series_base.insert(id, match ics_series::canonical(a, &describe) {
+                Ok(b) => (b, None),
+                Err((b, why)) => (b, Some(why)),
+            });
+        } else {
+            data.insert(id, (canon_event(a, dir), e));
+        }
     }
     let mut m = Matcher::new(exs, ctx.map.clone());
-    let (_, phone) = thunderlook_calendar::ics::parse(text, 0, 0)?;
-    let mut series = 0;
+    let split = ics_series::split(text);
+    let (_, phone) = thunderlook_calendar::ics::parse(&split.rest, 0, 0)?;
     for (n, a) in phone.iter().enumerate() {
-        if a.recurrence.is_some() {
-            series += 1;
-            continue;
-        }
         if ctx.deleted_here(a.uid.as_deref(), &m) {
             continue;
         }
         let e = norm_event(event_of(a, a.description.clone()));
         match m.find(a.uid.as_deref(), &event_key(&e)) {
+            Some(i) if series_base.contains_key(&m.exs[i].id) => rep.warnings.push(format!(
+                "{} : « {} » est une série dans ThunderLook mais un rendez-vous simple dans le fichier : non importé (la conversion d'une série en rendez-vous simple n'est pas prise en charge).",
+                crate::CALENDAR_FILE, m.exs[i].title
+            )),
             Some(i) => {
                 let id = m.exs[i].id.clone();
                 let (canon, existing) = &data[&id];
@@ -446,8 +463,56 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
             None => rep.changes.push(ctx.change(ChangeKind::New, &format!("#{n}"), format!("{} ({})", e.subject, e.start.replace('T', " ")), a.uid.as_deref(), Payload::Event(e))),
         }
     }
-    if series > 0 {
-        rep.warnings.push(format!("{} : {series} rendez-vous périodique(s) ignoré(s) (les séries ne se synchronisent pas par fichier).", crate::CALENDAR_FILE));
+    // Séries refusées : jamais importées de travers, toujours signalées (sauf celles que ThunderLook ne sait pas non plus
+    // relire dans son propre export, pour la même raison : rien n'a changé). Retrouvées dans la base, elles ne sont pas
+    // proposées à la suppression.
+    for r in &split.rejected {
+        let hit = m.find(Some(&r.uid), "").map(|i| m.exs[i].id.clone());
+        if hit.and_then(|id| series_base.get(&id).and_then(|(_, why)| why.clone())).is_some_and(|why| why == r.reason) {
+            rep.unchanged += 1;
+        } else {
+            rep.warnings.push(format!("{} : série « {} » non importée : {}.", crate::CALENDAR_FILE, r.subject, r.reason));
+        }
+    }
+    for (n, s) in split.series.iter().enumerate() {
+        let uid = Some(s.uid.as_str());
+        if ctx.deleted_here(uid, &m) {
+            continue;
+        }
+        let mut phone = s.appointment.clone();
+        let subject = phone.subject.clone();
+        let refuse = |rep: &mut ImportReport, why: &str| rep.warnings.push(format!("{} : série « {subject} » non importée : {why}.", crate::CALENDAR_FILE));
+        match m.find(uid, &event_key(&event_of(&phone, None))) {
+            Some(i) => {
+                let id = m.exs[i].id.clone();
+                let base = match series_base.get(&id) {
+                    Some((b, _)) => b.clone(),
+                    None => {
+                        let a = cal.appointments.iter().find(|a| format!("a{}", a.id) == id).ok_or("rendez-vous introuvable")?;
+                        Appointment { description: describe(a), ..a.clone() }
+                    }
+                };
+                // Catégories et rappel que le téléphone n'envoie pas : ceux de ThunderLook.
+                ics_series::keep_from(&base, &mut phone);
+                let fields = ics_series::changed(&base, &phone);
+                if fields.is_empty() {
+                    rep.unchanged += 1;
+                } else if let Some(why) = &s.inexact {
+                    refuse(rep, why);
+                } else {
+                    let summary = format!("{} : série ({})", m.exs[i].title, fields.join(", "));
+                    rep.changes.push(ctx.change(ChangeKind::Modified, &id, summary, uid, Payload::Event(series_event(&phone, s.ics.clone()))));
+                }
+            }
+            None => match &s.inexact {
+                Some(why) => refuse(rep, why),
+                None => {
+                    let e = series_event(&phone, s.ics.clone());
+                    let summary = format!("{} ({}, série)", e.subject, e.start.replace('T', " "));
+                    rep.changes.push(ctx.change(ChangeKind::New, &format!("#s{n}"), summary, uid, Payload::Event(e)));
+                }
+            },
+        }
     }
     ctx.deletions(&m, rep);
     Ok(())
@@ -527,6 +592,11 @@ fn edit_of(e: &EventData) -> thunderlook_calendar::write::Edit {
     }
 }
 
+/// Périodicité d'une série (son VCALENDAR).
+fn recurrence_of(ics: &str) -> Result<thunderlook_calendar::recur::Recurrence> {
+    ics_series::parse_series(ics)?.appointment.recurrence.ok_or_else(|| "série sans périodicité".to_string())
+}
+
 /// État actuel d'un élément, pour pouvoir le rétablir.
 fn snapshot(conn: &Connection, dir: &Path, item: ItemKind, id: &str) -> Result<Payload> {
     Ok(match item {
@@ -537,10 +607,11 @@ fn snapshot(conn: &Connection, dir: &Path, item: ItemKind, id: &str) -> Result<P
             let n = num(id, 'a')?;
             let cal = thunderlook_calendar::load(conn)?;
             let a = cal.appointments.iter().find(|a| a.id == n).ok_or("rendez-vous introuvable")?;
+            let mut e = event_of(a, thunderlook_calendar::description(a, dir));
             if a.recurrence.is_some() {
-                return Err("rendez-vous périodique : non géré".into());
+                e.series = Some(thunderlook_calendar::ics::export(&[a], "ThunderLook", &|a| thunderlook_calendar::description(a, dir)));
             }
-            Payload::Event(event_of(a, thunderlook_calendar::description(a, dir)))
+            Payload::Event(e)
         }
     })
 }
@@ -573,7 +644,10 @@ fn create(conn: &mut Connection, dir: &Path, payload: &Payload) -> Result<String
         }
         Payload::Event(e) => {
             let folder = if e.calendar_id.is_empty() { default_folder(conn, ItemKind::Event)? } else { num(&e.calendar_id, 'c')? };
-            Ok(format!("a{}", thunderlook_calendar::write::create(conn, dir, folder, &edit_of(e))?))
+            Ok(format!("a{}", match &e.series {
+                Some(ics) => thunderlook_calendar::write::create_series(conn, dir, folder, &edit_of(e), &recurrence_of(ics)?)?,
+                None => thunderlook_calendar::write::create(conn, dir, folder, &edit_of(e))?,
+            }))
         }
         Payload::None => Err("rien à créer".into()),
     }
@@ -585,7 +659,10 @@ fn update(conn: &mut Connection, dir: &Path, id: &str, payload: &Payload) -> Res
         Payload::Contact(f) => thunderlook_contacts::write::update(conn, dir, num(id, 'p')?, &ContactForm { id: Some(id.to_string()), photo: None, ..f.clone() }),
         Payload::Task(f) => thunderlook_items::task_save(conn, dir, &TaskForm { id: Some(id.to_string()), ..f.clone() }).map(|_| ()),
         Payload::Note(f) => thunderlook_items::note_save(conn, dir, &NoteForm { id: Some(id.to_string()), ..f.clone() }).map(|_| ()),
-        Payload::Event(e) => thunderlook_calendar::write::update(conn, dir, num(id, 'a')?, &edit_of(e)),
+        Payload::Event(e) => match &e.series {
+            Some(ics) => thunderlook_calendar::write::replace_series(conn, dir, num(id, 'a')?, &edit_of(e), &recurrence_of(ics)?),
+            None => thunderlook_calendar::write::update(conn, dir, num(id, 'a')?, &edit_of(e)),
+        },
         Payload::None => Err("rien à modifier".into()),
     }
 }

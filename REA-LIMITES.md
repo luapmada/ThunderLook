@@ -332,3 +332,22 @@ Testé sous Linux sur une base fabriquée uniquement ; **aucune écriture dans O
   l'occurrence supprimée : la suivante créée reste.
 - Export `.ics` : `RRULE` (FREQ/INTERVAL/COUNT/UNTIL) pour les séries fixes ; « après la fin » → `X-THUNDERLOOK-REGEN` (aucun équivalent iCalendar).
 - Rappels : aucune modification de `crates/reminders` ; chaque occurrence suivante est une vraie tâche avec son propre rappel décalé.
+
+## À vérifier avec REA/Outlook — séries venues du téléphone (`crates/calendar/src/ics_series.rs`, lot AA)
+
+Une série importée du téléphone est écrite par `write::create_series` / `write::replace_series` avec la périodicité
+complète (exceptions et dates supprimées) : même format que `update_series`, **donc mêmes réserves que la section
+« séries avec exceptions » ci-dessus** (jamais ouverte dans Outlook, aucune écriture dans Outlook).
+- **`FirstDateTime`** : calculé comme `write::recurrence_of` (jour, semaine selon `WKST`, mois, an) ; l'expansion de
+  ThunderLook ne s'en sert pas, Outlook peut s'en servir : non vérifié.
+- **`OccurrenceCount`** d'une série à `UNTIL` : nombre d'occurrences réellement générées ; pour `COUNT`, la valeur du fichier.
+- **Heure fixe en UTC** (`DTSTART:…Z` + RRULE) : acceptée seulement si le décalage de Paris ne change pas sur la
+  période (sinon refus signalé). Le fuseau des `TZID` reconnus (Europe/Paris, Brussels, Berlin… « Romance Standard Time »)
+  est supposé identique à Paris. **Je ne sais pas ce qu'écrit MPE** (TZID ou UTC, `RANGE`, `EXDATE` en date seule) : à relever.
+- Occurrence modifiée dont l'objet, le lieu, les heures, la disponibilité, le rappel ou « journée entière » changent : gardée.
+  Description / catégories / confidentialité différentes : série refusée. Un champ absent de l'occurrence est lu comme
+  « comme la série » (la RFC dirait « absent »), pour ne pas refuser les téléphones qui n'écrivent que les différences.
+- **Rappel et catégories** d'une série remplacée : ceux du téléphone s'il en envoie, sinon ceux de ThunderLook ; un
+  rappel ou des catégories **retirés** sur le téléphone ne sont donc pas retirés dans ThunderLook.
+- Annuler un import qui a modifié une série la rétablit depuis son export `.ics` : les champs que l'export ne porte
+  pas (disponibilité / rappel propres à une occurrence modifiée) ne sont pas rétablis.

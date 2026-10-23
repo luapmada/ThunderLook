@@ -455,6 +455,64 @@ pub fn update_occurrence(conn: &mut Connection, _data_dir: &Path, message_id: i6
     Ok(())
 }
 
+/// Remplace la périodicité (et les champs de `edit`) d'une série venue d'un fichier, ou fait d'un rendez-vous simple une
+/// série : `rec` est la périodicité complète (exceptions et dates supprimées comprises), `edit` porte objet, lieu, heures
+/// de la première occurrence, description, etc. Le rendez-vous garde son identifiant (donc son UID d'export). Catégories et
+/// rappel de l'existant sont CONSERVÉS quand `edit` n'en porte pas.
+pub fn replace_series(conn: &mut Connection, data_dir: &Path, message_id: i64, edit: &Edit, rec: &Recurrence) -> Result<()> {
+    let row: Option<(i64, Vec<u8>)> = conn
+        .query_row("SELECT f.source_id, m.props FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id = ?1", [message_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()
+        .map_err(e)?;
+    let (source_id, old) = row.ok_or("rendez-vous introuvable")?;
+    let named = named_of(conn, source_id)?;
+    let blob_id = named.id(PSETID_APPOINTMENT, 0x8216).ok_or("source sans périodicité")?;
+    let a = |lid| named.id(PSETID_APPOINTMENT, lid);
+    let c = |lid| named.id(PSETID_COMMON, lid);
+    let bag = bag::Bag::parse(&old)?;
+    let mut edit = edit.clone();
+    if edit.categories.trim().is_empty() {
+        edit.categories = named.name(PS_PUBLIC_STRINGS, "Keywords").and_then(|i| bag.strings(i)).unwrap_or_default().join(",");
+    }
+    if edit.reminder.is_none() && c(0x8503).and_then(|i| bag.bool(i)).unwrap_or(false) {
+        edit.reminder = Some(c(0x8501).and_then(|i| bag.int(i)).unwrap_or(15) as i32);
+    }
+    let first_day = minutes_to_local(rec.start_date).date();
+    let first = expand::dates(rec, first_day, first_day + Duration::days(366 * 5)).first().copied().unwrap_or(first_day);
+    let at = |offset: u32| first.and_hms_opt(0, 0, 0).unwrap_or_default() + Duration::minutes(i64::from(offset));
+    let (first_start, first_end) = (TimeZone::PARIS.to_utc(at(rec.start_offset)).and_utc().timestamp_millis(), TimeZone::PARIS.to_utc(at(rec.end_offset)).and_utc().timestamp_millis());
+    let mut set = props_of(&named, &edit, false)?;
+    set.push((blob_id, Some(Value::Binary(rec.encode()))));
+    for (id, v) in [
+        (a(0x8223), Value::Bool(true)),
+        (a(0x820D), Value::time_ms(first_start)),
+        (a(0x820E), Value::time_ms(first_end)),
+        (a(0x8215), Value::Bool(edit.all_day)),
+        (Some(0x0060), Value::time_ms(first_start)),
+        (Some(0x0061), Value::time_ms(first_end)),
+    ] {
+        if let Some(id) = id {
+            set.push((id, Some(v)));
+        }
+    }
+    let props = bag::merge(&old, &set)?;
+    save(conn, data_dir, message_id, source_id, &edit, &props)
+}
+
+/// Nouvelle série dans le calendrier `folder_id` à partir d'une périodicité déjà construite (voir `replace_series`) ;
+/// rend l'identifiant du message.
+pub fn create_series(conn: &mut Connection, data_dir: &Path, folder_id: i64, edit: &Edit, rec: &Recurrence) -> Result<i64> {
+    // Création d'une série quelconque (porte la périodicité et les drapeaux), puis remplacement par celle du fichier.
+    let placeholder = Edit { repeat: Some(Repeat { frequency: Frequency::Daily, interval: 1, end: RepeatEnd::Never }), ..edit.clone() };
+    let id = create(conn, data_dir, folder_id, &placeholder)?;
+    if let Err(x) = replace_series(conn, data_dir, id, edit, rec) {
+        let _ = conn.execute("DELETE FROM message_fts WHERE rowid = ?1", [id]);
+        let _ = conn.execute("DELETE FROM message WHERE id = ?1", [id]);
+        return Err(x);
+    }
+    Ok(id)
+}
+
 /// Déplace un rendez-vous simple (glisser-déposer, poignée de fin) : nouveaux début et fin, heure de Paris
 /// `AAAA-MM-JJTHH:MM`. Le reste du rendez-vous est inchangé. Refuse une série (une occurrence se déplace par
 /// `update_occurrence`).

@@ -110,7 +110,8 @@ pub enum Payload {
     Event(EventData),
 }
 
-/// Rendez-vous simple (non périodique) : les champs que porte un `.ics`. Dates locales (Paris) `AAAA-MM-JJTHH:MM`.
+/// Rendez-vous : les champs que porte un `.ics`. Dates locales (Paris) `AAAA-MM-JJTHH:MM`. Une série porte en plus son
+/// `.ics` (`series`) ; `start`/`end` sont alors ceux de sa première occurrence.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct EventData {
@@ -128,6 +129,9 @@ pub struct EventData {
     pub body: String,
     pub categories: String,
     pub private: bool,
+    /// VCALENDAR de la série (maître + occurrences modifiées) ; `None` : rendez-vous simple.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub series: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,8 +246,7 @@ pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<
         })
         .collect();
     let text = thunderlook_calendar::ics::export(&shown.iter().collect::<Vec<_>>(), "ThunderLook", &|a| thunderlook_calendar::description(a, data_dir));
-    // Les séries ne se relisent pas (voir `import`) : leurs suppressions ne sont jamais proposées.
-    let pairs = shown.iter().filter(|a| a.recurrence.is_none()).map(|a| (format!("a{}", a.id), event_uid(a))).collect();
+    let pairs = shown.iter().map(|a| (format!("a{}", a.id), event_uid(a))).collect();
     files.push(write_file(out_dir, CALENDAR_FILE, &text, pairs)?);
 
     let manifest = Manifest { exported_at: now_stamp(), files };

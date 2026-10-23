@@ -361,9 +361,6 @@ fn serie_et_exceptions_traversent_l_aller_retour_sans_changement() {
 }
 
 #[test]
-#[ignore = "ÉCART : une série modifiée sur le téléphone n'est jamais relue (avertissement seulement) ; critère § 7 « périodicités \
-            et exceptions identiques » non atteint dans le sens téléphone → ThunderLook. Correction hors périmètre : \
-            `ics::parse` rend la série mais l'écriture (`thunderlook_calendar::write`) ne sait pas rejouer des exceptions importées."]
 fn serie_modifiee_sur_le_telephone_est_proposee() {
     let mut w = world("serie-modif");
     rich(&mut w);
@@ -374,8 +371,6 @@ fn serie_modifiee_sur_le_telephone_est_proposee() {
 }
 
 #[test]
-#[ignore = "ÉCART : une série créée sur le téléphone est ignorée (perte silencieuse, simple avertissement). Hors périmètre : \
-            l'écriture de séries importées demande une API dans `thunderlook-calendar` (RRULE → `Repeat`, exceptions)."]
 fn serie_creee_sur_le_telephone_est_importee() {
     let mut w = world("serie-new");
     rich(&mut w);

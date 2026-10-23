@@ -19,8 +19,8 @@ fn export_ecrit_les_quatre_fichiers_et_un_manifeste_exact() {
     assert!(read(&w, "contacts.vcf").contains("VERSION:3.0"));
     // Écriture atomique : aucun fichier temporaire ne traîne.
     assert!(fs::read_dir(&w.out).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")));
-    // Les séries ne sont jamais proposées à la suppression.
-    assert_eq!(rep.file("calendrier.ics").unwrap().ids.len(), 2);
+    // Les séries sont relues : une série retirée du fichier est proposée à la suppression comme un autre rendez-vous.
+    assert_eq!(rep.file("calendrier.ics").unwrap().ids.len(), 3);
 }
 
 #[test]
@@ -35,8 +35,8 @@ fn export_puis_import_sans_modification_ne_donne_aucun_changement() {
     fs::remove_file(w.out.join("manifest.json")).unwrap();
     let rep = import_changes(&w.conn, &w.dir, &w.out).unwrap();
     assert!(rep.changes.is_empty(), "{:?}", rep.changes);
-    assert_eq!(rep.unchanged, 2 + 2 + 2 + 2);
-    assert_eq!(rep.warnings.len(), 1, "la série est signalée : {:?}", rep.warnings);
+    assert_eq!(rep.unchanged, 2 + 2 + 2 + 3);
+    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
 }
 
 #[test]
