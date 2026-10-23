@@ -6,6 +6,7 @@
 mod contacts_cmds;
 mod items_cmds;
 mod reminders_cmds;
+mod search_cmds;
 mod shared_calendar;
 mod toast;
 
@@ -1518,6 +1519,7 @@ pub fn run() {
             reminders_cmds::reminders_due,
             reminders_cmds::reminder_dismiss,
             reminders_cmds::reminder_snooze,
+            search_cmds::global_search,
             contact_folders,
             contact_list,
             contact_card,

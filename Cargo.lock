@@ -5074,6 +5074,7 @@ dependencies = [
  "thunderlook-mailbox",
  "thunderlook-model",
  "thunderlook-reminders",
+ "thunderlook-search",
  "thunderlook-store",
  "thunderlook-sync",
  "tokio",
