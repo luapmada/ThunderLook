@@ -122,13 +122,19 @@ struct Ctx<'a> {
     kind: ItemKind,
     /// Identifiants exportés (manifeste) ; `None` sans manifeste : aucune suppression n'est alors proposée.
     exported: Option<&'a [String]>,
+    /// Identifiant du fichier → identifiant local, tels qu'exportés (manifeste).
+    uids: Option<&'a HashMap<String, String>>,
     map: HashMap<String, String>,
 }
 
 impl Ctx<'_> {
-    /// L'élément du fichier est un élément exporté qui n'est plus dans la base : supprimé ici depuis, pas « nouveau ».
+    /// L'élément du fichier a été exporté, ou déjà importé (identifiant retenu), et n'est plus dans la base : supprimé ici
+    /// depuis, pas « nouveau ». Le téléphone qui le garde ne le ressuscite pas.
     fn deleted_here(&self, uid: Option<&str>, m: &Matcher) -> bool {
-        uid.is_some_and(|u| self.exported.is_some_and(|e| e.iter().any(|x| x == u)) && !m.ids.contains(u) && !self.map.contains_key(u))
+        uid.is_some_and(|u| {
+            let by_manifest = self.uids.and_then(|x| x.get(u)).cloned().or_else(|| self.exported.filter(|e| e.iter().any(|x| x == u)).map(|_| u.to_string()));
+            by_manifest.or_else(|| self.map.get(u).cloned()).is_some_and(|local| !m.ids.contains(&local))
+        })
     }
 
     fn change(&self, kind: ChangeKind, id: &str, summary: String, ext_uid: Option<&str>, payload: Payload) -> Change {
@@ -172,7 +178,7 @@ pub fn import_changes(conn: &Connection, data_dir: &Path, in_dir: &Path) -> Resu
             rep.unchanged += info.map_or(0, |i| i.count);
             continue;
         }
-        let ctx = Ctx { kind, exported: info.map(|i| i.ids.as_slice()), map: maps.get(kind.name()).cloned().unwrap_or_default() };
+        let ctx = Ctx { kind, exported: info.map(|i| i.ids.as_slice()), uids: info.map(|i| &i.uids), map: maps.get(kind.name()).cloned().unwrap_or_default() };
         let text = text_of(&bytes);
         match kind {
             ItemKind::Contact => contacts(conn, data_dir, &text, &ctx, &mut rep)?,
@@ -419,6 +425,9 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
     for (n, a) in phone.iter().enumerate() {
         if a.recurrence.is_some() {
             series += 1;
+            continue;
+        }
+        if ctx.deleted_here(a.uid.as_deref(), &m) {
             continue;
         }
         let e = norm_event(event_of(a, a.description.clone()));
