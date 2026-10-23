@@ -76,6 +76,10 @@ pub struct FileInfo {
     /// suppression (un élément créé depuis l'export n'est pas « supprimé sur le téléphone »).
     #[serde(default)]
     pub ids: Vec<String>,
+    /// Identifiant écrit dans le fichier (`UID`, `X-OUTLOOK-UID`) → identifiant local : retrouve un élément supprimé ici
+    /// depuis l'export, même quand le fichier le désigne par l'identifiant du téléphone.
+    #[serde(default)]
+    pub uids: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,15 +189,26 @@ pub(crate) fn event_uid(a: &thunderlook_calendar::Appointment) -> String {
     a.uid.clone().unwrap_or_else(|| format!("thunderlook-{}-{}", a.source_id, a.id))
 }
 
+/// Identifiant sous lequel le téléphone connaît un élément : celui qu'il a donné à la création (retenu dans
+/// `exchange-map.json`), sinon l'identifiant local. Le garder d'un export à l'autre évite que MPE voie « un nouvel
+/// élément » et « un élément disparu » là où il n'y en a qu'un.
+fn phone_uid(map: Option<&HashMap<String, String>>, local: &str) -> String {
+    map.and_then(|m| m.iter().filter(|(_, l)| l.as_str() == local).map(|(u, _)| u).min()).cloned().unwrap_or_else(|| local.to_string())
+}
+
 /// Exporte contacts, tâches, notes et calendrier dans `out_dir` (créé au besoin).
 pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<Report> {
     fs::create_dir_all(out_dir).map_err(|e| format!("{} : {e}", out_dir.display()))?;
     let mut files: Vec<FileInfo> = Vec::new();
+    let maps = read_map(data_dir);
+    let uid_of = |kind: ItemKind, local: &str| phone_uid(maps.get(kind.name()), local);
 
     let contacts = thunderlook_contacts::load(conn, None, None)?;
     let forms: Vec<ContactForm> = contacts.contacts.iter().map(|c| thunderlook_contacts::write::form_from(c, data_dir)).collect();
-    let text = thunderlook_contacts::vcard::export(&forms, thunderlook_contacts::vcard::Version::V30);
-    files.push(write_file(out_dir, CONTACTS_FILE, &text, forms.iter().filter_map(|f| f.id.clone()).collect())?);
+    let shown: Vec<ContactForm> = forms.iter().map(|f| ContactForm { id: f.id.as_deref().map(|i| uid_of(ItemKind::Contact, i)), ..f.clone() }).collect();
+    let text = thunderlook_contacts::vcard::export(&shown, thunderlook_contacts::vcard::Version::V30);
+    let pairs = forms.iter().zip(&shown).filter_map(|(f, s)| Some((f.id.clone()?, s.id.clone()?))).collect();
+    files.push(write_file(out_dir, CONTACTS_FILE, &text, pairs)?);
 
     let tasks = thunderlook_items::tasks(conn)?;
     let forms: Vec<TaskForm> = tasks
@@ -202,7 +217,9 @@ pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<
         .filter_map(|r| r.id.strip_prefix('t').and_then(|n| n.parse().ok()))
         .map(|n| thunderlook_items::task_form(conn, data_dir, n))
         .collect::<Result<_>>()?;
-    files.push(write_file(out_dir, TASKS_FILE, &thunderlook_items::vtodo::export(&forms), forms.iter().filter_map(|f| f.id.clone()).collect())?);
+    let shown: Vec<TaskForm> = forms.iter().map(|f| TaskForm { id: f.id.as_deref().map(|i| uid_of(ItemKind::Task, i)), ..f.clone() }).collect();
+    let pairs = forms.iter().zip(&shown).filter_map(|(f, s)| Some((f.id.clone()?, s.id.clone()?))).collect();
+    files.push(write_file(out_dir, TASKS_FILE, &thunderlook_items::vtodo::export(&shown), pairs)?);
 
     let notes = thunderlook_items::notes(conn, data_dir)?;
     let forms: Vec<NoteForm> = notes
@@ -211,14 +228,23 @@ pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<
         .filter_map(|r| r.id.strip_prefix('n').and_then(|n| n.parse().ok()))
         .map(|n| thunderlook_items::note_form(conn, data_dir, n))
         .collect::<Result<_>>()?;
-    files.push(write_file(out_dir, NOTES_FILE, &thunderlook_items::vnote::export(&forms), forms.iter().filter_map(|f| f.id.clone()).collect())?);
+    let shown: Vec<NoteForm> = forms.iter().map(|f| NoteForm { id: f.id.as_deref().map(|i| uid_of(ItemKind::Note, i)), ..f.clone() }).collect();
+    let pairs = forms.iter().zip(&shown).filter_map(|(f, s)| Some((f.id.clone()?, s.id.clone()?))).collect();
+    files.push(write_file(out_dir, NOTES_FILE, &thunderlook_items::vnote::export(&shown), pairs)?);
 
     let calendar = thunderlook_calendar::load(conn)?;
-    let items: Vec<&thunderlook_calendar::Appointment> = calendar.appointments.iter().collect();
-    let text = thunderlook_calendar::ics::export(&items, "ThunderLook", &|a| thunderlook_calendar::description(a, data_dir));
+    let shown: Vec<thunderlook_calendar::Appointment> = calendar
+        .appointments
+        .iter()
+        .map(|a| {
+            let phone = uid_of(ItemKind::Event, &format!("a{}", a.id));
+            thunderlook_calendar::Appointment { uid: Some(if phone == format!("a{}", a.id) { event_uid(a) } else { phone }), ..a.clone() }
+        })
+        .collect();
+    let text = thunderlook_calendar::ics::export(&shown.iter().collect::<Vec<_>>(), "ThunderLook", &|a| thunderlook_calendar::description(a, data_dir));
     // Les séries ne se relisent pas (voir `import`) : leurs suppressions ne sont jamais proposées.
-    let ids = items.iter().filter(|a| a.recurrence.is_none()).map(|a| format!("a{}", a.id)).collect();
-    files.push(write_file(out_dir, CALENDAR_FILE, &text, ids)?);
+    let pairs = shown.iter().filter(|a| a.recurrence.is_none()).map(|a| (format!("a{}", a.id), event_uid(a))).collect();
+    files.push(write_file(out_dir, CALENDAR_FILE, &text, pairs)?);
 
     let manifest = Manifest { exported_at: now_stamp(), files };
     let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -226,7 +252,7 @@ pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<
     Ok(manifest)
 }
 
-fn write_file(dir: &Path, name: &str, text: &str, ids: Vec<String>) -> Result<FileInfo> {
+fn write_file(dir: &Path, name: &str, text: &str, pairs: Vec<(String, String)>) -> Result<FileInfo> {
     write_atomic(&dir.join(name), text.as_bytes())?;
     let count = match name {
         CONTACTS_FILE => text.matches("BEGIN:VCARD").count(),
@@ -234,7 +260,7 @@ fn write_file(dir: &Path, name: &str, text: &str, ids: Vec<String>) -> Result<Fi
         NOTES_FILE => text.matches("BEGIN:VNOTE").count(),
         _ => text.matches("BEGIN:VEVENT").count(),
     };
-    Ok(FileInfo { name: name.to_string(), count, sha256: sha256::hex(text.as_bytes()), ids })
+    Ok(FileInfo { name: name.to_string(), count, sha256: sha256::hex(text.as_bytes()), ids: pairs.iter().map(|(id, _)| id.clone()).collect(), uids: pairs.into_iter().map(|(id, uid)| (uid, id)).collect() })
 }
 
 /// Manifeste du dossier d'échange, s'il y en a un de lisible.
