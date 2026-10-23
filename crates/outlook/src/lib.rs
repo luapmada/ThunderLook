@@ -5,4 +5,6 @@ pub mod calendar;
 #[cfg(windows)]
 pub mod com;
 #[cfg(windows)]
+pub mod contacts;
+#[cfg(windows)]
 pub mod msg;

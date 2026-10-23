@@ -212,6 +212,8 @@ pub struct Ui {
     pub cal_view: RwSignal<Option<CalendarView>>,
     pub cal_anchor: RwSignal<String>,
     pub cal_epoch: RwSignal<u64>,
+    /// Incrémenté quand la synchronisation avec Outlook a changé des contacts.
+    pub contacts_epoch: RwSignal<u64>,
     /// Vue Mois défilée à la roulette : lundi de la première semaine (`None` : mois de `cal_anchor`).
     pub cal_month_start: RwSignal<Option<String>>,
     pub cal_selected: RwSignal<Option<CalendarEvent>>,
@@ -271,6 +273,7 @@ impl Ui {
             cal_view: RwSignal::new(None),
             cal_anchor: RwSignal::new(String::new()),
             cal_epoch: RwSignal::new(0),
+            contacts_epoch: RwSignal::new(0),
             cal_month_start: RwSignal::new(None),
             cal_selected: RwSignal::new(None),
             appointment: RwSignal::new(None),

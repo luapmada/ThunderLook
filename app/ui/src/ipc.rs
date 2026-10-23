@@ -197,6 +197,14 @@ pub fn on_calendar_changed(f: impl Fn() + 'static) {
     });
 }
 
+pub fn on_contacts_changed(f: impl Fn() + 'static) {
+    let handler = Closure::<dyn FnMut(JsValue)>::new(move |_: JsValue| f());
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = tauri_listen("contacts-changed", &handler).await;
+        handler.forget();
+    });
+}
+
 pub async fn contact_folders() -> Result<Vec<ContactFolder>, String> {
     call("contact_folders", &NoArgs {}).await
 }

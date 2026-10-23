@@ -126,6 +126,21 @@ const PHONES: [(&str, u16); 19] = [
     ("Télécopie bureau", 0x3A24),
 ];
 
+/// Propriétés que lit ce crate (fixes et nommées de la source) : celles qu'une synchronisation avec Outlook remplace,
+/// une propriété absente d'Outlook étant effacée du contact.
+pub fn tracked_ids(named: &Named) -> Vec<u16> {
+    let ids = Ids::new(named);
+    let mut v: Vec<u16> = vec![
+        0x3001, 0x3A45, 0x3A06, 0x3A44, 0x3A11, 0x3A05, 0x3A4F, 0x3A16, 0x3A17, 0x3A18, 0x3A19, 0x3A5D, 0x3A59, 0x3A5C, 0x3A5B, 0x3A5A, 0x3A63, 0x3A5F, 0x3A62,
+        0x3A61, 0x3A60, 0x3A51, 0x3A42, 0x3A41,
+    ];
+    v.extend(PHONES.iter().map(|&(_, id)| id));
+    v.extend([ids.file_under, ids.file_under_id, ids.postal_id, ids.html, ids.im, ids.has_picture, ids.keywords].into_iter().flatten());
+    v.extend(ids.emails.iter().flat_map(|e| [e.0, e.1, e.2, e.3]).flatten());
+    v.extend(ids.work.iter().flatten());
+    v
+}
+
 /// Identifiants locaux des propriétés nommées, pour une source.
 struct Ids {
     file_under: Option<u16>,

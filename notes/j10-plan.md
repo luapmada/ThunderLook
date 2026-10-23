@@ -30,3 +30,13 @@
 - Rechargement depuis une copie fraîche du PST (comme `tl-import --calendars`) : les 2 contacts récents.
 - Listes de distribution (3) ; export vCard ; recherche des contacts dans la recherche globale.
 - Écriture : à décider avec Paul (voir Décision).
+
+## Contacts lus en direct par Outlook (23/10)
+- `crates/outlook/src/contacts.rs` : même principe que le calendrier (table du dossier → contacts nouveaux ou modifiés →
+  `.msg` temporaire → fusion dans le sac MAPI ; disparus retirés). Notes et photo (`ContactPicture.jpg`) dans le `.eml`.
+  « Classer sous » relu par COM (`FileAs`) : l'export `.msg` ne le porte pas toujours. État : `outlook-contacts.json`.
+- Première synchronisation sur une copie de la base : 6 048 contacts vérifiés en 5,9 s, 3 relus (2 créés dans Outlook les
+  20 et 21/10, Vandé modifiée). Comparaison avec Outlook (14 champs, 2 140 contacts) : aucun écart.
+- Lancée après chaque synchro du calendrier (toutes les EVERY_MS) ; événement `contacts-changed` → liste rechargée sans
+  perdre la sélection. Mention : « Synchronisé avec Outlook le … ». Exemple : `cargo run -p thunderlook-outlook --example contacts_sync -- <dossier>`.
+- Reste : écriture (créer, modifier, supprimer), listes de distribution, export vCard.

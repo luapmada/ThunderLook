@@ -16,6 +16,7 @@ use crate::{
 /// Charge les dossiers à la première ouverture du module, la liste à chaque changement de dossier, la fiche à chaque
 /// changement de sélection.
 pub fn watch(ui: Ui) {
+    ipc::on_contacts_changed(move || ui.contacts_epoch.update(|e| *e += 1));
     Effect::new(move |_| {
         if ui.module.get() != Module::Contacts || !ui.contact_folders.with_untracked(Vec::is_empty) {
             return;
@@ -34,16 +35,25 @@ pub fn watch(ui: Ui) {
             }
         });
     });
+    let last = StoredValue::new((String::new(), 0u64));
     Effect::new(move |_| {
         let folder = ui.contact_folder.get();
+        let epoch = ui.contacts_epoch.get();
+        let refresh = last.with_value(|(f, e)| *f == folder && *e != epoch) && ui.contact_list.with_untracked(Option::is_some);
+        last.set_value((folder.clone(), epoch));
         if folder.is_empty() {
             return;
         }
-        ui.contact_list.set(None);
+        // Rechargement après une synchronisation : la liste et la sélection restent en place.
+        if !refresh {
+            ui.contact_list.set(None);
+        }
         spawn_local(async move {
             match ipc::contact_list(&folder).await {
                 Ok(l) if ui.contact_folder.get_untracked() == folder => {
-                    ui.contact_selected.set(l.rows.first().map(|r| r.id.clone()));
+                    if !refresh || ui.contact_selected.get_untracked().is_none() {
+                        ui.contact_selected.set(l.rows.first().map(|r| r.id.clone()));
+                    }
                     ui.contact_list.set(Some(l));
                 }
                 Ok(_) => {}

@@ -106,7 +106,7 @@ struct ItemState {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct State {
+pub(crate) struct State {
     source_id: i64,
     store_path: String,
     /// NID → EntryID des calendriers liés.
@@ -179,10 +179,10 @@ fn file_stem(p: &str) -> String {
 }
 
 /// Session Outlook : espace MAPI et fichier de données lié.
-struct Session {
-    ns: Disp,
-    store: Disp,
-    store_id: String,
+pub(crate) struct Session {
+    pub(crate) ns: Disp,
+    pub(crate) store: Disp,
+    pub(crate) store_id: String,
 }
 
 fn calendars(store: &Disp) -> Result<Vec<Disp>> {
@@ -203,7 +203,7 @@ fn calendars(store: &Disp) -> Result<Vec<Disp>> {
 /// Fichier de données d'Outlook lié à une source PST de la base : nom du fichier d'origine de la source commençant par
 /// celui du PST d'Outlook (`Outlook_300923_BACKUP_….pst` ↔ `Outlook_300923.pst`), et calendrier par défaut connu de
 /// la source sous le même NID.
-fn link(conn: &Connection, ns: &Disp, previous: Option<&State>) -> Result<(Session, i64, u32)> {
+pub(crate) fn link(conn: &Connection, ns: &Disp, previous: Option<&State>) -> Result<(Session, i64, u32)> {
     let stores = ns.obj("Stores")?;
     let sources: Vec<(i64, String)> = conn
         .prepare("SELECT id, origin_path FROM source WHERE kind = 'pst'")
@@ -236,24 +236,24 @@ fn link(conn: &Connection, ns: &Disp, previous: Option<&State>) -> Result<(Sessi
 }
 
 /// Ce qu'Outlook dit d'un rendez-vous.
-struct Fetched {
-    folder_id: i64,
-    nid: u32,
-    entry_id: String,
-    modified: i64,
-    class: String,
-    subject: String,
-    organizer: String,
-    attendees: String,
-    sensitivity: i64,
-    importance: i64,
-    body: String,
+pub(crate) struct Fetched {
+    pub(crate) folder_id: i64,
+    pub(crate) nid: u32,
+    pub(crate) entry_id: String,
+    pub(crate) modified: i64,
+    pub(crate) class: String,
+    pub(crate) subject: String,
+    pub(crate) organizer: String,
+    pub(crate) attendees: String,
+    pub(crate) sensitivity: i64,
+    pub(crate) importance: i64,
+    pub(crate) body: String,
     /// (identifiant dans le sac, valeur ; `None` : absente d'Outlook).
-    props: Vec<(u16, Option<Value>)>,
-    modified_ms: Option<i64>,
+    pub(crate) props: Vec<(u16, Option<Value>)>,
+    pub(crate) modified_ms: Option<i64>,
 }
 
-fn fetch(s: &Session, named: &Named, folder_id: i64, nid: u32, entry_id: &str, modified: i64) -> Result<Fetched> {
+pub(crate) fn fetch(s: &Session, named: &Named, folder_id: i64, nid: u32, entry_id: &str, modified: i64) -> Result<Fetched> {
     let item = s.ns.obj_with("GetItemFromID", &[VARIANT::from(entry_id), VARIANT::from(s.store_id.as_str())])?;
     // Toutes les propriétés brutes, par un `.msg` temporaire (`olMSGUnicode`) : l'élément n'est pas modifié.
     let tmp = std::env::temp_dir().join("thunderlook-outlook");
@@ -510,7 +510,7 @@ fn sync_in(s: &Session, conn: &mut Connection, data_dir: &Path, source_id: i64, 
     Ok(report)
 }
 
-fn preview(body: &str) -> String {
+pub(crate) fn preview(body: &str) -> String {
     body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect()
 }
 

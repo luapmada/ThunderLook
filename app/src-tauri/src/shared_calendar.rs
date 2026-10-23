@@ -44,6 +44,14 @@ pub fn start(app: &AppHandle) {
         }
         st.running.store(false, Ordering::SeqCst);
         let _ = app.emit("calendar-changed", ());
+        // Contacts : même lien avec Outlook, relevés à la suite du calendrier.
+        if r.is_ok() {
+            if let Ok(rep) = data_dir(&app).and_then(|d| thunderlook_outlook::contacts::sync(&d)) {
+                if rep.added + rep.updated + rep.removed > 0 {
+                    let _ = app.emit("contacts-changed", ());
+                }
+            }
+        }
     });
 }
 

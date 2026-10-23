@@ -997,6 +997,14 @@ fn contact_list(app: AppHandle, folder: String) -> Result<thunderlook_model::con
     let all = thunderlook_contacts::load(&conn, Some(id), None)?;
     let mut list = thunderlook_contacts::view::list(&all, id);
     list.source_note = thunderlook_contacts::source_note(&conn, id)?;
+    // Dossier suivi en direct avec Outlook : la mention dit quand la synchronisation a eu lieu.
+    let folder: Option<(i64, u32)> = conn.query_row("SELECT source_id, nid FROM folder WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
+    if let (Some((source, nid)), Some((linked, folders, at))) = (folder, thunderlook_outlook::contacts::linked(&data_dir(&app)?)) {
+        if source == linked && folders.contains(&nid) {
+            let when = chrono::DateTime::from_timestamp_millis(at).map(|t| t.with_timezone(&chrono::Local).format("%d/%m à %H:%M").to_string()).unwrap_or_default();
+            list.source_note = Some(format!("Lecture seule — Outlook fait foi. Synchronisé avec Outlook le {when}."));
+        }
+    }
     Ok(list)
 }
 
