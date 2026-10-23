@@ -183,11 +183,6 @@ pub async fn appointment_delete(id: &str, series: bool) -> Result<String, String
     call("appointment_delete", &DeleteArg { id, series }).await
 }
 
-/// Synchronisation du calendrier commun avec Outlook (le résultat arrive par « calendar-changed »).
-pub async fn outlook_sync() -> Result<(), String> {
-    call("outlook_sync", &NoArgs {}).await
-}
-
 /// Suit l'événement « calendar-changed » du cœur (calendrier commun relu).
 pub fn on_calendar_changed(f: impl Fn() + 'static) {
     let handler = Closure::<dyn FnMut(JsValue)>::new(move |_: JsValue| f());

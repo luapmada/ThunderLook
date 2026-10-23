@@ -24,13 +24,6 @@ const DRAG_PX: f64 = 4.0;
 pub fn watch(ui: Ui) {
     // Calendrier commun avec Outlook : relu à chaque ouverture du module ; « calendar-changed » recharge la vue.
     ipc::on_calendar_changed(move || ui.cal_epoch.update(|e| *e += 1));
-    Effect::new(move |_| {
-        if ui.module.get() == Module::Calendar {
-            spawn_local(async move {
-                let _ = ipc::outlook_sync().await;
-            });
-        }
-    });
     // Toute autre navigation (jour, flèches, Aujourd'hui, type de vue) quitte le défilement de la vue Mois.
     Effect::new(move |_| {
         ui.cal_anchor.track();
