@@ -28,6 +28,26 @@ pub struct TaskRow {
     pub importance: i32,
     pub categories: Vec<String>,
     pub folder: String,
+    /// `AAAA-MM-JJ` du début, vide sans début.
+    #[serde(default)]
+    pub start: String,
+    /// Tâche périodique.
+    #[serde(default)]
+    pub recurring: bool,
+}
+
+/// Vue et tri demandés à la liste des tâches.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TaskQuery {
+    /// "all" (défaut), "today", "overdue", "week", "done" ou "folder".
+    pub view: String,
+    /// Dossier `f<id>` pour la vue "folder".
+    pub folder: String,
+    /// "due" (défaut), "importance" ou "title".
+    pub sort: String,
+    /// Texte cherché dans l'objet.
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +74,18 @@ pub struct TaskForm {
     pub body: String,
     /// Catégories séparées par des virgules.
     pub categories: String,
+    /// Rappel `AAAA-MM-JJTHH:MM` (heure de Paris) ; `None` : aucun.
+    pub reminder: Option<String>,
+    /// "" (aucune), "daily", "weekly", "monthly" ou "yearly". "custom" : périodicité relue qui n'entre pas dans ces champs
+    /// (jours multiples, n-ième jour…), conservée telle quelle à l'enregistrement.
+    pub repeat: String,
+    /// Tous les N jours, semaines, mois ou ans.
+    pub repeat_every: u32,
+    /// "never", "count" ou "until".
+    pub repeat_end: String,
+    pub repeat_count: u32,
+    /// Dernier jour `AAAA-MM-JJ`.
+    pub repeat_until: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,4 +116,14 @@ pub struct NoteForm {
     pub folder_id: String,
     pub body: String,
     pub color: i32,
+}
+
+/// Recherche et tri de la liste des notes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NoteQuery {
+    /// Texte cherché dans le titre et le contenu (sans tenir compte des majuscules).
+    pub text: String,
+    /// "recent" (défaut) ou "alpha".
+    pub sort: String,
 }

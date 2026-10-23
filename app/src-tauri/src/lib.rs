@@ -3,6 +3,7 @@
 //! Dossier de données, par ordre de priorité : variable d'environnement `THUNDERLOOK_DATA`,
 //! `dataDir` dans `config.json` (dossier de configuration de l'application), sinon `<données locales>\data`.
 
+mod items_cmds;
 mod shared_calendar;
 mod toast;
 
@@ -1517,6 +1518,8 @@ pub fn run() {
             exchange_export,
             exchange_import,
             tasks_list,
+            items_cmds::tasks_query,
+            items_cmds::notes_query,
             task_form,
             task_save,
             task_complete,

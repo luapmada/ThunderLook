@@ -2,14 +2,38 @@
 //! et modifier. Tout est écrit dans la base de ThunderLook.
 
 use leptos::{html, prelude::*, task::spawn_local};
-use thunderlook_model::items::{TaskForm, TaskRow};
-use wasm_bindgen::JsCast;
+use serde::{Serialize, de::DeserializeOwned};
+use thunderlook_model::items::{TaskForm, TaskList, TaskQuery};
+use wasm_bindgen::{JsCast, prelude::*};
 
 use crate::{
     icons::*,
     ipc,
     state::{Module, Ui, use_ui},
 };
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], js_name = invoke, catch)]
+    async fn tauri_invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
+}
+
+/// Appel d'une commande de `items_cmds.rs` (hors `ipc.rs`) ; `pub(crate)` pour `notes.rs`.
+pub(crate) async fn call<A: Serialize, T: DeserializeOwned>(cmd: &str, args: &A) -> Result<T, String> {
+    let args = args.serialize(&serde_wasm_bindgen::Serializer::json_compatible()).map_err(|e| e.to_string())?;
+    let out = tauri_invoke(cmd, args).await.map_err(|e| e.as_string().unwrap_or_else(|| format!("{cmd} : {e:?}")))?;
+    serde_wasm_bindgen::from_value(out).map_err(|e| format!("{cmd} : {e}"))
+}
+
+#[derive(Serialize)]
+struct QueryArg<'a> {
+    query: &'a TaskQuery,
+}
+
+const VIEWS: [(&str, &str); 5] = [("all", "Toutes"), ("today", "Aujourd'hui"), ("overdue", "En retard"), ("week", "Cette semaine"), ("done", "Terminées")];
+const SORTS: [(&str, &str); 3] = [("due", "Échéance"), ("importance", "Importance"), ("title", "Titre")];
+const REPEATS: [(&str, &str); 5] = [("", "Jamais"), ("daily", "Chaque jour"), ("weekly", "Chaque semaine"), ("monthly", "Chaque mois"), ("yearly", "Chaque année")];
+const REPEAT_ENDS: [(&str, &str); 3] = [("never", "Sans fin"), ("count", "Après N fois"), ("until", "Jusqu'au")];
 
 const STATUSES: [(i32, &str); 5] = [(0, "Pas commencée"), (1, "En cours"), (2, "Terminée"), (3, "En attente de quelqu'un d'autre"), (4, "Reportée")];
 const IMPORTANCES: [(i32, &str); 3] = [(0, "Basse"), (1, "Normale"), (2, "Haute")];
@@ -82,10 +106,6 @@ pub fn delete_selected(ui: Ui) {
     });
 }
 
-fn visible(ui: Ui) -> Vec<TaskRow> {
-    let filter = ui.task_filter.get().trim().to_lowercase();
-    ui.tasks.with(|l| l.as_ref().map(|l| l.rows.iter().filter(|r| filter.is_empty() || r.title.to_lowercase().contains(&filter)).cloned().collect()).unwrap_or_default())
-}
 
 /// `AAAA-MM-JJ` → `JJ/MM/AAAA`.
 fn fr_date(d: &str) -> String {
@@ -103,18 +123,49 @@ fn today() -> String {
 #[component]
 pub fn TasksPane() -> impl IntoView {
     let ui = use_ui();
+    let (view_sel, sort, shown) = (RwSignal::new("all".to_string()), RwSignal::new("due".to_string()), RwSignal::new(None::<TaskList>));
+    // Vue, tri et recherche sont calculés par le cœur (`tasks_query`) ; rechargés aussi après chaque modification.
+    Effect::new(move |_| {
+        ui.tasks_epoch.track();
+        let (v, so, text) = (view_sel.get(), sort.get(), ui.task_filter.get());
+        let (view, folder) = if v.starts_with('f') { ("folder".to_string(), v) } else { (v, String::new()) };
+        let query = TaskQuery { view, folder, sort: so, text };
+        spawn_local(async move {
+            match call::<_, TaskList>("tasks_query", &QueryArg { query: &query }).await {
+                Ok(l) => shown.set(Some(l)),
+                Err(e) => ui.error.set(Some(e)),
+            }
+        });
+    });
     view! {
         <section class="pane tasks" aria-label="Tâches">
+            <div class="task-views">
+                <select aria-label="Afficher" on:change=move |ev| view_sel.set(event_target_value(&ev))>
+                    {VIEWS.iter().map(|&(v, l)| view! { <option value=v selected=move || view_sel.get() == v>{l}</option> }).collect_view()}
+                    {move || {
+                        shown.with(|l| l.as_ref().map(|l| l.folders.clone()).unwrap_or_default())
+                            .into_iter()
+                            .map(|f| {
+                                let id = f.id.clone();
+                                view! { <option value=f.id.clone() selected=move || view_sel.get() == id>{format!("Dossier : {} ({})", f.name, f.count)}</option> }
+                            })
+                            .collect_view()
+                    }}
+                </select>
+                <select aria-label="Trier par" on:change=move |ev| sort.set(event_target_value(&ev))>
+                    {SORTS.iter().map(|&(v, l)| view! { <option value=v selected=move || sort.get() == v>{format!("Tri : {l}")}</option> }).collect_view()}
+                </select>
+            </div>
             <div class="contact-search">
                 <Svg icon=SEARCH size=14 />
                 <input type="search" placeholder="Rechercher dans les tâches" aria-label="Rechercher dans les tâches"
                     prop:value=move || ui.task_filter.get() on:input=move |ev| ui.task_filter.set(event_target_value(&ev)) />
             </div>
             <div class="task-rows" role="listbox" aria-label="Liste des tâches">
-                {move || match ui.tasks.with(Option::is_none) {
+                {move || match shown.with(Option::is_none) {
                     true => view! { <div class="placeholder">"Chargement des tâches…"</div> }.into_any(),
                     false => {
-                        let rows = visible(ui);
+                        let rows = shown.with(|l| l.as_ref().map(|l| l.rows.clone()).unwrap_or_default());
                         if rows.is_empty() {
                             return view! { <div class="placeholder">"Aucune tâche."</div> }.into_any();
                         }
@@ -133,6 +184,7 @@ pub fn TasksPane() -> impl IntoView {
                                             on:click=move |ev| ev.stop_propagation()
                                             on:change=move |ev| set_complete(ui, check_id.clone(), event_target_checked(&ev)) />
                                         <span class="task-title">{r.title.clone()}</span>
+                                        {r.recurring.then(|| view! { <span class="task-flag" title="Tâche périodique">"↻"</span> })}
                                         {(r.importance == 2).then(|| view! { <span class="task-flag" title="Importance haute">"!"</span> })}
                                         {(!r.categories.is_empty()).then(|| view! { <span class="task-cats">{r.categories.join(", ")}</span> })}
                                         {(!r.due.is_empty()).then(|| view! { <span class="task-due" class:overdue=overdue>{fr_date(&r.due)}</span> })}
@@ -242,6 +294,59 @@ pub fn TaskDialog() -> impl IntoView {
                             </select>
                         </label>
                     </div>
+                    <div class="appt-row">
+                        <label class="field">
+                            <span>"Rappel"</span>
+                            <input type="datetime-local" aria-label="Rappel" prop:value=move || form().and_then(|f| f.reminder).unwrap_or_default()
+                                on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.reminder = Some(v.clone()).filter(|r| !r.is_empty())); } />
+                        </label>
+                        <label class="field">
+                            <span>"Répéter"</span>
+                            <select aria-label="Répéter" on:change=move |ev| {
+                                let v = event_target_value(&ev);
+                                set(&|f| {
+                                    f.repeat = v.clone();
+                                    if f.repeat_every == 0 { f.repeat_every = 1; }
+                                    if f.repeat_end.is_empty() { f.repeat_end = "never".into(); }
+                                    if f.repeat_count == 0 { f.repeat_count = 5; }
+                                });
+                            }>
+                                {REPEATS.iter().map(|&(v, l)| view! { <option value=v selected=move || form().is_some_and(|f| f.repeat == v)>{l}</option> }).collect_view()}
+                                <Show when=move || form().is_some_and(|f| f.repeat == "custom")>
+                                    <option value="custom" selected=true>"Personnalisée (conservée)"</option>
+                                </Show>
+                            </select>
+                        </label>
+                    </div>
+                    <Show when=move || form().is_some_and(|f| !f.repeat.is_empty() && f.repeat != "custom")>
+                        <div class="appt-row">
+                            <label class="field">
+                                <span>"Tous les"</span>
+                                <input type="number" min="1" max="999" aria-label="Intervalle" prop:value=move || form().map(|f| f.repeat_every.max(1)).unwrap_or(1)
+                                    on:input=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(1); set(&|f| f.repeat_every = v); } />
+                            </label>
+                            <label class="field">
+                                <span>"Fin"</span>
+                                <select aria-label="Fin de la répétition" on:change=move |ev| { let v = event_target_value(&ev); set(&|f| f.repeat_end = v.clone()); }>
+                                    {REPEAT_ENDS.iter().map(|&(v, l)| view! { <option value=v selected=move || form().is_some_and(|f| f.repeat_end == v || (v == "never" && f.repeat_end.is_empty()))>{l}</option> }).collect_view()}
+                                </select>
+                            </label>
+                            <Show when=move || form().is_some_and(|f| f.repeat_end == "count")>
+                                <label class="field">
+                                    <span>"Nombre de fois"</span>
+                                    <input type="number" min="1" max="9999" aria-label="Nombre d'occurrences" prop:value=move || form().map(|f| f.repeat_count).unwrap_or(5)
+                                        on:input=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(1); set(&|f| f.repeat_count = v); } />
+                                </label>
+                            </Show>
+                            <Show when=move || form().is_some_and(|f| f.repeat_end == "until")>
+                                <label class="field">
+                                    <span>"Dernier jour"</span>
+                                    <input type="date" aria-label="Dernier jour" prop:value=move || form().map(|f| f.repeat_until).unwrap_or_default()
+                                        on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.repeat_until = v.clone()); } />
+                                </label>
+                            </Show>
+                        </div>
+                    </Show>
                     <label class="field">
                         <span>"Catégories (séparées par des virgules)"</span>
                         <input type="text" aria-label="Catégories" prop:value=move || form().map(|f| f.categories).unwrap_or_default()

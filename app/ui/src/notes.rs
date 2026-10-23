@@ -1,11 +1,13 @@
 //! Module Notes : pense-bêtes colorés (jaune par défaut), créés, modifiés et supprimés dans la base de ThunderLook.
 
 use leptos::{html, prelude::*, task::spawn_local};
-use thunderlook_model::items::NoteForm;
+use serde::Serialize;
+use thunderlook_model::items::{NoteForm, NoteList, NoteQuery};
 use wasm_bindgen::JsCast;
 
 use crate::{
     ipc,
+    tasks::call,
     state::{Module, Ui, use_ui},
 };
 
@@ -81,12 +83,36 @@ pub fn delete_selected(ui: Ui) {
 pub fn NotesPane() -> impl IntoView {
     let ui = use_ui();
     let selected = RwSignal::new(None::<String>);
+    let (text, sort, shown) = (RwSignal::new(String::new()), RwSignal::new("recent".to_string()), RwSignal::new(None::<NoteList>));
+    // Recherche dans le texte entier et tri calculés par le cœur (`notes_query`), rechargés après chaque modification.
+    Effect::new(move |_| {
+        ui.notes_epoch.track();
+        let query = NoteQuery { text: text.get(), sort: sort.get() };
+        spawn_local(async move {
+            #[derive(Serialize)]
+            struct Arg<'a> {
+                query: &'a NoteQuery,
+            }
+            match call::<_, NoteList>("notes_query", &Arg { query: &query }).await {
+                Ok(l) => shown.set(Some(l)),
+                Err(e) => ui.error.set(Some(e)),
+            }
+        });
+    });
     view! {
         <section class="pane notes" aria-label="Notes">
-            {move || match ui.notes.with(Option::is_none) {
+            <div class="task-views">
+                <input type="search" placeholder="Rechercher dans les notes" aria-label="Rechercher dans les notes"
+                    prop:value=move || text.get() on:input=move |ev| text.set(event_target_value(&ev)) />
+                <select aria-label="Trier par" on:change=move |ev| sort.set(event_target_value(&ev))>
+                    <option value="recent" selected=move || sort.get() == "recent">"Tri : récentes"</option>
+                    <option value="alpha" selected=move || sort.get() == "alpha">"Tri : alphabétique"</option>
+                </select>
+            </div>
+            {move || match shown.with(Option::is_none) {
                 true => view! { <div class="placeholder">"Chargement des notes…"</div> }.into_any(),
                 false => {
-                    let rows = ui.notes.with(|l| l.as_ref().map(|l| l.rows.clone()).unwrap_or_default());
+                    let rows = shown.with(|l| l.as_ref().map(|l| l.rows.clone()).unwrap_or_default());
                     if rows.is_empty() {
                         return view! { <div class="placeholder">"Aucune note."</div> }.into_any();
                     }
@@ -185,6 +211,22 @@ pub fn NoteDialog() -> impl IntoView {
                         _ => {}
                     }>
                     <h2 id="note-title">{move || if form().is_some_and(|f| f.id.is_some()) { "Note" } else { "Nouvelle note" }}</h2>
+                    <Show when=move || form().is_some_and(|f| f.id.is_none()) && ui.notes.with(|l| l.as_ref().is_some_and(|l| l.folders.len() > 1))>
+                        <label class="field">
+                            <span>"Dossier"</span>
+                            <select aria-label="Dossier" on:change=move |ev| { let v = event_target_value(&ev); set(&|f| f.folder_id = v.clone()); }>
+                                {move || {
+                                    ui.notes.with(|l| l.as_ref().map(|l| l.folders.clone()).unwrap_or_default())
+                                        .into_iter()
+                                        .map(|d| {
+                                            let id = d.id.clone();
+                                            view! { <option value=d.id.clone() selected=move || form().is_some_and(|f| f.folder_id == id)>{format!("{} — {}", d.section, d.name)}</option> }
+                                        })
+                                        .collect_view()
+                                }}
+                            </select>
+                        </label>
+                    </Show>
                     <label class="field">
                         <span>"Texte (la première ligne sert de titre)"</span>
                         <textarea class="ar-text" aria-label="Texte de la note" rows="10" prop:value=move || form().map(|f| f.body).unwrap_or_default()
