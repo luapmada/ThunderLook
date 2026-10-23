@@ -5073,7 +5073,6 @@ dependencies = [
  "thunderlook-items",
  "thunderlook-mailbox",
  "thunderlook-model",
- "thunderlook-outlook",
  "thunderlook-store",
  "thunderlook-sync",
  "tokio",
@@ -5160,21 +5159,6 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "thunderlook-outlook"
-version = "0.10.0"
-dependencies = [
- "base64 0.22.1",
- "cfb",
- "mail-parser",
- "serde",
- "serde_json",
- "thunderlook-calendar",
- "thunderlook-contacts",
- "thunderlook-store",
- "windows",
 ]
 
 [[package]]
