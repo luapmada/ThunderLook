@@ -99,7 +99,8 @@ pub fn appointment_form(app: AppHandle, cache: State<CalendarCache>, id: Option<
         }
         return Ok(form);
     }
-    // Nouveau : à l'heure demandée (sinon l'heure pleine suivante), 30 minutes, rappel 15 minutes (défauts d'Outlook).
+    // Nouveau : à l'heure demandée (sinon l'heure pleine suivante) ; durée et rappel des Options (défauts d'Outlook : 30 minutes, 15 minutes).
+    let opts = crate::options_cmds::load(&app);
     let start = match start {
         Some(s) => chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M").map_err(|_| format!("date invalide : {s}"))?,
         None => {
@@ -112,8 +113,8 @@ pub fn appointment_form(app: AppHandle, cache: State<CalendarCache>, id: Option<
         id: None,
         calendar_id: calendar_id.unwrap_or_default(),
         start: fmt(start),
-        end: fmt(start + chrono::Duration::minutes(30)),
-        reminder: Some(15),
+        end: fmt(start + chrono::Duration::minutes(i64::from(opts.default_duration))),
+        reminder: opts.default_reminder,
         repeat_every: 1,
         repeat_count: 10,
         busy: 2,

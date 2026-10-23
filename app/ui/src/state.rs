@@ -92,6 +92,8 @@ pub enum Dialog {
     SaveSearch,
     /// « Réglages de l'affichage » : classement, conversations, espacement, lecture (J3b).
     ViewSettings,
+    /// « Options » (Fichier › Options) : thème, calendrier, courrier, tâches et notes, rappels.
+    Options,
     /// « Règles et alertes », ou directement « Exécuter les règles maintenant » (J6).
     Rules { run: bool },
     /// « Gérer les actions rapides » (`edit` : `None`), ou l'éditeur d'une action rapide (indice ; la longueur de

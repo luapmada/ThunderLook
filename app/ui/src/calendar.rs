@@ -16,12 +16,8 @@ use crate::{
 const HOUR_PX: f64 = 44.0;
 /// Largeur de la colonne des heures (px), comme `grid-template-columns` de la grille.
 const HOURS_W: f64 = 56.0;
-/// Pas d'arrondi des gestes à la souris (minutes).
-const SNAP: i64 = 15;
 /// Déplacement minimal du pointeur (px) avant qu'un appui devienne un glissement.
 const DRAG_PX: f64 = 4.0;
-/// Heure affichée en haut de la grille à l'ouverture.
-const FIRST_HOUR: f64 = 7.5;
 
 /// Recharge la vue quand le module, le type de vue, la date ou les calendriers affichés changent.
 pub fn watch(ui: Ui) {
@@ -250,25 +246,26 @@ struct Outcome {
     shift_end: i64,
 }
 
-fn snap(m: f64) -> i64 {
-    (m / SNAP as f64).round() as i64 * SNAP
+fn snap(m: f64, step: i64) -> i64 {
+    (m / step as f64).round() as i64 * step
 }
 
-fn outcome(d: &Drag) -> Outcome {
+/// `step` : pas de la grille en minutes (réglage « Calendrier » des Options).
+fn outcome(d: &Drag, step: i64) -> Outcome {
     match &d.gesture {
         Gesture::Create => {
-            let floor = |m: f64| (m.min(1439.0) / SNAP as f64).floor() as i64 * SNAP;
+            let floor = |m: f64| (m.min(1439.0) / step as f64).floor() as i64 * step;
             let (a, b) = (floor(d.m0), floor(d.m));
-            Outcome { col: d.col0, start: a.min(b), end: (a.max(b) + SNAP).min(1440), shift_start: 0, shift_end: 0 }
+            Outcome { col: d.col0, start: a.min(b), end: (a.max(b) + step).min(1440), shift_start: 0, shift_end: 0 }
         }
         Gesture::Move { start, end, .. } => {
             let dur = end - start;
-            let new_start = snap(*start as f64 + d.m - d.m0).clamp(0, (1440 - dur).max(0));
+            let new_start = snap(*start as f64 + d.m - d.m0, step).clamp(0, (1440 - dur).max(0));
             let shift = (d.col as i64 - d.col0 as i64) * 1440 + new_start - start;
             Outcome { col: d.col, start: new_start, end: new_start + dur, shift_start: shift, shift_end: shift }
         }
         Gesture::Resize { start, end, .. } => {
-            let new_end = snap(d.m).clamp(start + SNAP, 1440);
+            let new_end = snap(d.m, step).clamp(start + step, 1440);
             Outcome { col: d.col0, start: *start, end: new_end, shift_start: 0, shift_end: new_end - end }
         }
     }
@@ -400,10 +397,11 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
     let scroller = NodeRef::<html::Div>::new();
     let n = view.days.len();
     let cols = format!("grid-template-columns: 56px repeat({n}, minmax(0, 1fr))");
-    // Ouverture vers 7 h 30, comme la référence.
+    // Ouverture au début de la journée de travail (7 h 30 par défaut, comme la référence).
     Effect::new(move |_| {
         if let Some(el) = scroller.get() {
-            el.set_scroll_top((FIRST_HOUR * HOUR_PX) as i32);
+            let first_hour = use_ui().settings.with_untracked(|s| f64::from(s.work_start) / 60.0);
+            el.set_scroll_top((first_hour * HOUR_PX) as i32);
         }
     });
     let ui = use_ui();
@@ -450,7 +448,7 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
                 if !d.active {
                     return;
                 }
-                let o = outcome(&d);
+                let o = outcome(&d, i64::from(use_ui().settings.with_untracked(|s| s.snap_minutes)));
                 match d.gesture {
                     Gesture::Create => {
                         if let Some(date) = dates.get(o.col) {
@@ -512,7 +510,7 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
                                     {d.timed.into_iter().map(|t| view! { <Timed item=t col=idx drag=drag body=body columns=columns /> }).collect_view()}
                                     {move || {
                                         let d = drag.get().filter(|d| d.active)?;
-                                        let o = outcome(&d);
+                                        let o = outcome(&d, i64::from(use_ui().settings.with_untracked(|s| s.snap_minutes)));
                                         (o.col == idx).then(|| {
                                             let label = match &d.gesture {
                                                 Gesture::Create => String::new(),

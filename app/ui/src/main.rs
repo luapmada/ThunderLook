@@ -22,6 +22,7 @@ mod list;
 mod menu;
 mod menus;
 mod notes;
+mod options;
 mod quicksteps;
 mod reading;
 mod reminders;
