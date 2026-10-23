@@ -221,3 +221,36 @@ Non vérifié sur un blob réel (pas de fixture avec objet ou lieu d'exception) 
   - si 0x8054 liste bien **tous** les membres (contacts compris) comme je le lis : non confirmé ;
   - si l'import PST conserve les propriétés `PtypMultipleBinary` dans `message.props` (sinon la liste s'affiche vide) ;
   - `PidLidDistributionListStream` (0x8064, ordre et noms de repli) non lu.
+## À vérifier avec REA/Outlook — tâches et notes (`crates/items`, lot C, 23/10)
+
+Tout est écrit dans la base de ThunderLook, jamais dans Outlook. Tests sous Linux : `cargo test -p thunderlook-items` (23 tests, dont
+écriture/relecture en base pour rappel, périodicité, occurrence suivante, couleur de note).
+
+**`PidLidTaskRecurrence` (0x8116) — format NON confirmé sur une tâche réelle.**
+- Écrit = `RecurrencePattern` seul : l'encodeur de `calendar::recur` privé des 26 derniers octets (`AppointmentRecurrencePattern`
+  vide). Lu = le même blob + ces 26 octets. Aucune fixture de tâche périodique réelle dans le dépôt : seul l'aller-retour
+  `encode`/`decode` est testé, pas la conformité à ce qu'écrit Outlook.
+- Je n'ai pas lu [MS-OXOTASK] lui-même (la recherche ne rend que les pages MAPI « canonical property »). À vérifier : fixture
+  d'une vraie tâche périodique (octets de 0x8116) comparée à `trecur::encode`.
+- Périodicités relues qui n'entrent pas dans le formulaire (plusieurs jours de semaine, n-ième jour du mois, fin de mois) :
+  affichées « Personnalisée », blob conservé tel quel à l'enregistrement.
+- `PidLidTaskFRecurring` (0x8126) écrit avec 0x8116 ; la doc MAPI demande aussi `PidLidTaskDeadOccurrence` (0x8109) — écrit
+  seulement sur la tâche terminée dont on a créé la suite. Autres propriétés de [MS-OXOTASK] pour une série (ex. `TaskOwner`,
+  `TaskAccepted`, `TaskMode`) : non écrites.
+
+**Fin d'une tâche périodique** (choix de ThunderLook, pas un comportement observé d'Outlook) : la tâche est marquée terminée
+(`DateCompleted` = minuit UTC du jour, comme avant) ET une nouvelle tâche est créée (début, échéance, rappel décalés au jour
+de l'occurrence suivante, état « pas commencée »). « N fois » devient « N-1 fois » sur la suite ; série personnalisée : blob
+recopié. La terminée garde sa périodicité et reçoit `DeadOccurrence` = vrai (pas de doublon si on la rouvre puis la termine).
+- **INCERTAIN : sens de `PidLidTaskDateCompleted` pour une tâche périodique** (date de l'occurrence terminée ou de la série ?
+  La doc MAPI exige seulement minuit local converti en UTC ; ThunderLook écrit minuit UTC, comme avant le lot).
+- Si la série n'a plus d'occurrence, rien n'est créé.
+
+**Rappel** : `PidLidReminderSet` 0x8503 + `PidLidReminderTime` 0x8502 (PSETID_Common, FILETIME UTC), heure saisie = heure de
+Paris. Si la source n'a pas ces noms dans sa table, le rappel n'est pas écrit (silencieusement, comme les autres champs).
+`PidLidReminderSignalTime` (0x8560) non écrit : Outlook pourrait ne pas déclencher le rappel sans lui. À vérifier à l'écran.
+
+**Couleur de note** : `PidLidNoteColor` 0x8B00 / PSETID_Note `0006200E-…` confirmé par la doc (PT_LONG, 0 bleu, 1 vert, 2 rose,
+3 jaune, 4 blanc). Pas de base réelle en cloud : je n'ai PAS pu vérifier sur les notes importées que la propriété y est. Repli
+explicite : jaune (3) si la source n'a pas la propriété, si la note ne la porte pas, ou si la valeur est hors 0-4
+(`NOTE_COLOR_FALLBACK`, testé). Non essayé : `PidTagIconIndex` (0x1080) comme source de secours — correspondance non vérifiée.
