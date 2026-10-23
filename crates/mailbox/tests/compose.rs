@@ -117,7 +117,7 @@ fn reply_all_is_faithful_and_saved_as_draft() {
     let id = saved.id.clone().unwrap();
     // Le brouillon est dans Brouillons, non envoyé, dans la même conversation que l'original.
     let v = mb
-        .open_list(&ListQuery { folder_id: format!("f{drafts}"), unread_only: false, sort: SortField::Date, descending: true, conversations: false })
+        .open_list(&ListQuery { folder_id: format!("f{drafts}"), unread_only: false, sort: SortField::Date, descending: true, conversations: false, then_by: None, then_descending: false })
         .unwrap();
     assert_eq!(v.count, 1);
     assert_eq!(mb.rows(v.token, 0, 1).unwrap()[0].id, id);
@@ -155,7 +155,7 @@ fn reply_all_is_faithful_and_saved_as_draft() {
     let again = mb.save_draft(&edited).unwrap();
     assert_eq!(again.id, Some(id.clone()));
     let v = mb
-        .open_list(&ListQuery { folder_id: format!("f{drafts}"), unread_only: false, sort: SortField::Date, descending: true, conversations: false })
+        .open_list(&ListQuery { folder_id: format!("f{drafts}"), unread_only: false, sort: SortField::Date, descending: true, conversations: false, then_by: None, then_descending: false })
         .unwrap();
     assert_eq!(v.count, 1);
     let back = mb.open_draft(&id).unwrap();

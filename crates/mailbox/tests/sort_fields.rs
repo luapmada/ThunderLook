@@ -25,7 +25,7 @@ fn add(c: &Connection, folder: i64, subject: &str, to: &str, importance: i64) {
 }
 
 fn open(mb: &mut Mailbox, folder: i64, sort: SortField, descending: bool) -> Vec<(String, u32)> {
-    let q = ListQuery { folder_id: format!("f{folder}"), unread_only: false, sort, descending, conversations: false };
+    let q = ListQuery { folder_id: format!("f{folder}"), unread_only: false, sort, descending, conversations: false, then_by: None, then_descending: false };
     mb.open_list(&q).unwrap().groups.into_iter().map(|g| (g.label, g.count)).collect()
 }
 

@@ -30,7 +30,7 @@ fn main() {
     }
     for f in &targets {
         for sort in [SortField::Categories, SortField::Flag, SortField::Attachments] {
-            let q = ListQuery { folder_id: f.id.clone(), unread_only: false, sort, descending: false, conversations: false };
+            let q = ListQuery { folder_id: f.id.clone(), unread_only: false, sort, descending: false, conversations: false, then_by: None, then_descending: false };
             let t = Instant::now();
             let view = mb.open_list(&q).expect("vue");
             println!(
@@ -46,7 +46,7 @@ fn main() {
     }
     for f in targets {
         for unread_only in [false, true] {
-            let q = ListQuery { folder_id: f.id.clone(), unread_only, sort: SortField::Date, descending: true, conversations: true };
+            let q = ListQuery { folder_id: f.id.clone(), unread_only, sort: SortField::Date, descending: true, conversations: true, then_by: None, then_descending: false };
             let t = Instant::now();
             let view = mb.open_list(&q).expect("vue");
             let open = t.elapsed();

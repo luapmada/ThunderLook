@@ -38,7 +38,7 @@ fn main() {
 
     for sort in SortField::ALL {
         for unread_only in [false, true] {
-            let q = ListQuery { folder_id: big.id.clone(), unread_only, sort, descending: sort.default_descending(), conversations: false };
+            let q = ListQuery { folder_id: big.id.clone(), unread_only, sort, descending: sort.default_descending(), conversations: false, then_by: None, then_descending: false };
             let t = Instant::now();
             let view = mb.open_list(&q).expect("vue");
             let open = t.elapsed();
@@ -64,7 +64,7 @@ fn main() {
         for f in &s.folders {
             let t = Instant::now();
             let v = mb
-                .open_list(&ListQuery { folder_id: f.id.clone(), unread_only: false, sort: SortField::Date, descending: true, conversations: false })
+                .open_list(&ListQuery { folder_id: f.id.clone(), unread_only: false, sort: SortField::Date, descending: true, conversations: false, then_by: None, then_descending: false })
                 .expect("dossier de recherche");
             println!("  dossier de recherche « {} » : {} éléments en {:?} (compteur du volet : {})", f.name, v.count, t.elapsed(), f.total);
         }
@@ -101,7 +101,7 @@ fn main() {
     let mut failures: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for f in &folders {
         let view = mb
-            .open_list(&ListQuery { folder_id: f.id.clone(), unread_only: false, sort: SortField::Date, descending: true, conversations: false })
+            .open_list(&ListQuery { folder_id: f.id.clone(), unread_only: false, sort: SortField::Date, descending: true, conversations: false, then_by: None, then_descending: false })
             .expect("vue");
         let ids: Vec<i64> = mb.view_targets(view.token, 0, view.count).unwrap();
         for (i, id) in ids.iter().enumerate() {

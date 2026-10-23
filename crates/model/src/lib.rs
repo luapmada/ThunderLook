@@ -109,10 +109,16 @@ pub enum SortField {
     To,
     /// Haute, normale, faible.
     Importance,
+    /// Non lu, lu.
+    Read,
+    /// Compte (source) du dossier.
+    Account,
+    /// Type d'élément (message, invitation, accusé…).
+    Type,
 }
 
 impl SortField {
-    pub const ALL: [SortField; 9] = [
+    pub const ALL: [SortField; 12] = [
         SortField::Date,
         SortField::From,
         SortField::Subject,
@@ -122,6 +128,9 @@ impl SortField {
         SortField::Attachments,
         SortField::To,
         SortField::Importance,
+        SortField::Read,
+        SortField::Account,
+        SortField::Type,
     ];
 
     pub fn label(self) -> &'static str {
@@ -135,6 +144,9 @@ impl SortField {
             Self::Attachments => "Pièces jointes",
             Self::To => "À",
             Self::Importance => "Importance",
+            Self::Read => "Lu/non lu",
+            Self::Account => "Compte",
+            Self::Type => "Type",
         }
     }
 
@@ -154,6 +166,11 @@ pub struct ListQuery {
     /// « Afficher en tant que conversations » : pris en compte pour le tri par date d'un dossier réel.
     #[serde(default)]
     pub conversations: bool,
+    /// Deuxième critère de tri (dossier réel, hors conversations) ; ignoré s'il égale le premier.
+    #[serde(default)]
+    pub then_by: Option<SortField>,
+    #[serde(default)]
+    pub then_descending: bool,
 }
 
 /// Groupe contigu de la liste triée (« Aujourd'hui », un expéditeur, une tranche de taille…).
@@ -408,6 +425,8 @@ pub enum FlagAction {
     Clear,
     /// Touche Inser : pose « Aujourd'hui », ou marque terminé si déjà marqué.
     Toggle,
+    /// Échéance libre : minuit local (ms depuis l'époque) du jour choisi.
+    DueOn(i64),
 }
 
 impl FlagAction {
@@ -421,6 +440,7 @@ impl FlagAction {
             Self::Complete => "Marquer comme terminé",
             Self::Clear => "Effacer l'indicateur",
             Self::Toggle => "Assurer un suivi",
+            Self::DueOn(_) => "Date personnalisée",
         }
     }
 }

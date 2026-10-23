@@ -297,7 +297,7 @@ pub fn App() -> impl IntoView {
             return;
         }
         let search = (!search_text.trim().is_empty()).then(|| SearchQuery { text: search_text.clone(), scope, folder_id: folder.clone() });
-        let query = ListQuery { folder_id: folder, unread_only, sort, descending, conversations };
+        let query = ListQuery { folder_id: folder, unread_only, sort, descending, conversations, then_by: None, then_descending: false };
         let t0 = now_ms();
         spawn_local(async move {
             let q = query.clone();

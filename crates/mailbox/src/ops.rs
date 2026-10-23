@@ -61,6 +61,9 @@ pub(crate) fn local_midnight_ms(d: NaiveDate) -> i64 {
 /// Début et échéance d'un indicateur, comme la référence : semaine de travail du lundi au vendredi.
 /// Le schéma ne garde que l'échéance ; le début sert aux tests et au futur module Tâches.
 fn flag_dates(action: FlagAction, today: NaiveDate) -> (Option<i64>, Option<i64>) {
+    if let FlagAction::DueOn(ms) = action {
+        return (Some(ms), Some(ms));
+    }
     let friday = |d: NaiveDate| d + Duration::days(4 - i64::from(d.weekday().num_days_from_monday()));
     let (start, due) = match action {
         FlagAction::Today | FlagAction::Toggle => (Some(today), Some(today)),
@@ -913,5 +916,7 @@ mod tests {
         let sat = NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();
         assert_eq!(flag_dates(FlagAction::ThisWeek, sat).1, Some(local_midnight_ms(sat)));
         assert_eq!(flag_dates(FlagAction::NoDate, mon), (None, None));
+        let free = local_midnight_ms(mon + Duration::days(40));
+        assert_eq!(flag_dates(FlagAction::DueOn(free), mon), (Some(free), Some(free)));
     }
 }

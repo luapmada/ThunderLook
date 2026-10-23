@@ -401,8 +401,13 @@ impl Mailbox {
         }
         // Tri par date : l'index couvrant suffit, sans lire les lignes.
         let from = if q.sort == SortField::Date { "message m INDEXED BY message_folder_read" } else { "message m" };
-        let items = self.collect(&format!("{from} WHERE m.folder_id = ?{filter}"), &[Value::Integer(folder)], q.sort)?;
-        Ok(self.finish_view(items, q.sort, q.descending, now, (folder_total, folder_unread), false))
+        let from_where = format!("{from} WHERE m.folder_id = ?{filter}");
+        let items = self.collect(&from_where, &[Value::Integer(folder)], q.sort)?;
+        let second = match q.then_by.filter(|s| *s != q.sort && q.sort != SortField::Date) {
+            Some(s2) => Some((self.second_keys(&from_where, &[Value::Integer(folder)], s2)?, q.then_descending)),
+            None => None,
+        };
+        Ok(self.finish_view(items, q.sort, q.descending, second, now, (folder_total, folder_unread), false))
     }
 
     /// Vue en conversations d'un dossier, triée par date du dernier élément du dossier.
@@ -532,11 +537,18 @@ impl Mailbox {
         if sort == SortField::Categories {
             return self.collect_categories(from_where, params);
         }
+        // Le nom du compte n'est lu que pour le tri par compte.
+        let account = if sort == SortField::Account {
+            "IFNULL((SELECT s.display_name FROM folder f JOIN source s ON s.id = f.source_id WHERE f.id = m.folder_id), '')"
+        } else {
+            "''"
+        };
         let mut stmt = self
             .conn
             .prepare_cached(&format!(
                 "SELECT m.id, IFNULL(m.received_at, 0), m.from_name, m.from_addr, m.subject, m.size, m.flag_status, m.to_line, m.importance,
-                        EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0)
+                        EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id AND a.inline = 0 AND a.hidden = 0),
+                        m.is_read, m.message_class, {account}
                  FROM {from_where}"
             ))
             .map_err(err)?;
@@ -553,12 +565,15 @@ impl Mailbox {
                     r.get::<_, bool>(9)?,
                     r.get::<_, String>(7)?,
                     r.get::<_, i64>(8)?,
+                    r.get::<_, bool>(10)?,
+                    r.get::<_, String>(11)?,
+                    r.get::<_, String>(12)?,
                 ))
             })
             .map_err(err)?;
         let mut to_labels: HashMap<String, String> = HashMap::new();
         for row in rows {
-            let (id, date, from_name, from_addr, subject, size, flag, attached, to_line, importance) = row.map_err(err)?;
+            let (id, date, from_name, from_addr, subject, size, flag, attached, to_line, importance, read, class, account) = row.map_err(err)?;
             let (key, label) = match sort {
                 SortField::From => {
                     let label = if from_name.trim().is_empty() { from_addr } else { from_name };
@@ -588,6 +603,16 @@ impl Mailbox {
                     0 => ("2".into(), "Importance faible".into()),
                     _ => ("1".into(), "Importance normale".into()),
                 },
+                SortField::Read if read => ("1".into(), "Lu".into()),
+                SortField::Read => ("0".into(), "Non lu".into()),
+                SortField::Account => {
+                    let label = if account.trim().is_empty() { "(compte inconnu)".to_string() } else { account };
+                    (fold(&label), label)
+                }
+                SortField::Type => {
+                    let (rank, label) = class_group(&class);
+                    (format!("{rank}{}", fold(label)), label.to_string())
+                }
                 SortField::Attachments if attached => ("0".into(), "Avec pièce jointe".into()),
                 SortField::Attachments => ("1".into(), "Sans pièce jointe".into()),
                 _ => {
@@ -631,12 +656,23 @@ impl Mailbox {
         Ok(items)
     }
 
+    /// Clé du deuxième critère de tri, par message (la première attribution pour les catégories).
+    fn second_keys(&self, from_where: &str, params: &[Value], sort: SortField) -> Result<HashMap<i64, String>> {
+        let mut keys = HashMap::new();
+        for (id, date, key, _) in self.collect(from_where, params, sort)? {
+            keys.entry(id).or_insert(if sort == SortField::Date { format!("{:020}", date.max(0)) } else { key });
+        }
+        Ok(keys)
+    }
+
     /// Tri, groupes et enregistrement de la vue.
+    #[allow(clippy::too_many_arguments)]
     fn finish_view(
         &mut self,
         mut items: Vec<Item>,
         sort: SortField,
         descending: bool,
+        second: Option<(HashMap<i64, String>, bool)>,
         now: DateTime<Local>,
         counts: (u32, u32),
         search: bool,
@@ -649,7 +685,15 @@ impl Mailbox {
             }),
             _ => items.sort_by(|a, b| {
                 let o = a.2.cmp(&b.2);
-                (if descending { o.reverse() } else { o }).then(b.1.cmp(&a.1)).then(b.0.cmp(&a.0))
+                let o = if descending { o.reverse() } else { o };
+                let o2 = match &second {
+                    Some((keys, desc)) => {
+                        let o = keys.get(&a.0).cmp(&keys.get(&b.0));
+                        if *desc { o.reverse() } else { o }
+                    }
+                    None => std::cmp::Ordering::Equal,
+                };
+                o.then(o2).then(b.1.cmp(&a.1)).then(b.0.cmp(&a.0))
             }),
         }
         let labels: Vec<String> = if sort == SortField::Date { Vec::new() } else { items.iter().map(|i| i.3.clone()).collect() };
@@ -741,7 +785,7 @@ impl Mailbox {
     ) -> Result<ListView> {
         let parsed = search::parse(text, now.date_naive());
         if parsed.fts.is_empty() && parsed.preds.is_empty() {
-            return Ok(self.finish_view(Vec::new(), sort, descending, now, (0, 0), true));
+            return Ok(self.finish_view(Vec::new(), sort, descending, None, now, (0, 0), true));
         }
         let mut sql = format!("message m WHERE {scope_sql}");
         let mut params = scope_params;
@@ -774,7 +818,7 @@ impl Mailbox {
             }
             n
         };
-        Ok(self.finish_view(items, sort, descending, now, (total, unread), true))
+        Ok(self.finish_view(items, sort, descending, None, now, (total, unread), true))
     }
 
     /// Dossiers de recherche du volet : prédéfinis (avec compteurs), puis enregistrés.
@@ -972,6 +1016,24 @@ fn groups(rows: &[Row], sort: SortField, now: DateTime<Local>, labels: &[String]
         }
     }
     groups
+}
+
+/// Rang et libellé du groupe « Type » d'après la classe de message MAPI.
+fn class_group(class: &str) -> (u8, &'static str) {
+    let c = class.to_ascii_uppercase();
+    if c.starts_with("IPM.SCHEDULE.MEETING") {
+        (1, "Invitation à une réunion")
+    } else if c.starts_with("IPM.TASK") {
+        (2, "Tâche")
+    } else if c.starts_with("REPORT.") || c.starts_with("IPM.NOTE.RECEIPT") {
+        (3, "Accusé ou rapport")
+    } else if c.starts_with("IPM.NOTE.SMIME") || c.starts_with("IPM.NOTE.SECURE") {
+        (4, "Message signé ou chiffré")
+    } else if c.starts_with("IPM.NOTE") || c.is_empty() {
+        (0, "Message")
+    } else {
+        (5, "Autre")
+    }
 }
 
 pub(crate) fn flag_state(v: i64) -> FlagState {

@@ -87,7 +87,7 @@ fn reply_then_forward_mark_the_original() {
     assert_eq!(v.last_verb, Some(LastVerb::Replied));
     assert!(v.last_verb_label.as_deref().unwrap().starts_with("Vous avez répondu à ce message le "), "{:?}", v.last_verb_label);
     let list = mb
-        .open_list(&ListQuery { folder_id: format!("f{inbox}"), unread_only: false, sort: SortField::Date, descending: true, conversations: false })
+        .open_list(&ListQuery { folder_id: format!("f{inbox}"), unread_only: false, sort: SortField::Date, descending: true, conversations: false, then_by: None, then_descending: false })
         .unwrap();
     assert_eq!(mb.rows(list.token, 0, 1).unwrap()[0].last_verb, Some(LastVerb::Replied));
     // Clic sur une notification : la ligne du message est retrouvée dans la vue.

@@ -54,7 +54,7 @@ fn message(c: &Connection, dir: &PathBuf, folder: i64, subject: &str, from: &str
 }
 
 fn query(folder: i64, conversations: bool) -> ListQuery {
-    ListQuery { folder_id: format!("f{folder}"), unread_only: false, sort: SortField::Date, descending: true, conversations }
+    ListQuery { folder_id: format!("f{folder}"), unread_only: false, sort: SortField::Date, descending: true, conversations, then_by: None, then_descending: false }
 }
 
 /// Dossier de données vide (source 1) ; supprimé à la fin du test.
@@ -90,7 +90,7 @@ fn arrangements_categories_flag_attachments() {
     drop(c);
     let mut mb = Mailbox::open(dir).unwrap();
     let open = |mb: &mut Mailbox, sort: SortField| {
-        let v = mb.open_list(&ListQuery { folder_id: format!("f{inbox}"), unread_only: false, sort, descending: false, conversations: false }).unwrap();
+        let v = mb.open_list(&ListQuery { folder_id: format!("f{inbox}"), unread_only: false, sort, descending: false, conversations: false, then_by: None, then_descending: false }).unwrap();
         let ids: Vec<String> = mb.rows(v.token, 0, 10).unwrap().into_iter().map(|r| r.id).collect();
         (v.groups.into_iter().map(|g| (g.label, g.count)).collect::<Vec<_>>(), ids, v.token)
     };
