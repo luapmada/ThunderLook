@@ -270,3 +270,16 @@ explicite : jaune (3) si la source n'a pas la propriété, si la note ne la port
   d'une journée entière : rappel compté depuis minuit.
 - **Notification** : le clic ramène seulement ThunderLook au premier plan (pas de lien d'ouverture dédié). Le thread Tauri
   (`app/src-tauri/src/reminders_cmds.rs`) n'a pas pu être compilé en cloud (gdk absent, Windows seulement).
+
+## À vérifier avec REA/Outlook — courrier : tri À/Importance, impression, tout enregistrer (lot J, 23/10)
+
+Écrit et testé sous Linux (`cargo test -p thunderlook-mailbox` : tris À et Importance, noms de fichiers uniques). Le code
+Tauri (`mail_cmds.rs`) et l'interface n'ont pas pu être compilés ici pour Windows/Tauri (gdk absent) ; l'interface compile en wasm32.
+
+- **Tri « À »** : clé = premier destinataire de `to_line` (nom, sinon adresse), insensible à la casse et aux accents. Je ne sais
+  pas si Outlook trie sur le premier destinataire ou sur la ligne « À » entière.
+- **Tri « Importance »** : ordre croissant = haute, normale, faible (hypothèse : celui d'Outlook ; non confirmé).
+- **Doublons de noms** à l'enregistrement groupé : « nom (2).ext ». Format choisi par ThunderLook ; Outlook n'enregistre
+  pas de façon groupée avec ce schéma à ma connaissance — non vérifié.
+- **Impression** : `window.print()` du cadre du message (HTML) ou du volet de lecture (texte, règles `@media print`). Pas d'en-têtes
+  Outlook (De/À/Date/Objet) dans l'impression du corps HTML seul : à voir à l'écran.

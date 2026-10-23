@@ -105,10 +105,14 @@ pub enum SortField {
     Flag,
     /// Avec ou sans pièce jointe.
     Attachments,
+    /// Premier destinataire (« À »).
+    To,
+    /// Haute, normale, faible.
+    Importance,
 }
 
 impl SortField {
-    pub const ALL: [SortField; 7] = [
+    pub const ALL: [SortField; 9] = [
         SortField::Date,
         SortField::From,
         SortField::Subject,
@@ -116,6 +120,8 @@ impl SortField {
         SortField::Categories,
         SortField::Flag,
         SortField::Attachments,
+        SortField::To,
+        SortField::Importance,
     ];
 
     pub fn label(self) -> &'static str {
@@ -127,6 +133,8 @@ impl SortField {
             Self::Categories => "Catégories",
             Self::Flag => "Indicateur",
             Self::Attachments => "Pièces jointes",
+            Self::To => "À",
+            Self::Importance => "Importance",
         }
     }
 
