@@ -22,6 +22,7 @@ use thunderlook_contacts::vcard;
 use thunderlook_model::{contacts::ContactForm, items::{NoteForm, TaskForm}};
 use thunderlook_store::rusqlite::Connection;
 
+use crate::conflict::{self, Resolution, Verdict};
 use crate::{Change, ChangeKind, EventData, IdMap, ImportReport, ItemKind, Manifest, Payload, Result, event_uid, read_manifest, sha256, undo_dir};
 
 /// Champs jamais comparés ni écrasés : l'identité de l'élément et sa photo.
@@ -124,6 +125,8 @@ struct Ctx<'a> {
     exported: Option<&'a [String]>,
     /// Identifiant du fichier → identifiant local, tels qu'exportés (manifeste).
     uids: Option<&'a HashMap<String, String>>,
+    /// Identifiant local → empreinte de la valeur exportée (manifeste) ; vide pour un ancien manifeste.
+    values: Option<&'a HashMap<String, String>>,
     map: HashMap<String, String>,
 }
 
@@ -143,7 +146,23 @@ impl Ctx<'_> {
             ChangeKind::Modified => "modified",
             ChangeKind::Deleted => "deleted",
         };
-        Change { key: format!("{}:{k}:{id}", self.kind.name()), kind, item: self.kind, id: id.to_string(), summary, ext_uid: ext_uid.filter(|u| !u.is_empty()).map(str::to_string), payload }
+        Change { key: format!("{}:{k}:{id}", self.kind.name()), kind, item: self.kind, id: id.to_string(), summary, ext_uid: ext_uid.filter(|u| !u.is_empty()).map(str::to_string), payload, conflict: None, resolution: None }
+    }
+
+    /// Classe une modification venue du téléphone (le fichier diffère de la base) : modification à appliquer, élément
+    /// intact côté téléphone (ThunderLook fait foi, rien à proposer) ou conflit (proposé à part).
+    fn propose(&self, rep: &mut ImportReport, id: &str, summary: String, uid: Option<&str>, payload: Payload, canon: &impl Serialize, phone: &impl Serialize) {
+        let exported = self.values.and_then(|v| v.get(id)).map(String::as_str);
+        match conflict::classify(exported, &conflict::fingerprint(phone), &conflict::fingerprint(canon)) {
+            Verdict::Intact => rep.unchanged += 1,
+            Verdict::PhoneEdit => rep.changes.push(self.change(ChangeKind::Modified, id, summary, uid, payload)),
+            Verdict::Conflict(origin) => {
+                let mut c = self.change(ChangeKind::Modified, id, summary, uid, payload);
+                c.key = format!("{}:conflict:{id}", self.kind.name());
+                c.conflict = Some(origin);
+                rep.conflicts.push(c);
+            }
+        }
     }
 
     /// Suppressions proposées : éléments exportés, toujours dans la base, absents du fichier.
@@ -178,7 +197,7 @@ pub fn import_changes(conn: &Connection, data_dir: &Path, in_dir: &Path) -> Resu
             rep.unchanged += info.map_or(0, |i| i.count);
             continue;
         }
-        let ctx = Ctx { kind, exported: info.map(|i| i.ids.as_slice()), uids: info.map(|i| &i.uids), map: maps.get(kind.name()).cloned().unwrap_or_default() };
+        let ctx = Ctx { kind, exported: info.map(|i| i.ids.as_slice()), uids: info.map(|i| &i.uids), values: info.map(|i| &i.values), map: maps.get(kind.name()).cloned().unwrap_or_default() };
         let text = text_of(&bytes);
         match kind {
             ItemKind::Contact => contacts(conn, data_dir, &text, &ctx, &mut rep)?,
@@ -214,7 +233,7 @@ fn norm_contact(mut f: ContactForm) -> ContactForm {
     f
 }
 
-fn canon_contact(f: &ContactForm) -> ContactForm {
+pub(crate) fn canon_contact(f: &ContactForm) -> ContactForm {
     vcard::parse(&vcard::export(std::slice::from_ref(f), vcard::Version::V30)).ok().and_then(|mut v| v.pop()).map_or_else(|| norm_contact(f.clone()), |p| norm_contact(p.form))
 }
 
@@ -247,7 +266,7 @@ fn contacts(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Impo
                 } else {
                     let merged = overlay(existing, &phone, &fields);
                     let summary = format!("{} : {}", m.exs[i].title, fields.join(", "));
-                    rep.changes.push(ctx.change(ChangeKind::Modified, &id, summary, p.uid.as_deref(), Payload::Contact(merged)));
+                    ctx.propose(rep, &id, summary, p.uid.as_deref(), Payload::Contact(merged), canon, &phone);
                 }
             }
             None => rep.changes.push(ctx.change(ChangeKind::New, &format!("#{n}"), contact_title(&phone), p.uid.as_deref(), Payload::Contact(phone))),
@@ -267,7 +286,7 @@ fn norm_task(mut f: TaskForm) -> TaskForm {
     f
 }
 
-fn canon_task(f: &TaskForm) -> TaskForm {
+pub(crate) fn canon_task(f: &TaskForm) -> TaskForm {
     thunderlook_items::vtodo::parse(&thunderlook_items::vtodo::export(std::slice::from_ref(f))).ok().and_then(|mut v| v.pop()).map_or_else(|| norm_task(f.clone()), |p| norm_task(p.form))
 }
 
@@ -298,7 +317,7 @@ fn tasks(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut ImportR
                     rep.unchanged += 1;
                 } else {
                     let summary = format!("{} : {}", m.exs[i].title, fields.join(", "));
-                    rep.changes.push(ctx.change(ChangeKind::Modified, &id, summary, p.uid.as_deref(), Payload::Task(overlay(existing, &phone, &fields))));
+                    ctx.propose(rep, &id, summary, p.uid.as_deref(), Payload::Task(overlay(existing, &phone, &fields)), canon, &phone);
                 }
             }
             None => rep.changes.push(ctx.change(ChangeKind::New, &format!("#{n}"), phone.subject.clone(), p.uid.as_deref(), Payload::Task(phone))),
@@ -316,7 +335,7 @@ fn note_title(body: &str) -> String {
     body.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("(note vide)").chars().take(80).collect()
 }
 
-fn canon_note(f: &NoteForm) -> String {
+pub(crate) fn canon_note(f: &NoteForm) -> String {
     thunderlook_items::vnote::parse(&thunderlook_items::vnote::export(std::slice::from_ref(f))).ok().and_then(|mut v| v.pop()).map_or_else(|| body_of(&f.body), |p| body_of(&p.form.body))
 }
 
@@ -346,7 +365,7 @@ fn notes(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut ImportR
                     rep.unchanged += 1;
                 } else {
                     let merged = NoteForm { body: body.clone(), ..existing.clone() };
-                    rep.changes.push(ctx.change(ChangeKind::Modified, &id, format!("{} : texte", note_title(&body)), uid.as_deref(), Payload::Note(merged)));
+                    ctx.propose(rep, &id, format!("{} : texte", note_title(&body)), uid.as_deref(), Payload::Note(merged), canon, &body);
                 }
             }
             None => {
@@ -398,7 +417,7 @@ fn event_key(e: &EventData) -> String {
     format!("{}|{}", lower(&e.subject), e.start)
 }
 
-fn canon_event(a: &Appointment, dir: &Path) -> EventData {
+pub(crate) fn canon_event(a: &Appointment, dir: &Path) -> EventData {
     let own = norm_event(event_of(a, thunderlook_calendar::description(a, dir)));
     let text = thunderlook_calendar::ics::export(&[a], "x", &|a| thunderlook_calendar::description(a, dir));
     match thunderlook_calendar::ics::parse(&text, 0, 0) {
@@ -457,7 +476,7 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
                     rep.unchanged += 1;
                 } else {
                     let summary = format!("{} : {}", m.exs[i].title, fields.join(", "));
-                    rep.changes.push(ctx.change(ChangeKind::Modified, &id, summary, a.uid.as_deref(), Payload::Event(overlay(existing, &e, &fields))));
+                    ctx.propose(rep, &id, summary, a.uid.as_deref(), Payload::Event(overlay(existing, &e, &fields)), canon, &e);
                 }
             }
             None => rep.changes.push(ctx.change(ChangeKind::New, &format!("#{n}"), format!("{} ({})", e.subject, e.start.replace('T', " ")), a.uid.as_deref(), Payload::Event(e))),
@@ -546,6 +565,8 @@ struct UndoRecord {
 pub struct ApplyReport {
     pub applied: usize,
     pub errors: Vec<String>,
+    /// Conflits résolus en gardant la valeur de ThunderLook (rien d'écrit).
+    pub kept: usize,
     /// Horodatage du fichier d'annulation, s'il y a de quoi annuler.
     pub undo: Option<String>,
 }
@@ -680,6 +701,19 @@ pub fn apply(conn: &mut Connection, data_dir: &Path, changes: &[Change]) -> Resu
     let mut report = ApplyReport::default();
     let mut todo: Vec<&Change> = Vec::new();
     for c in changes {
+        if c.conflict.is_some() {
+            match c.resolution {
+                None => {
+                    report.errors.push(format!("{} : conflit non résolu, ignoré.", c.summary));
+                    continue;
+                }
+                Some(Resolution::KeepThunderlook) => {
+                    report.kept += 1;
+                    continue;
+                }
+                Some(Resolution::KeepPhone) => {}
+            }
+        }
         if c.kind == ChangeKind::New {
             todo.push(c);
             continue;

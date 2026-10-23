@@ -3,7 +3,7 @@
 //! 0 doublon, 0 perte. Les écarts constatés sont des tests `#[ignore]` qui échouent tant que le défaut subsiste.
 
 use thunderlook_calendar::{recur::Frequency, write::{Edit, Repeat, RepeatEnd}};
-use thunderlook_exchange::{ChangeKind, ImportReport, ItemKind, Payload, apply, export_all, import_changes, undo};
+use thunderlook_exchange::{Change, ChangeKind, ImportReport, ItemKind, Origin, Payload, Resolution, apply, export_all, import_changes, undo};
 use thunderlook_model::{contacts::ContactForm, items::{NoteForm, TaskForm}};
 
 mod common;
@@ -200,15 +200,13 @@ fn modifie_dans_thunderlook_puis_le_telephone_renvoie_l_ancien_fichier() {
     // Le téléphone modifie un autre élément : le fichier n'est plus « intact », la comparaison se fait élément par élément.
     write(&w, "contacts.vcf", &read(&w, "contacts.vcf").replace("Hélène", "Helena"));
     let rep = import_changes(&w.conn, &w.dir, &w.out).unwrap();
-    // Un seul changement proposé (Hélène) ; l'élément modifié ici ressort comme « modifié » par le fichier : à signaler.
+    // Un seul changement proposé (Hélène) : l'élément modifié ici est resté intact sur le téléphone, ThunderLook fait foi.
     let touched: Vec<_> = rep.changes.iter().map(|c| c.summary.clone()).collect();
-    assert_eq!(rep.changes.len(), 2, "{touched:?}");
+    assert_eq!(rep.changes.len(), 1, "{touched:?}");
+    assert!(rep.conflicts.is_empty());
 }
 
 #[test]
-#[ignore = "ÉCART : un élément modifié dans ThunderLook ET resté intact sur le téléphone est proposé comme « modifié » (le fichier \
-            porte l'ancienne valeur) ; l'appliquer écraserait la modification faite dans ThunderLook. Il faudrait connaître \
-            la valeur exportée (le manifeste ne retient que les identifiants et le SHA du fichier entier)."]
 fn modification_locale_non_ecrasee_par_un_ancien_fichier() {
     let mut w = world("modif-tl-strict");
     rich(&mut w);
@@ -221,6 +219,121 @@ fn modification_locale_non_ecrasee_par_un_ancien_fichier() {
     write(&w, "contacts.vcf", &read(&w, "contacts.vcf").replace("Hélène", "Helena"));
     let rep = import_changes(&w.conn, &w.dir, &w.out).unwrap();
     assert_eq!(rep.changes.len(), 1, "seul Hélène a changé côté téléphone : {:?}", rep.changes.iter().map(|c| &c.summary).collect::<Vec<_>>());
+}
+
+// --- Conflits : modifié des deux côtés (lot AC) -----------------------------------------------------------------------
+
+fn contact_id(w: &World, surname: &str) -> i64 {
+    contacts_of(w).into_iter().find(|f| f.surname == surname).unwrap().id.unwrap()[1..].parse().unwrap()
+}
+
+fn edit_here(w: &mut World, surname: &str, mobile: &str) -> i64 {
+    let (dir, n) = (w.dir.clone(), contact_id(w, surname));
+    let mut f = thunderlook_contacts::write::form_of(&w.conn, &dir, n).unwrap();
+    f.mobile = mobile.into();
+    thunderlook_contacts::write::update(&mut w.conn, &dir, n, &f).unwrap();
+    n
+}
+
+fn mobile_of(w: &World, n: i64) -> String {
+    thunderlook_contacts::write::form_of(&w.conn, &w.dir, n).unwrap().mobile
+}
+
+#[test]
+fn intact_sur_le_telephone_rien_n_est_propose_et_la_valeur_locale_fait_foi() {
+    // (a) fichier = valeur exportée : ni changement ni conflit, même si le fichier a été réécrit (autre élément modifié).
+    let mut w = world("conflit-a");
+    rich(&mut w);
+    export_all(&w.conn, &w.dir, &w.out).unwrap();
+    let n = edit_here(&mut w, "Contact", "0700000000");
+    write(&w, "contacts.vcf", &read(&w, "contacts.vcf").replace("Hélène", "Helena"));
+    let rep = import_changes(&w.conn, &w.dir, &w.out).unwrap();
+    assert!(rep.conflicts.is_empty() && rep.changes.len() == 1, "{rep:?}");
+    sync(&mut w, false);
+    assert_eq!(mobile_of(&w, n), "0700000000");
+}
+
+#[test]
+fn modifie_seulement_sur_le_telephone_est_propose_et_applique() {
+    // (b) fichier ≠ valeur exportée ET ThunderLook inchangé : modification du téléphone, appliquée.
+    let mut w = world("conflit-b");
+    rich(&mut w);
+    export_all(&w.conn, &w.dir, &w.out).unwrap();
+    let n = contact_id(&w, "Œuvre-Ñandú");
+    let before = mobile_of(&w, n);
+    write(&w, "contacts.vcf", &read(&w, "contacts.vcf").replace(&before, "0611223344"));
+    let rep = import_changes(&w.conn, &w.dir, &w.out).unwrap();
+    assert!(rep.conflicts.is_empty(), "{rep:?}");
+    assert_eq!(rep.changes.len(), 1, "{rep:?}");
+    sync(&mut w, false);
+    assert_eq!(mobile_of(&w, n), "0611223344");
+}
+
+#[test]
+fn modifie_des_deux_cotes_est_un_conflit_a_part_jamais_applique_sans_choix() {
+    // (c) les deux ont changé : proposé séparément, non coché, ignoré par `apply` sans choix.
+    let mut w = world("conflit-c");
+    rich(&mut w);
+    export_all(&w.conn, &w.dir, &w.out).unwrap();
+    let n = edit_here(&mut w, "Œuvre-Ñandú", "0700000000");
+    let exported = contacts_of(&w).len();
+    let old = read(&w, "contacts.vcf");
+    let before_phone = thunderlook_contacts::write::form_of(&w.conn, &w.dir, n).unwrap();
+    // Le téléphone change le même élément (autre valeur de mobile que l'export et que ThunderLook).
+    assert!(old.contains("06 12 34 56 78"));
+    write(&w, "contacts.vcf", &old.replace("06 12 34 56 78", "0688888888"));
+    let rep = import_changes(&w.conn, &w.dir, &w.out).unwrap();
+    assert!(rep.changes.is_empty(), "{:?}", rep.changes);
+    assert_eq!(rep.conflicts.len(), 1, "{rep:?}");
+    let c = rep.conflicts[0].clone();
+    assert_eq!((c.conflict, c.kind, c.item, c.default_selected()), (Some(Origin::Both), ChangeKind::Modified, ItemKind::Contact, false));
+    assert!(c.key.contains(":conflict:"));
+
+    // Sans choix : rien d'écrit, une erreur explicite.
+    let dir = w.dir.clone();
+    let done = apply(&mut w.conn, &dir, &[c.clone()]).unwrap();
+    assert_eq!((done.applied, done.errors.len(), done.undo), (0, 1, None));
+    assert_eq!(mobile_of(&w, n), "0700000000");
+
+    // Garder ThunderLook : rien d'écrit.
+    let done = apply(&mut w.conn, &dir, &[Change { resolution: Some(Resolution::KeepThunderlook), ..c.clone() }]).unwrap();
+    assert_eq!((done.applied, done.kept, done.errors.len()), (0, 1, 0));
+    assert_eq!(mobile_of(&w, n), "0700000000");
+    assert_eq!(contacts_of(&w).len(), exported);
+
+    // Garder le téléphone : appliqué, annulable.
+    let done = apply(&mut w.conn, &dir, &[Change { resolution: Some(Resolution::KeepPhone), ..c }]).unwrap();
+    assert_eq!((done.applied, done.errors.len()), (1, 0));
+    assert_eq!(mobile_of(&w, n), "0688888888");
+    undo(&mut w.conn, &dir, &done.undo.unwrap()).unwrap();
+    assert_eq!(thunderlook_contacts::write::form_of(&w.conn, &dir, n).unwrap().mobile, before_phone.mobile);
+}
+
+#[test]
+fn ancien_manifeste_sans_empreintes_propose_sans_appliquer_d_office() {
+    // Migration : un manifeste d'avant le lot AC n'a pas `values`. Le fichier modifié par le téléphone est proposé comme
+    // conflit « inconnu » (jamais appliqué d'office) ; un fichier intact reste muet.
+    let mut w = world("conflit-migration");
+    rich(&mut w);
+    export_all(&w.conn, &w.dir, &w.out).unwrap();
+    let path = w.out.join("manifest.json");
+    let mut m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    for f in m["files"].as_array_mut().unwrap() {
+        f.as_object_mut().unwrap().remove("values");
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&m).unwrap()).unwrap();
+
+    let rep = import_changes(&w.conn, &w.dir, &w.out).unwrap();
+    assert!(rep.changes.is_empty() && rep.conflicts.is_empty(), "{rep:?}");
+
+    let n = contact_id(&w, "Œuvre-Ñandú");
+    let before = mobile_of(&w, n);
+    write(&w, "contacts.vcf", &read(&w, "contacts.vcf").replace(&before, "0611223344"));
+    let rep = import_changes(&w.conn, &w.dir, &w.out).unwrap();
+    assert!(rep.changes.is_empty(), "{:?}", rep.changes);
+    assert_eq!(rep.conflicts.len(), 1, "{rep:?}");
+    assert_eq!(rep.conflicts[0].conflict, Some(Origin::Unknown));
+    assert!(!rep.conflicts[0].default_selected());
 }
 
 // --- Supprimé d'un côté (propagé) -------------------------------------------------------------------------------------
