@@ -1595,6 +1595,8 @@ pub fn run() {
             exchange_cmds::phone_exchange_check,
             exchange_cmds::phone_exchange_apply,
             exchange_cmds::phone_exchange_undo,
+            exchange_cmds::phone_exchange_check_detail,
+            exchange_cmds::phone_exchange_apply_detail,
             tasks_list,
             items_cmds::tasks_query,
             items_cmds::notes_query,

@@ -2401,3 +2401,60 @@ input {
   font-size: var(--fs-sm);
   opacity: 0.65;
 }
+
+/* ---------- Échange avec le téléphone : changements, conflits, récapitulatif (lot AF) ---------- */
+.exchange-groups,
+.exchange-conflicts {
+  max-height: 20em;
+  overflow: auto;
+  margin: 0.5em 0;
+}
+.exchange-changes {
+  list-style: none;
+  padding: 0;
+  margin: 0.25em 0;
+}
+.exchange-changes > li {
+  padding: 0.25em 0;
+  border-bottom: 1px solid var(--border, #ccc);
+}
+.exchange-fields {
+  list-style: none;
+  margin: 0.2em 0 0 1.6em;
+  padding: 0;
+  font-size: 0.9em;
+}
+.exchange-fields del {
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+.exchange-fields ins {
+  text-decoration: none;
+  font-weight: 600;
+}
+.exchange-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2em 1.2em;
+  margin: 0.3em 0 0 1.6em;
+}
+.exchange-warnings {
+  border: 1px solid var(--warn, #b26a00);
+  border-left-width: 4px;
+  padding: 0.4em 0.7em;
+  margin: 0.5em 0;
+}
+.exchange-warnings ul {
+  margin: 0.2em 0 0;
+  padding-left: 1.2em;
+}
+.exchange-confirm,
+.exchange-summary {
+  border: 1px solid var(--border, #888);
+  padding: 0.5em 0.7em;
+  margin: 0.5em 0;
+}
+.exchange-count {
+  font-weight: 600;
+  margin: 0.5em 0;
+}
