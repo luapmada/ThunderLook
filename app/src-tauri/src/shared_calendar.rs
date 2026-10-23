@@ -57,6 +57,7 @@ fn form_of(a: &Appointment, dir: &std::path::Path) -> AppointmentForm {
         categories: a.categories.join(", "),
         private: a.private,
         recurring: a.recurrence.is_some(),
+        series_date: if a.recurrence.is_some() { fmt(a.start_ms).split('T').next().unwrap_or_default().to_string() } else { String::new() },
         repeat_every: 1,
         repeat_count: 10,
         ..Default::default()
@@ -77,9 +78,26 @@ fn message_id(id: &str) -> Result<(i64, Option<String>), String> {
 pub fn appointment_form(app: AppHandle, cache: State<CalendarCache>, id: Option<String>, calendar_id: Option<String>, start: Option<String>) -> Result<AppointmentForm, String> {
     let dir = data_dir(&app)?;
     if let Some(id) = id {
-        let (n, _) = message_id(&id)?;
+        let (n, day) = message_id(&id)?;
         let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
-        return with_calendar(&cache, &conn, &dir, |cal| cal.appointments.iter().find(|a| a.id == n).map(|a| form_of(a, &dir)))?.ok_or_else(|| "rendez-vous introuvable".to_string());
+        let mut form = with_calendar(&cache, &conn, &dir, |cal| cal.appointments.iter().find(|a| a.id == n).map(|a| form_of(a, &dir)))?.ok_or_else(|| "rendez-vous introuvable".to_string())?;
+        if form.recurring {
+            match day {
+                Some(day) => {
+                    // Occurrence : jour de l'occurrence, heure et durée de la série.
+                    let parse = |s: &str| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M").map_err(|_| format!("date invalide : {s}"));
+                    let (start, end) = (parse(&form.start)?, parse(&form.end)?);
+                    let day = chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d").map_err(|_| format!("date invalide : {day}"))?;
+                    let new_start = day.and_time(start.time());
+                    form.start = new_start.format("%Y-%m-%dT%H:%M").to_string();
+                    form.end = (new_start + (end - start)).format("%Y-%m-%dT%H:%M").to_string();
+                    form.occurrence = day.format("%Y-%m-%d").to_string();
+                    form.scope = "occurrence".into();
+                }
+                None => form.scope = "series".into(),
+            }
+        }
+        return Ok(form);
     }
     // Nouveau : à l'heure demandée (sinon l'heure pleine suivante), 30 minutes, rappel 15 minutes (défauts d'Outlook).
     let start = match start {
@@ -103,6 +121,26 @@ pub fn appointment_form(app: AppHandle, cache: State<CalendarCache>, id: Option<
     })
 }
 
+/// Périodicité saisie dans le formulaire (`None` : "Jamais" ou "Inchangée").
+fn repeat_of(f: &AppointmentForm) -> Option<Repeat> {
+    let frequency = match f.repeat.as_str() {
+        "daily" => Frequency::Daily,
+        "weekly" => Frequency::Weekly,
+        "monthly" => Frequency::Monthly,
+        "yearly" => Frequency::Yearly,
+        _ => return None,
+    };
+    Some(Repeat {
+        frequency,
+        interval: f.repeat_every.max(1),
+        end: match f.repeat_end.as_str() {
+            "count" => RepeatEnd::Count(f.repeat_count.max(1)),
+            "until" => RepeatEnd::Until(f.repeat_until.clone()),
+            _ => RepeatEnd::Never,
+        },
+    })
+}
+
 fn edit_of(f: &AppointmentForm) -> Edit {
     Edit {
         subject: f.subject.clone(),
@@ -115,28 +153,19 @@ fn edit_of(f: &AppointmentForm) -> Edit {
         body: f.body.clone(),
         categories: f.categories.clone(),
         private: f.private,
-        // Une série existante garde sa périodicité : la répétition ne s'applique qu'à la création.
-        repeat: if f.id.is_some() {
-            None
-        } else {
-            let frequency = match f.repeat.as_str() {
-                "daily" => Some(Frequency::Daily),
-                "weekly" => Some(Frequency::Weekly),
-                "monthly" => Some(Frequency::Monthly),
-                "yearly" => Some(Frequency::Yearly),
-                _ => None,
-            };
-            frequency.map(|frequency| Repeat {
-                frequency,
-                interval: f.repeat_every.max(1),
-                end: match f.repeat_end.as_str() {
-                    "count" => RepeatEnd::Count(f.repeat_count.max(1)),
-                    "until" => RepeatEnd::Until(f.repeat_until.clone()),
-                    _ => RepeatEnd::Never,
-                },
-            })
-        },
+        // Une série existante garde sa périodicité ici : elle ne change que par `update_series`.
+        repeat: if f.id.is_some() { None } else { repeat_of(f) },
     }
+}
+
+/// Modification de la série : le premier jour reste `series_date`, seules l'heure de début et la durée du formulaire comptent.
+fn series_edit_of(f: &AppointmentForm) -> Result<Edit, String> {
+    let parse = |s: &str| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M").map_err(|_| format!("date invalide : {s}"));
+    let (start, end) = (parse(&f.start)?, parse(&f.end)?);
+    let first = chrono::NaiveDate::parse_from_str(&f.series_date, "%Y-%m-%d").map_err(|_| format!("date invalide : {}", f.series_date))?;
+    let new_start = first.and_time(start.time());
+    let fmt = |t: chrono::NaiveDateTime| t.format("%Y-%m-%dT%H:%M").to_string();
+    Ok(Edit { start: fmt(new_start), end: fmt(new_start + (end - start)), ..edit_of(f) })
 }
 
 fn done(app: &AppHandle, r: Result<(), String>, what: &str) -> Result<String, String> {
@@ -157,6 +186,22 @@ pub fn appointment_save(app: AppHandle, form: AppointmentForm) -> Result<String,
     }
     let dir = data_dir(&app)?;
     let mut conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
+    if let (Some(id), true) = (&form.id, form.recurring) {
+        let n = message_id(id)?.0;
+        if form.scope == "occurrence" {
+            let r = thunderlook_calendar::write::update_occurrence(&mut conn, &dir, n, &form.occurrence, &edit_of(&form));
+            return done(&app, r, "Occurrence enregistrée");
+        }
+        let r = thunderlook_calendar::write::update_series(&mut conn, &dir, n, &series_edit_of(&form)?, repeat_of(&form));
+        return match r {
+            Ok(c) => {
+                let lost = c.lost_exceptions + c.lost_deleted;
+                let msg = if lost == 0 { "Série enregistrée".to_string() } else { format!("Série enregistrée ({lost} occurrence(s) modifiée(s) ou supprimée(s) rétablie(s) par le changement de périodicité)") };
+                done(&app, Ok(()), &msg)
+            }
+            Err(e) => done(&app, Err(e), ""),
+        };
+    }
     let r = match &form.id {
         Some(id) => thunderlook_calendar::write::update(&mut conn, &dir, message_id(id)?.0, &edit_of(&form)),
         None => {

@@ -184,9 +184,18 @@ pub struct AppointmentForm {
     /// Catégories séparées par des virgules.
     pub categories: String,
     pub private: bool,
-    /// Série périodique existante : heures et périodicité ne se modifient pas encore.
+    /// Rendez-vous périodique (série ou l'une de ses occurrences).
     pub recurring: bool,
-    /// Nouveau rendez-vous périodique : "" (aucune), "daily", "weekly", "monthly" ou "yearly".
+    /// Occurrence ouverte (`AAAA-MM-JJ`) ; vide si le rendez-vous est ouvert depuis la série.
+    #[serde(default)]
+    pub occurrence: String,
+    /// Portée de l'enregistrement d'un rendez-vous périodique : "occurrence" ou "series".
+    #[serde(default)]
+    pub scope: String,
+    /// Premier jour de la série `AAAA-MM-JJ`.
+    #[serde(default)]
+    pub series_date: String,
+    /// Nouveau rendez-vous périodique, ou nouvelle périodicité d'une série : "" (aucune / inchangée), "daily", "weekly", "monthly" ou "yearly".
     #[serde(default)]
     pub repeat: String,
     /// Tous les N jours, semaines, mois ou ans.

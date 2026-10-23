@@ -155,11 +155,14 @@ pub fn AppointmentDialog() -> impl IntoView {
     };
     // Date et heure séparées (champs du navigateur), recomposées en `AAAA-MM-JJTHH:MM`.
     let date_time = move |label: &'static str, get: fn(&AppointmentForm) -> String, put: fn(&mut AppointmentForm, String)| {
-        let disabled = move || form().is_some_and(|f| f.recurring);
+        // Série entière : les dates (premier jour) ne se modifient pas ; une occurrence se déplace librement.
+        let disabled = move || form().is_some_and(|f| f.recurring && f.scope != "occurrence");
+        let date_disabled = disabled;
+        let time_disabled = move || form().is_some_and(|f| f.all_day);
         view! {
             <div class="appt-when">
                 <span class="appt-label">{label}</span>
-                <input type="date" aria-label=format!("{label} (date)") prop:disabled=disabled
+                <input type="date" aria-label=format!("{label} (date)") prop:disabled=date_disabled
                     prop:value=move || form().map(|f| get(&f).split('T').next().unwrap_or_default().to_string()).unwrap_or_default()
                     on:input=move |ev| {
                         let d = event_target_value(&ev);
@@ -169,7 +172,7 @@ pub fn AppointmentDialog() -> impl IntoView {
                         });
                     } />
                 <input type="time" aria-label=format!("{label} (heure)")
-                    prop:disabled=move || disabled() || form().is_some_and(|f| f.all_day)
+                    prop:disabled=time_disabled
                     prop:value=move || form().map(|f| get(&f).split_once('T').map(|(_, t)| t.to_string()).unwrap_or_default()).unwrap_or_default()
                     on:input=move |ev| {
                         let t = event_target_value(&ev);
@@ -221,15 +224,23 @@ pub fn AppointmentDialog() -> impl IntoView {
                             on:change=move |ev| { let on = event_target_checked(&ev); set(&|f| f.all_day = on); } />
                         <span>"Journée entière"</span>
                     </label>
-                    {move || form().is_some_and(|f| f.recurring).then(|| view! {
-                        <p class="dialog-note">"Série périodique : les heures et la périodicité ne se modifient pas encore ; le reste s'applique à toute la série."</p>
+                    {move || form().is_some_and(|f| f.recurring && f.id.is_some()).then(|| view! {
+                        <label class="field">
+                            <span>"Appliquer à"</span>
+                            <select aria-label="Appliquer à" on:change=move |ev| { let v = event_target_value(&ev); set(&|f| f.scope = v.clone()); }>
+                                {move || form().is_some_and(|f| !f.occurrence.is_empty()).then(|| view! {
+                                    <option value="occurrence" selected=move || form().is_some_and(|f| f.scope == "occurrence")>"Cette occurrence seulement"</option>
+                                })}
+                                <option value="series" selected=move || form().is_some_and(|f| f.scope != "occurrence")>"Toute la série"</option>
+                            </select>
+                        </label>
                     })}
-                    {move || form().is_some_and(|f| f.id.is_none()).then(|| view! {
+                    {move || form().is_some_and(|f| f.id.is_none() || (f.recurring && f.scope != "occurrence")).then(|| view! {
                         <div class="appt-row">
                             <label class="field">
                                 <span>"Répéter"</span>
                                 <select aria-label="Répéter" on:change=move |ev| { let v = event_target_value(&ev); set(&|f| f.repeat = v.clone()); }>
-                                    <option value="" selected=move || form().is_some_and(|f| f.repeat.is_empty())>"Jamais"</option>
+                                    <option value="" selected=move || form().is_some_and(|f| f.repeat.is_empty())>{move || if form().is_some_and(|f| f.id.is_some()) { "Inchangée" } else { "Jamais" }}</option>
                                     <option value="daily" selected=move || form().is_some_and(|f| f.repeat == "daily")>"Tous les jours"</option>
                                     <option value="weekly" selected=move || form().is_some_and(|f| f.repeat == "weekly")>"Toutes les semaines"</option>
                                     <option value="monthly" selected=move || form().is_some_and(|f| f.repeat == "monthly")>"Tous les mois"</option>
