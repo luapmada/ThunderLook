@@ -54,13 +54,26 @@ Constaté par tests automatisés sur des fichiers simulés (pas par MPE) :
 - Une fiche sans photo envoyée par le téléphone n'efface pas la photo de ThunderLook.
 - 2 000 contacts synthétiques : 0 changement, 0 doublon.
 
+## 5 bis. Conflits (modifié dans ThunderLook ET sur le téléphone)
+
+Le manifeste retient, pour chaque élément exporté, l'empreinte SHA-256 de sa valeur exportée (`values`). À l'import, pour un élément dont le fichier diffère de la base :
+
+| Fichier vs valeur exportée | ThunderLook vs valeur exportée | Résultat |
+|---|---|---|
+| identique | (modifié ou non) | **rien proposé** : le téléphone n'a pas touché l'élément, la valeur de ThunderLook fait foi |
+| différent | inchangé | **modification du téléphone**, proposée et appliquée comme avant |
+| différent | modifié | **conflit** : rendu à part (`ImportReport.conflicts`), jamais coché, jamais appliqué sans choix |
+
+- Choix d'un conflit (`Change.resolution`) : **garder ThunderLook** (rien n'est écrit ; le prochain export renvoie la valeur au téléphone) ou **garder le téléphone** (appliqué comme une modification, annulable ; la sauvegarde/corbeille interne reste le filet).
+- Manifeste d'avant ce format (pas de `values`) : valeur exportée **inconnue** → tout écart du fichier est proposé en conflit d'origine « inconnue », jamais appliqué d'office. Le prochain export écrit les empreintes.
+- Constaté par tests automatisés (`scenarios.rs`, section « Conflits »). Non essayé avec MPE.
+
 ## 6. Écarts connus (tests `#[ignore]`, à lancer avec `cargo test -p thunderlook-exchange -- --ignored`)
 
 | Écart | Effet | Où se corrige |
 |---|---|---|
 | Série **modifiée** sur le téléphone : non relue (avertissement) | modification perdue côté ThunderLook | `thunderlook-calendar` (écriture d'exceptions importées) |
 | Série **créée** sur le téléphone : ignorée | série absente de ThunderLook | idem (RRULE → `Repeat`) |
-| Élément modifié dans ThunderLook et resté intact sur le téléphone, alors que le téléphone modifie un autre élément du même fichier : proposé « modifié » (valeur ancienne) | si accepté, écrase la modification faite dans ThunderLook | `crates/exchange` : demande de retenir la valeur exportée de chaque élément dans le manifeste ; non fait ici (changement de format du manifeste, à décider). **Relire la liste avant « Appliquer »** |
 | Listes de distribution : non exportées | le téléphone ne les voit pas ; rien n'est perdu dans ThunderLook (lecture seule) | décision de Paul |
 | Rappel d'une **tâche** : non écrit dans `taches.ics` | le téléphone ne le voit pas | `thunderlook-items` (`vtodo::export`) |
 

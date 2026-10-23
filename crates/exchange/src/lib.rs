@@ -3,12 +3,14 @@
 //! - [`export_all`] écrit dans le dossier d'échange `contacts.vcf`, `taches.ics`, `notes.vnt`, `calendrier.ics` et un
 //!   `manifest.json` (horodatage, nombre d'éléments, SHA-256 et identifiants de chaque fichier), chaque fichier de façon
 //!   atomique (fichier temporaire puis renommage).
-//! - [`import_changes`] relit ces fichiers et ne rend que ce qui a changé par rapport à la base, sans rien écrire.
+//! - [`import_changes`] relit ces fichiers et ne rend que ce qui a changé par rapport à la base, sans rien écrire ;
+//!   un élément modifié des deux côtés est rendu à part (`conflict`).
 //! - [`apply`] applique les changements acceptés, après avoir consigné de quoi revenir en arrière dans
 //!   `data_dir/exchange-undo/<horodatage>.json` ; [`undo`] les défait.
 //!
 //! Rien n'est supprimé sans accord : une suppression est une simple proposition ([`Change::default_selected`] est faux).
 
+mod conflict;
 mod import;
 mod sha256;
 
@@ -22,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use thunderlook_model::{contacts::ContactForm, items::{NoteForm, TaskForm}};
 use thunderlook_store::rusqlite::Connection;
 
+pub use conflict::{Origin, Resolution};
 pub use import::{ApplyReport, apply, import_changes, last_undo, undo};
 
 pub type Result<T> = std::result::Result<T, String>;
@@ -80,6 +83,10 @@ pub struct FileInfo {
     /// depuis l'export, même quand le fichier le désigne par l'identifiant du téléphone.
     #[serde(default)]
     pub uids: HashMap<String, String>,
+    /// Identifiant local → empreinte (SHA-256) de la valeur exportée de l'élément. Absent des manifestes d'avant ce
+    /// format : la valeur exportée est alors « inconnue » et tout écart est traité en conflit (voir `conflict`).
+    #[serde(default)]
+    pub values: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,18 +158,27 @@ pub struct Change {
     /// Identifiant du fichier (`UID`, `X-OUTLOOK-UID`), s'il en a un : retenu après application pour reconnaître l'élément.
     pub ext_uid: Option<String>,
     pub payload: Payload,
+    /// Présent pour un conflit (voir [`ImportReport::conflicts`]) : jamais appliqué sans [`Change::resolution`].
+    #[serde(default)]
+    pub conflict: Option<Origin>,
+    /// Choix de l'utilisateur, à renseigner avant [`apply`] pour un conflit.
+    #[serde(default)]
+    pub resolution: Option<Resolution>,
 }
 
 impl Change {
     /// Coché d'office dans la liste ? Jamais une suppression.
     pub fn default_selected(&self) -> bool {
-        self.kind != ChangeKind::Deleted
+        self.kind != ChangeKind::Deleted && self.conflict.is_none()
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ImportReport {
     pub changes: Vec<Change>,
+    /// Éléments modifiés des deux côtés (ou dont la valeur exportée est inconnue) : à part, jamais appliqués sans choix.
+    #[serde(default)]
+    pub conflicts: Vec<Change>,
     /// Éléments du fichier identiques à ceux de la base.
     pub unchanged: usize,
     pub warnings: Vec<String>,
@@ -208,7 +224,8 @@ pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<
     let shown: Vec<ContactForm> = forms.iter().map(|f| ContactForm { id: f.id.as_deref().map(|i| uid_of(ItemKind::Contact, i)), ..f.clone() }).collect();
     let text = thunderlook_contacts::vcard::export(&shown, thunderlook_contacts::vcard::Version::V30);
     let pairs = forms.iter().zip(&shown).filter_map(|(f, s)| Some((f.id.clone()?, s.id.clone()?))).collect();
-    files.push(write_file(out_dir, CONTACTS_FILE, &text, pairs)?);
+    let values = forms.iter().filter_map(|f| Some((f.id.clone()?, conflict::fingerprint(&import::canon_contact(f))))).collect();
+    files.push(write_file(out_dir, CONTACTS_FILE, &text, pairs, values)?);
 
     let tasks = thunderlook_items::tasks(conn)?;
     let forms: Vec<TaskForm> = tasks
@@ -219,7 +236,8 @@ pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<
         .collect::<Result<_>>()?;
     let shown: Vec<TaskForm> = forms.iter().map(|f| TaskForm { id: f.id.as_deref().map(|i| uid_of(ItemKind::Task, i)), ..f.clone() }).collect();
     let pairs = forms.iter().zip(&shown).filter_map(|(f, s)| Some((f.id.clone()?, s.id.clone()?))).collect();
-    files.push(write_file(out_dir, TASKS_FILE, &thunderlook_items::vtodo::export(&shown), pairs)?);
+    let values = forms.iter().filter_map(|f| Some((f.id.clone()?, conflict::fingerprint(&import::canon_task(f))))).collect();
+    files.push(write_file(out_dir, TASKS_FILE, &thunderlook_items::vtodo::export(&shown), pairs, values)?);
 
     let notes = thunderlook_items::notes(conn, data_dir)?;
     let forms: Vec<NoteForm> = notes
@@ -230,7 +248,8 @@ pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<
         .collect::<Result<_>>()?;
     let shown: Vec<NoteForm> = forms.iter().map(|f| NoteForm { id: f.id.as_deref().map(|i| uid_of(ItemKind::Note, i)), ..f.clone() }).collect();
     let pairs = forms.iter().zip(&shown).filter_map(|(f, s)| Some((f.id.clone()?, s.id.clone()?))).collect();
-    files.push(write_file(out_dir, NOTES_FILE, &thunderlook_items::vnote::export(&shown), pairs)?);
+    let values = forms.iter().filter_map(|f| Some((f.id.clone()?, conflict::fingerprint(&import::canon_note(f))))).collect();
+    files.push(write_file(out_dir, NOTES_FILE, &thunderlook_items::vnote::export(&shown), pairs, values)?);
 
     let calendar = thunderlook_calendar::load(conn)?;
     let shown: Vec<thunderlook_calendar::Appointment> = calendar
@@ -244,7 +263,8 @@ pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<
     let text = thunderlook_calendar::ics::export(&shown.iter().collect::<Vec<_>>(), "ThunderLook", &|a| thunderlook_calendar::description(a, data_dir));
     // Les séries ne se relisent pas (voir `import`) : leurs suppressions ne sont jamais proposées.
     let pairs = shown.iter().filter(|a| a.recurrence.is_none()).map(|a| (format!("a{}", a.id), event_uid(a))).collect();
-    files.push(write_file(out_dir, CALENDAR_FILE, &text, pairs)?);
+    let values = calendar.appointments.iter().filter(|a| a.recurrence.is_none()).map(|a| (format!("a{}", a.id), conflict::fingerprint(&import::canon_event(a, data_dir)))).collect();
+    files.push(write_file(out_dir, CALENDAR_FILE, &text, pairs, values)?);
 
     let manifest = Manifest { exported_at: now_stamp(), files };
     let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -252,7 +272,7 @@ pub fn export_all(conn: &Connection, data_dir: &Path, out_dir: &Path) -> Result<
     Ok(manifest)
 }
 
-fn write_file(dir: &Path, name: &str, text: &str, pairs: Vec<(String, String)>) -> Result<FileInfo> {
+fn write_file(dir: &Path, name: &str, text: &str, pairs: Vec<(String, String)>, values: HashMap<String, String>) -> Result<FileInfo> {
     write_atomic(&dir.join(name), text.as_bytes())?;
     let count = match name {
         CONTACTS_FILE => text.matches("BEGIN:VCARD").count(),
@@ -260,7 +280,7 @@ fn write_file(dir: &Path, name: &str, text: &str, pairs: Vec<(String, String)>) 
         NOTES_FILE => text.matches("BEGIN:VNOTE").count(),
         _ => text.matches("BEGIN:VEVENT").count(),
     };
-    Ok(FileInfo { name: name.to_string(), count, sha256: sha256::hex(text.as_bytes()), ids: pairs.iter().map(|(id, _)| id.clone()).collect(), uids: pairs.into_iter().map(|(id, uid)| (uid, id)).collect() })
+    Ok(FileInfo { name: name.to_string(), count, sha256: sha256::hex(text.as_bytes()), ids: pairs.iter().map(|(id, _)| id.clone()).collect(), uids: pairs.into_iter().map(|(id, uid)| (uid, id)).collect(), values })
 }
 
 /// Manifeste du dossier d'échange, s'il y en a un de lisible.
