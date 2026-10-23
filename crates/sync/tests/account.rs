@@ -3,6 +3,8 @@
 
 use thunderlook_sync::{Endpoints, account};
 
+// Windows seulement : le mot de passe vit dans le Gestionnaire d'identifiants (keyring « windows-native »), absent sous Linux.
+#[cfg(windows)]
 #[test]
 fn account_lifecycle_keeps_password_out_of_the_database() {
     let dir = std::env::temp_dir().join(format!("tl-account-{}", std::process::id()));
@@ -53,6 +55,8 @@ fn account_lifecycle_keeps_password_out_of_the_database() {
 
 /// Point ouvert du J7 : le même compte dans deux dossiers de données ; le retirer de l'un garde le mot de passe pour
 /// l'autre. Un mot de passe enregistré avant la liste des utilisateurs n'est jamais effacé.
+// Windows seulement : le mot de passe vit dans le Gestionnaire d'identifiants (keyring « windows-native »), absent sous Linux.
+#[cfg(windows)]
 #[test]
 fn password_is_shared_between_data_dirs() {
     let base = std::env::temp_dir().join(format!("tl-account-shared-{}", std::process::id()));

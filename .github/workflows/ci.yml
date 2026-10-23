@@ -1,0 +1,34 @@
+# Intégration continue (Linux). Le crate Tauri (`thunderlook`) est exclu : il dépend de WebView2 et de la chaîne Windows.
+# Voir docs/ci.md pour ce qui ne passe pas encore (clippy, rustfmt).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: Tests
+        run: cargo test --workspace --exclude thunderlook
+      # `-D warnings` échoue aujourd'hui (53 avertissements existants) : en `-W` en attendant.
+      - name: Clippy
+        run: cargo clippy --workspace --exclude thunderlook -- -W warnings
+      # Pas de `cargo fmt --check` : le dépôt n'est pas formaté avec rustfmt (voir docs/ci.md).
