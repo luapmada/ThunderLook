@@ -4,6 +4,7 @@
 //! `dataDir` dans `config.json` (dossier de configuration de l'application), sinon `<données locales>\data`.
 
 mod contacts_cmds;
+mod exchange_cmds;
 mod items_cmds;
 mod reminders_cmds;
 mod shared_calendar;
@@ -1466,6 +1467,7 @@ pub fn run() {
             }
             start_scheduler(app.handle());
             reminders_cmds::start(app.handle());
+            exchange_cmds::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1524,6 +1526,13 @@ pub fn run() {
             contacts_cmds::contact_dist_lists,
             exchange_export,
             exchange_import,
+            exchange_cmds::phone_exchange_state,
+            exchange_cmds::phone_exchange_pick,
+            exchange_cmds::phone_exchange_set_auto,
+            exchange_cmds::phone_exchange_export,
+            exchange_cmds::phone_exchange_check,
+            exchange_cmds::phone_exchange_apply,
+            exchange_cmds::phone_exchange_undo,
             tasks_list,
             items_cmds::tasks_query,
             items_cmds::notes_query,

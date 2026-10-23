@@ -92,7 +92,13 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
     let key = ev.key();
     let (ctrl, alt, shift) = (ev.ctrl_key(), ev.alt_key(), ev.shift_key());
     // Une boîte de dialogue ou un menu contextuel garde ses touches.
-    if ui.dialog.get_untracked().is_some() || ui.context_menu.get_untracked().is_some() {
+    if ui.dialog.get_untracked().is_some() || ui.context_menu.get_untracked().is_some() || ui.phone_exchange.get_untracked() {
+        return;
+    }
+    // Échange avec le téléphone (fichiers vCard, iCalendar, vNote).
+    if ctrl && shift && !alt && key.eq_ignore_ascii_case("t") {
+        ev.prevent_default();
+        ui.phone_exchange.set(true);
         return;
     }
     // Organisation (J3), hors saisie de texte.
@@ -488,6 +494,7 @@ pub fn App() -> impl IntoView {
             <crate::tasks::TaskDialog />
             <crate::notes::NoteDialog />
             <JunkOptionsDialog />
+            <crate::exchange::ExchangeDialog />
         </div>
     }
 }

@@ -630,3 +630,52 @@ pub fn on_open_item(f: impl Fn(OpenItem) + 'static) {
 pub async fn perf_mark(label: &str, ms: f64) {
     let _ = call::<_, ()>("perf_mark", &PerfArg { label, ms }).await;
 }
+
+// --- Échange avec le téléphone (fichiers) ---------------------------------------------------------------------------
+
+use crate::exchange::{CheckResult, ExchangeState};
+
+pub async fn phone_exchange_state() -> Result<ExchangeState, String> {
+    call("phone_exchange_state", &NoArgs {}).await
+}
+
+/// « Choisir le dossier… » ; `None` si l'utilisateur annule.
+pub async fn phone_exchange_pick() -> Result<Option<ExchangeState>, String> {
+    call("phone_exchange_pick", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct MinutesArg {
+    minutes: u32,
+}
+
+pub async fn phone_exchange_set_auto(minutes: u32) -> Result<ExchangeState, String> {
+    call("phone_exchange_set_auto", &MinutesArg { minutes }).await
+}
+
+#[derive(Serialize)]
+struct ForceArg {
+    force: bool,
+}
+
+/// Une erreur « MODIFIED:fichiers » : le téléphone a modifié ces fichiers, un export les écraserait (`force` passe outre).
+pub async fn phone_exchange_export(force: bool) -> Result<String, String> {
+    call("phone_exchange_export", &ForceArg { force }).await
+}
+
+pub async fn phone_exchange_check() -> Result<CheckResult, String> {
+    call("phone_exchange_check", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct KeysArg<'a> {
+    keys: &'a [String],
+}
+
+pub async fn phone_exchange_apply(keys: &[String]) -> Result<String, String> {
+    call("phone_exchange_apply", &KeysArg { keys }).await
+}
+
+pub async fn phone_exchange_undo() -> Result<String, String> {
+    call("phone_exchange_undo", &NoArgs {}).await
+}

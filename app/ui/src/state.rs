@@ -240,6 +240,8 @@ pub struct Ui {
     pub note_form: RwSignal<Option<thunderlook_model::items::NoteForm>>,
     pub notes_epoch: RwSignal<u64>,
     pub contact_filter: RwSignal<String>,
+    /// Boîte « Échange avec le téléphone » ouverte (Ctrl+Maj+T).
+    pub phone_exchange: RwSignal<bool>,
     pub refs: Refs,
 }
 
@@ -306,6 +308,7 @@ impl Ui {
             note_form: RwSignal::new(None),
             notes_epoch: RwSignal::new(0),
             contact_filter: RwSignal::new(String::new()),
+            phone_exchange: RwSignal::new(false),
             refs: Refs {
                 search: NodeRef::new(),
                 tabs: NodeRef::new(),

@@ -304,6 +304,28 @@ des textes synthétiques seulement. Rien ci-dessous n'est **constaté** sur MPE 
    (mobile, travail, domicile) avec avertissement ; à confirmer d'après ce qu'écrit MPE.
 7. Texte 2.1/VNOTE sans `CHARSET` en QP : lu en UTF-8, repli WINDOWS-1252 si octets invalides (avertissement).
 
+8. **Échange par dossier (lot I, `crates/exchange`)** : ThunderLook écrit `contacts.vcf` (vCard 3.0), `taches.ics`,
+   `notes.vnt`, `calendrier.ics` et `manifest.json` dans un dossier choisi ; MPE n'est jamais appelé. Non constaté, à
+   valider avec le S20 FE :
+   - **Nom et chemin des exports de MPE** : MPE sait-il lire et écrire CES quatre noms de fichiers dans un dossier ? Sinon
+     il faudra le réglage correspondant côté MPE (hors périmètre ici) ou renommer les fichiers.
+   - **Encodage de MPE** : vCard 2.1 ou 3.0, `UID` ou `X-OUTLOOK-UID` réécrit ou conservé ? Si MPE remplace nos `UID`
+     (`p12`…) par les siens (EntryID), la correspondance se fait par nom + courriel / objet + échéance / texte / objet +
+     début, puis `exchange-map.json` retient l'identifiant de MPE après la première application.
+   - **Suppressions côté téléphone** : un élément absent du fichier est proposé « supprimé » seulement s'il figurait dans
+     le dernier export (`manifest.json`, liste `ids`) ; jamais coché d'office. À vérifier : MPE supprime-t-il vraiment
+     la fiche du fichier quand on la supprime sur le téléphone, ou laisse-t-il le fichier tel quel ?
+   - **Doublons de MPE** : un élément réécrit par MPE avec un nom ou un objet légèrement différent apparaît « nouveau »
+     (et l'ancien « supprimé », décoché) ; à relire à l'écran avant « Appliquer ».
+   - **Rendez-vous** : seuls les rendez-vous simples se relisent ; les séries sont exportées mais ignorées à l'import
+     (signalé en avertissement). Un rendez-vous créé par le téléphone n'a pas d'`UID` ThunderLook : au prochain export il
+     repart avec `thunderlook-<source>-<id>` ; la correspondance par `exchange-map.json` évite le doublon côté ThunderLook,
+     pas forcément côté MPE.
+   - **Export automatique** (désactivé par défaut) : suspendu tant que le téléphone a modifié des fichiers depuis le
+     dernier export (sinon ses modifications seraient écrasées) ; l'export manuel demande une confirmation dans ce cas.
+   - **Annulation** : `data_dir/exchange-undo/<horodatage>.json` ; un élément supprimé puis rétabli reprend un NOUVEL
+     identifiant local (la base n'en réutilise pas).
+
 ## 9. Journal d'exécution
 - **2026-10-22, étape 1 (sauvegardes)**, avec l'accord de Paul :
   - MPE fermé proprement ; `%APPDATA%\MyPhoneExplorer` copié dans
