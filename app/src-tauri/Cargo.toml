@@ -21,6 +21,7 @@ tauri = { version = "2.12.4", features = [] }
 tauri-plugin-log = "2"
 thunderlook-model = { path = "../../crates/model" }
 thunderlook-mailbox = { path = "../../crates/mailbox" }
+thunderlook-mime = { path = "../../crates/mime" }
 thunderlook-sync = { path = "../../crates/sync" }
 thunderlook-store = { path = "../../crates/store" }
 thunderlook-calendar = { path = "../../crates/calendar" }
