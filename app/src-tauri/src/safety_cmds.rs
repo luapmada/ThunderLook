@@ -12,6 +12,8 @@ use crate::{CalendarCache, clear_calendar, data_dir};
 pub fn start(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
+        // Après le chargement de l'interface : la sauvegarde lit toute la base et ne doit pas gêner le démarrage.
+        std::thread::sleep(std::time::Duration::from_secs(240));
         let Ok(dir) = data_dir(&app) else { return };
         let Ok(conn) = thunderlook_store::open(&dir) else { return };
         let purged = thunderlook_safety::purge(&dir, TRASH_DAYS);
