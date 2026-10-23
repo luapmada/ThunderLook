@@ -694,6 +694,88 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    fn series(conn: &mut Connection, dir: &Path, folder: i64, start: &str, end: &str, frequency: Frequency, until: RepeatEnd) -> i64 {
+        let edit = Edit {
+            subject: "Série".into(),
+            start: start.into(),
+            end: end.into(),
+            reminder: Some(15),
+            busy: 2,
+            repeat: Some(Repeat { frequency, interval: 1, end: until }),
+            ..Default::default()
+        };
+        create(conn, dir, folder, &edit).unwrap()
+    }
+
+    #[test]
+    fn month_end_series_with_exception_and_deletion() {
+        let (dir, mut conn, folder) = fixture("eom");
+        let id = series(&mut conn, &dir, folder, "2026-01-31T10:00", "2026-01-31T11:00", Frequency::Monthly, RepeatEnd::Count(5));
+        let days = |conn: &Connection| listing(conn, id).iter().map(|l| l[..5].to_string()).collect::<Vec<_>>();
+        // Jour 31 : les mois plus courts donnent leur dernier jour (comme Outlook).
+        assert_eq!(days(&conn), ["01-31", "02-28", "03-31", "04-30", "05-31"]);
+        let moved = Edit { subject: "Série".into(), start: "2026-03-01T10:00".into(), end: "2026-03-01T11:00".into(), busy: 2, reminder: Some(15), ..Default::default() };
+        update_occurrence(&mut conn, &dir, id, "2026-02-28", &moved).unwrap();
+        delete_occurrence(&mut conn, id, "2026-04-30").unwrap();
+        // Les heures de la série changent ; l'exception et la suppression survivent.
+        let times = Edit { subject: "Série".into(), start: "2026-01-31T09:30".into(), end: "2026-01-31T10:00".into(), busy: 2, reminder: Some(15), ..Default::default() };
+        assert_eq!(update_series(&mut conn, &dir, id, &times, None).unwrap(), SeriesChange::default());
+        let l = listing(&conn, id);
+        assert_eq!(l.len(), 4, "{l:?}");
+        assert!(l.contains(&"02-28 03-01 10:00 → 03-01 11:00 Série *".to_string()), "{l:?}");
+        assert!(l.contains(&"03-31 03-31 09:30 → 03-31 10:00 Série".to_string()), "{l:?}");
+        assert!(l.iter().all(|x| !x.starts_with("04-30")), "{l:?}");
+        // Aller-retour de l'encodage.
+        let r = recurrence(&conn, id);
+        assert_eq!(Recurrence::parse(&r.encode()).unwrap().encode(), r.encode());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn leap_day_yearly_series() {
+        let (dir, mut conn, folder) = fixture("leap");
+        let id = series(&mut conn, &dir, folder, "2024-02-29T08:00", "2024-02-29T09:00", Frequency::Yearly, RepeatEnd::Never);
+        let cal = crate::load(&conn).unwrap();
+        let a = cal.appointments.iter().find(|a| a.id == id).unwrap();
+        let from = utc_ms("2024-01-01T00:00").unwrap();
+        let to = utc_ms("2029-01-01T00:00").unwrap();
+        let years: Vec<String> = expand::occurrences(a, from, to).iter().filter_map(|o| o.original_date).map(|d| d.to_string()).collect();
+        // Pas d'invention : la série ne tombe que sur un 29 février réel (2024 et 2028) ou sur le 28 (années communes),
+        // mais toujours une occurrence par an et jamais un 1er mars.
+        assert_eq!(years.len(), 5, "{years:?}");
+        assert!(years.iter().all(|d| d.ends_with("-02-29") || d.ends_with("-02-28")), "{years:?}");
+        let r = recurrence(&conn, id);
+        assert_eq!(Recurrence::parse(&r.encode()).unwrap(), r);
+        // Modifier l'occurrence de 2028 puis la supprimer.
+        let edit = Edit { subject: "Série".into(), start: "2028-02-29T12:00".into(), end: "2028-02-29T13:00".into(), busy: 2, reminder: Some(15), ..Default::default() };
+        update_occurrence(&mut conn, &dir, id, "2028-02-29", &edit).unwrap();
+        let cal = crate::load(&conn).unwrap();
+        let a = cal.appointments.iter().find(|a| a.id == id).unwrap();
+        assert!(expand::occurrences(a, from, to).iter().any(|o| o.exception && o.original_date.map(|d| d.to_string()) == Some("2028-02-29".into())));
+        delete_occurrence(&mut conn, id, "2028-02-29").unwrap();
+        assert!(recurrence(&conn, id).exceptions.is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn local_time_is_stable_across_the_dst_change() {
+        let (dir, mut conn, folder) = fixture("dst");
+        // Changement d'heure le 2026-10-25 : l'heure locale (14 h) ne bouge pas, l'instant UTC si.
+        let id = series(&mut conn, &dir, folder, "2026-10-24T14:00", "2026-10-24T15:00", Frequency::Daily, RepeatEnd::Count(3));
+        assert_eq!(listing(&conn, id), ["10-24 10-24 14:00 → 10-24 15:00 Série", "10-25 10-25 14:00 → 10-25 15:00 Série", "10-26 10-26 14:00 → 10-26 15:00 Série"]);
+        let cal = crate::load(&conn).unwrap();
+        let a = cal.appointments.iter().find(|a| a.id == id).unwrap();
+        let o = expand::occurrences(a, utc_ms("2026-10-01T00:00").unwrap(), utc_ms("2026-11-30T00:00").unwrap());
+        assert_eq!(o[0].start_ms, utc_ms("2026-10-24T14:00").unwrap());
+        assert_eq!(o[1].start_ms - o[0].start_ms, 25 * 3_600_000, "le 25 octobre dure 25 h");
+        // Une exception de l'autre côté du changement d'heure garde son heure locale.
+        let edit = Edit { subject: "Série".into(), start: "2026-10-25T16:00".into(), end: "2026-10-25T17:00".into(), busy: 2, reminder: Some(15), ..Default::default() };
+        update_occurrence(&mut conn, &dir, id, "2026-10-24", &edit).unwrap();
+        let l = listing(&conn, id);
+        assert!(l.contains(&"10-24 10-25 16:00 → 10-25 17:00 Série *".to_string()), "{l:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn paris_to_utc() {
         let utc = |t: &str| NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M").unwrap().and_utc().timestamp_millis();
