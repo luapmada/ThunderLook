@@ -525,7 +525,10 @@ CHECKS.push(['Clic droit : les actions des sous-menus s\'exécutent (Règles ›
   const ctx = `(() => { const e = document.querySelector('.msg[aria-posinset="1"]'); e.click(); const b = e.getBoundingClientRect(); e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: b.left + 80, clientY: b.top + 20 })); })()`;
   const item = (t) => `[...document.querySelectorAll('[role=menuitem]')].find(e => e.textContent.trim().startsWith(${JSON.stringify(t)}))`;
   const escape = () => js(`document.querySelector('.dialog')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
-  // Après le cas J9 (retour au Courrier par Ctrl+1), la liste peut ne pas être encore rechargée.
+  // Après le cas J9 (retour au Courrier par Ctrl+1), la liste peut ne pas être encore rechargée ; un cas précédent
+  // peut aussi avoir laissé un dossier vide (Éléments envoyés) : on revient d'abord à la Boîte de réception.
+  await js(`(() => { const t = [...document.querySelectorAll('.treeitem')].find(e => /Boîte de réception/.test(e.textContent)); if (t) t.click(); })()`);
+  await sleep(900);
   try {
     await until(`!!document.querySelector('.msg[aria-posinset="1"]')`, 'liste des messages');
   } catch (e) {
