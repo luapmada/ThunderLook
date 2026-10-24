@@ -12,7 +12,7 @@ use thunderlook_exchange::{ChangeKind, ItemKind};
 use crate::{CalendarCache, clear_calendar, data_dir, settings_path};
 
 /// Un seul export, relecture ou application à la fois (l'export automatique tourne dans son propre fil).
-static BUSY: Mutex<()> = Mutex::new(());
+pub(crate) static BUSY: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

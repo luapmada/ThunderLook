@@ -524,6 +524,7 @@ pub fn ExchangeDialog() -> impl IntoView {
                             } />
                     </label>
                     <p class="dialog-note" aria-live="polite">{move || note.get()}</p>
+                    <AutoSyncZone />
                     <crate::mpe_import::MpeImport />
                     <div class="dialog-buttons">
                         <button class="btn" on:click=move |_| close()>"Fermer"</button>
@@ -531,5 +532,308 @@ pub fn ExchangeDialog() -> impl IntoView {
                 </div>
             </div>
         </Show>
+    }
+}
+
+// --- Synchronisation automatique (lot AM) ---------------------------------------------------------------------------
+//
+// Reflet de `thunderlook_exchange::auto` : la tâche de fond relit le dossier d'échange toute seule ; cette zone règle
+// l'intervalle (5 à 120 min), montre ce qui est mis de côté (jamais appliqué sans toi) et annule le dernier passage.
+
+use std::time::Duration;
+
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], js_name = invoke, catch)]
+    async fn tauri_invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
+}
+
+#[derive(serde::Serialize)]
+struct NoArgs {}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AutoSetArgs {
+    enabled: bool,
+    minutes: u32,
+    auto_export: bool,
+}
+
+async fn auto_call<T: serde::de::DeserializeOwned>(cmd: &str, args: &impl serde::Serialize) -> Result<T, String> {
+    let ser = serde_wasm_bindgen::Serializer::json_compatible();
+    let args = serde::Serialize::serialize(args, &ser).map_err(|e| e.to_string())?;
+    let out = tauri_invoke(cmd, args).await.map_err(|e| e.as_string().unwrap_or_else(|| format!("{cmd} : {e:?}")))?;
+    serde_wasm_bindgen::from_value(out).map_err(|e| format!("{cmd} : {e}"))
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AutoSettings {
+    pub enabled: bool,
+    pub minutes: u32,
+    pub auto_export: bool,
+}
+
+impl Default for AutoSettings {
+    fn default() -> Self {
+        AutoSettings { enabled: false, minutes: 60, auto_export: true }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AutoAside {
+    pub deletions: usize,
+    pub conflicts: usize,
+    pub series: usize,
+    pub warnings: usize,
+}
+
+impl AutoAside {
+    fn total(&self) -> usize {
+        self.deletions + self.conflicts + self.series + self.warnings
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct AutoOutcome {
+    pub kind: String,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AutoPass {
+    pub at: String,
+    pub outcome: AutoOutcome,
+    pub created: usize,
+    pub modified: usize,
+    pub aside: AutoAside,
+    pub undo: Option<String>,
+    pub exported: Option<bool>,
+    pub export_note: String,
+    pub errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AutoView {
+    pub settings: AutoSettings,
+    pub last: Option<AutoPass>,
+    pub last_read: Option<AutoPass>,
+    pub dir_set: bool,
+    pub can_undo: bool,
+}
+
+/// `2026-10-24T22:54:51Z` (UTC) → « 24/10 à 00:54 » (heure locale).
+fn local_time(at: &str) -> String {
+    let d = js_sys::Date::new(&JsValue::from_str(at));
+    if d.get_time().is_nan() {
+        return at.to_string();
+    }
+    format!("{:02}/{:02} à {:02}:{:02}", d.get_date(), d.get_month() + 1, d.get_hours(), d.get_minutes())
+}
+
+fn outcome_text(p: &AutoPass) -> String {
+    let detail = p.outcome.detail.clone().unwrap_or_default();
+    match p.outcome.kind.as_str() {
+        "skipped" => format!("ignoré — {detail}"),
+        "blocked" => format!("BLOQUÉ par le seuil de sécurité, rien appliqué — {detail}"),
+        "failed" => format!("échec — {detail}"),
+        _ => {
+            let mut s = format!("{} créé(s), {} modifié(s)", p.created, p.modified);
+            if p.aside.total() > 0 {
+                s.push_str(&format!(", {} mis de côté", p.aside.total()));
+            }
+            match p.exported {
+                Some(true) => s.push_str(", exporté"),
+                Some(false) => s.push_str(&format!(", {}", p.export_note)),
+                None => {}
+            }
+            s
+        }
+    }
+}
+
+fn fetch_auto(view: RwSignal<AutoView>) {
+    spawn_local(async move {
+        if let Ok(v) = auto_call::<AutoView>("auto_sync_state", &NoArgs {}).await {
+            view.set(v);
+        }
+    });
+}
+
+/// Rafraîchit `view` toutes les 20 s tant que le composant vit.
+fn poll_auto(view: RwSignal<AutoView>) {
+    fetch_auto(view);
+    if let Ok(h) = set_interval_with_handle(move || fetch_auto(view), Duration::from_secs(20)) {
+        on_cleanup(move || h.clear());
+    }
+}
+
+/// État dans la barre d'état : dernier passage et compteur de ce qui est mis de côté ; vide si c'est désactivé.
+#[component]
+pub fn AutoSyncStatus() -> impl IntoView {
+    let view_state = RwSignal::new(AutoView::default());
+    poll_auto(view_state);
+    view! {
+        {move || {
+            let v = view_state.get();
+            if !v.settings.enabled {
+                return ().into_any();
+            }
+            let aside = v.last_read.as_ref().map_or(0, |p| p.aside.total());
+            let blocked = v.last_read.as_ref().is_some_and(|p| p.outcome.kind == "blocked");
+            let text = match &v.last {
+                None => format!("Synchro auto : toutes les {} min", v.settings.minutes),
+                Some(p) => format!("Synchro auto : {} — {}", local_time(&p.at), outcome_text(p)),
+            };
+            let title = "Relecture automatique du dossier d'échange du téléphone (Fichier › Échange avec le téléphone)";
+            view! {
+                <span class="status-msg auto-sync-status" title=title>{text}</span>
+                {(aside > 0 && !blocked).then(|| view! { <span class="badge-filter auto-sync-aside" title="Suppressions, conflits, séries refusées, avertissements : à traiter à la main">{format!("{aside} de côté")}</span> })}
+                {blocked.then(|| view! { <span class="status-error auto-sync-blocked" role="alert">"Synchro auto bloquée (seuil)"</span> })}
+            }
+            .into_any()
+        }}
+    }
+}
+
+/// Zone « Synchronisation automatique » de la boîte d'échange.
+#[component]
+pub fn AutoSyncZone() -> impl IntoView {
+    let ui = use_ui();
+    let st = RwSignal::new(AutoView::default());
+    let journal = RwSignal::new(Vec::<AutoPass>::new());
+    let message = RwSignal::new(String::new());
+    let busy = RwSignal::new(false);
+    poll_auto(st);
+
+    let load_journal = move || {
+        spawn_local(async move {
+            if let Ok(j) = auto_call::<Vec<AutoPass>>("auto_sync_journal", &NoArgs {}).await {
+                journal.set(j.into_iter().take(10).collect());
+            }
+        });
+    };
+    load_journal();
+
+    let save = move |enabled: bool, minutes: u32, auto_export: bool| {
+        spawn_local(async move {
+            match auto_call::<AutoView>("auto_sync_set", &AutoSetArgs { enabled, minutes: minutes.clamp(5, 120), auto_export }).await {
+                Ok(v) => st.set(v),
+                Err(e) => ui.error.set(Some(e)),
+            }
+        });
+    };
+    let run_now = move || {
+        busy.set(true);
+        message.set("Passage demandé : il démarre dans quelques secondes (fichiers instables = reporté).".into());
+        spawn_local(async move {
+            if let Err(e) = auto_call::<()>("auto_sync_run_now", &NoArgs {}).await {
+                ui.error.set(Some(e));
+            }
+            busy.set(false);
+        });
+        let _ = set_timeout_with_handle(
+            move || {
+                fetch_auto(st);
+                load_journal();
+            },
+            Duration::from_secs(15),
+        );
+    };
+    let undo = move || {
+        busy.set(true);
+        spawn_local(async move {
+            match auto_call::<String>("auto_sync_undo", &NoArgs {}).await {
+                Ok(m) => {
+                    ui.status.set(Some(m.clone()));
+                    message.set(m);
+                    ui.contacts_epoch.update(|e| *e += 1);
+                    ui.tasks_epoch.update(|e| *e += 1);
+                    ui.notes_epoch.update(|e| *e += 1);
+                    ui.cal_epoch.update(|e| *e += 1);
+                }
+                Err(e) => ui.error.set(Some(e)),
+            }
+            fetch_auto(st);
+            load_journal();
+            busy.set(false);
+        });
+    };
+
+    let s = move || st.with(|v| v.settings.clone());
+    view! {
+        <section class="auto-sync" aria-label="Synchronisation automatique">
+            <h3>"Synchronisation automatique"</h3>
+            <p class="dialog-note">"Quand la synchronisation du téléphone a écrit dans le dossier, ThunderLook relit les fichiers tout seul (jamais pendant qu'ils s'écrivent). Il applique seulement les créations et modifications venues du téléphone ; suppressions, conflits et séries refusées restent de côté."</p>
+            <label class="check">
+                <input type="checkbox" prop:disabled=move || !st.with(|v| v.dir_set)
+                    prop:checked=move || s().enabled
+                    on:change=move |ev| { let s = s(); save(event_target_checked(&ev), s.minutes, s.auto_export) } />
+                <span>"Relire automatiquement le dossier"</span>
+            </label>
+            <label class="field">
+                <span>"Toutes les (minutes, 5 à 120)"</span>
+                <input type="number" min="5" max="120" aria-label="Minutes entre deux relectures automatiques"
+                    prop:disabled=move || !s().enabled
+                    prop:value=move || s().minutes.to_string()
+                    on:change=move |ev| {
+                        if let Ok(m) = event_target_value(&ev).trim().parse::<u32>() {
+                            let s = s();
+                            save(s.enabled, m, s.auto_export);
+                        }
+                    } />
+            </label>
+            <label class="check">
+                <input type="checkbox" prop:disabled=move || !s().enabled
+                    prop:checked=move || s().auto_export
+                    on:change=move |ev| { let s = s(); save(s.enabled, s.minutes, event_target_checked(&ev)) } />
+                <span>"Exporter après la relecture, seulement si le téléphone n'a rien modifié depuis le dernier export"</span>
+            </label>
+            {move || {
+                let v = st.get();
+                v.last.as_ref().map(|p| view! { <p class="dialog-note" role="status">{format!("Dernier passage : {} — {}", local_time(&p.at), outcome_text(p))}</p> })
+            }}
+            {move || {
+                let v = st.get();
+                let p = v.last_read?;
+                let a = p.aside.clone();
+                let blocked = p.outcome.kind == "blocked";
+                Some(view! {
+                    <div class="auto-sync-aside-box" aria-label="Mis de côté">
+                        {blocked.then(|| view! { <p class="exchange-warnings" role="alert">{format!("Seuil de sécurité dépassé : rien n'a été appliqué. {} Vérifiez les fichiers du téléphone, puis « Vérifier les changements » ci-dessus.", p.outcome.detail.clone().unwrap_or_default())}</p> })}
+                        <ul class="auto-sync-counters">
+                            <li class:zero=a.deletions == 0>{format!("Suppressions : {}", a.deletions)}</li>
+                            <li class:zero=a.conflicts == 0>{format!("Conflits : {}", a.conflicts)}</li>
+                            <li class:zero=a.series == 0>{format!("Séries refusées : {}", a.series)}</li>
+                            <li class:zero=a.warnings == 0>{format!("Avertissements : {}", a.warnings)}</li>
+                        </ul>
+                        {(a.total() > 0).then(|| view! { <p class="dialog-note">"À traiter avec « Vérifier les changements » : rien de cela n'est appliqué sans ton choix."</p> })}
+                    </div>
+                })
+            }}
+            <div class="dialog-buttons">
+                <button class="btn" prop:disabled=move || busy.get() || !st.with(|v| v.dir_set) on:click=move |_| run_now()>"Relire maintenant"</button>
+                <button class="btn" prop:disabled=move || busy.get() || !st.with(|v| v.can_undo) on:click=move |_| undo()>"Annuler le dernier passage automatique"</button>
+            </div>
+            <p class="dialog-note" aria-live="polite">{move || message.get()}</p>
+            <details class="auto-sync-journal" on:toggle=move |_| load_journal()>
+                <summary>"Journal des passages"</summary>
+                <ul>
+                    {move || {
+                        let j = journal.get();
+                        if j.is_empty() {
+                            return view! { <li>"Aucun passage pour l'instant."</li> }.into_any();
+                        }
+                        j.into_iter().map(|p| view! { <li><strong>{local_time(&p.at)}</strong>" — "{outcome_text(&p)}</li> }).collect_view().into_any()
+                    }}
+                </ul>
+            </details>
+        </section>
     }
 }

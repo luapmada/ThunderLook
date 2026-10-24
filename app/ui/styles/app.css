@@ -2458,3 +2458,41 @@ input {
   font-weight: 600;
   margin: 0.5em 0;
 }
+
+/* ---------- Synchronisation automatique du dossier d'échange (lot AM) ---------- */
+.auto-sync {
+  margin: 0.75em 0;
+  padding-top: 0.5em;
+  border-top: 1px solid var(--border, #ccc);
+}
+.auto-sync-counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2em 1.4em;
+  list-style: none;
+  margin: 0.4em 0;
+  padding: 0;
+}
+.auto-sync-counters li {
+  font-weight: 600;
+}
+.auto-sync-counters li.zero {
+  font-weight: 400;
+  opacity: 0.65;
+}
+.auto-sync-journal {
+  margin: 0.4em 0;
+  font-size: 0.9em;
+}
+.auto-sync-journal ul {
+  max-height: 12em;
+  overflow: auto;
+  margin: 0.3em 0;
+  padding-left: 1.2em;
+}
+.auto-sync-status {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 38em;
+}
