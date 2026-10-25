@@ -65,3 +65,11 @@ Seul fait établi (fichiers d'état de MPE, pas la cible fichier) : `Phonebook.d
 
 - Demander à l'éditeur sur le forum officiel (https://www.fjsoft.at/forum/), question : format et fichier unique/dossier de la cible « vCard-File ».
 - Observer MPE en essai (§ 7) : c'est la seule source fiable pour § 5.
+
+## 9. Relevé sur le S20 FE (SM-G781B), 2026-10-25 [constaté dans settings.dat]
+Après réglage dans MPE (F2 › Sync, cible « fichier » pour contacts, calendrier, notes) :
+- `ContactSync=7`, `CalendarSync=7`, `NotesSync=7` (1 = Outlook, 7 = cible fichier).
+- Nouvelle section `[WebDAV]` : `vCardUrl=file://A:/…/contacts.vcf`, `vCardVersion=2`, `IcsURL_1=file://A:/…/calendrier.ics`, `Title_1`, `ReadOnly_1=0`, `vNoteUrl=file://A:/…/notes.vnt`.
+- `ContactSyncMode`, `EventSyncMode`, `NoteSyncMode` = 0 (bidirectionnel) ; les confirmations (`*Confirmation=1`) restent actives.
+- Sauvegarde avant réglage : `A:\AI_related\Claude_Code_Work\mpe-backup\2026-10-25\settings_S20.dat` (retour arrière : MPE fermé, remettre ce fichier).
+- Format écrit par MPE dans les trois fichiers : à relever après la première synchro (§ 5).
