@@ -272,6 +272,7 @@ pub fn App() -> impl IntoView {
             Err(e) => ui.error.set(Some(e)),
         }
         ui.settings_loaded.set(true);
+        ui.module.set(crate::options::start_module(&ui.settings.get_untracked()));
         match ipc::load_quick_steps().await {
             Ok(q) => ui.quick_steps.set(q),
             Err(e) => ui.error.set(Some(e)),
