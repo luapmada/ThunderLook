@@ -4,6 +4,7 @@ mod accounts;
 mod actions;
 mod address_book;
 mod app;
+mod attach_preview;
 mod appointment;
 mod autoreply;
 mod calendar;

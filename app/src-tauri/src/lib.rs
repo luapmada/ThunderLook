@@ -4,6 +4,7 @@
 //! `dataDir` dans `config.json` (dossier de configuration de l'application), sinon `<données locales>\data`.
 
 mod address_cmds;
+mod attach_cmds;
 mod calendar_cmds;
 mod contacts_cmds;
 mod dedupe_cmds;
@@ -1561,6 +1562,8 @@ pub fn run() {
             run_rules,
             open_attachment,
             save_attachment,
+            attach_cmds::attachment_preview,
+            attach_cmds::attachment_drag,
             mail_cmds::save_all_attachments,
             from_mail_cmds::from_mail_appointment,
             from_mail_cmds::from_mail_task,

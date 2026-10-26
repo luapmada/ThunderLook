@@ -8,7 +8,7 @@ use leptos::{prelude::*, task::spawn_local};
 use thunderlook_model::{BodyView, ComposeKind, FlagState, Importance, MessageView, initials};
 use wasm_bindgen::{JsCast, closure::Closure};
 
-use crate::{actions, app::global_key, icons::*, ipc, state::use_ui};
+use crate::{actions, app::global_key, attach_preview, icons::*, ipc, state::use_ui};
 
 /// Impression de la page entière (repli quand le corps n'est pas un cadre) : on ne garde que le volet de lecture.
 const PRINT_CSS: &str = "@media print { body * { visibility: hidden !important; } \
@@ -31,6 +31,8 @@ pub fn ReadingPane() -> impl IntoView {
     let ui = use_ui();
     let message = RwSignal::new(None::<MessageView>);
     let loading = RwSignal::new(false);
+    // Pièce jointe dont l'aperçu est ouvert : (message, index).
+    let preview = RwSignal::new(None::<(String, u32)>);
     let frame = NodeRef::<leptos::html::Iframe>::new();
     // Une seule fermeture pour tous les messages affichés.
     let relay = StoredValue::new_local(Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
@@ -114,6 +116,8 @@ pub fn ReadingPane() -> impl IntoView {
                 None => view! { <p class="reading-empty">{move || if loading.get() { "Chargement…" } else { "" }}</p> }.into_any(),
                 Some(m) => {
                     let id = m.id.clone();
+                    let prev_id = m.id.clone();
+                    let m_names: Vec<String> = m.attachments.iter().map(|a| a.name.clone()).collect();
                     let allow_id = m.id.clone();
                     view! {
                         <header class="reading-head">
@@ -212,7 +216,7 @@ pub fn ReadingPane() -> impl IntoView {
                                 view! {
                                     <ul class="attachments" aria-label=label>
                                         {atts.into_iter().map(|a| {
-                                            let (oid, sid) = (id.clone(), id.clone());
+                                            let (oid, sid, pid, hid, did) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
                                             let index = a.index;
                                             let title = if a.blocked {
                                                 format!("{} — type bloqué : enregistrer seulement", a.name)
@@ -220,11 +224,19 @@ pub fn ReadingPane() -> impl IntoView {
                                                 format!("Ouvrir {}", a.name)
                                             };
                                             view! {
-                                                <li class="attachment" class:blocked=a.blocked>
+                                                <li class="attachment" class:blocked=a.blocked draggable="true"
+                                                    on:mouseenter=move |_| attach_preview::prefetch_drag(&hid, index)
+                                                    on:dragstart=move |ev| attach_preview::drag_start(&ev, &did, index)>
                                                     <button class="att-open" title=title on:click=move |_| open_att(oid.clone(), index)>
                                                         {if a.blocked { view! { <Svg icon=SHIELD_ALERT size=16 /> } } else if a.message { view! { <Svg icon=MAIL size=16 /> } } else { view! { <Svg icon=FILE size=16 /> } }}
                                                         <span class="att-name">{a.name.clone()}</span>
                                                         <span class="att-size">{a.size_label.clone()}</span>
+                                                    </button>
+                                                    <button class="icon-btn" aria-label=format!("Aperçu de {}", a.name) title="Aperçu" on:click=move |_| {
+                                                        let key = (pid.clone(), index);
+                                                        preview.update(|p| *p = if p.as_ref() == Some(&key) { None } else { Some(key) });
+                                                    }>
+                                                        <Svg icon=EYE size=14 />
                                                     </button>
                                                     <button class="icon-btn" aria-label=format!("Enregistrer {} sous", a.name) title="Enregistrer sous" on:click=move |_| save_att(sid.clone(), index)>
                                                         <Svg icon=SAVE size=14 />
@@ -235,6 +247,14 @@ pub fn ReadingPane() -> impl IntoView {
                                     </ul>
                                 }
                             })}
+                            {move || {
+                                let (pid, index) = preview.get().filter(|(pid, _)| *pid == prev_id)?;
+                                let name = m_names.get(index as usize).cloned().unwrap_or_default();
+                                Some(view! {
+                                    <attach_preview::AttachPreviewPane id=pid index=index name=name
+                                        on_close=Callback::new(move |_| preview.set(None)) />
+                                })
+                            }}
                         </header>
                         <div class="reading-body">
                             {match m.body {
