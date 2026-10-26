@@ -514,6 +514,7 @@ pub fn App() -> impl IntoView {
             <crate::options::OptionsDialog />
             <crate::options::OptionsEffects />
             <crate::safety::BackupsDialog />
+            <crate::signatures::SignaturesDialog />
             <crate::help::HelpDialog />
         </div>
     }

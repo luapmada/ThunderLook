@@ -444,7 +444,7 @@ impl Mailbox {
         };
         let mine = self.my_addresses(source)?;
         let is_mine = |m: &MailAddress| mine.iter().any(|a| a.eq_ignore_ascii_case(&m.addr));
-        let signature = default_signature(&signatures(), &mine).map(|s| s.html).unwrap_or_default();
+        let signature = crate::signature_store::for_compose(&self.data_dir, kind, &mine);
         // Ligne vide où écrire, puis la signature, comme Outlook.
         let mut html = format!("<p class=MsoNormal><o:p>&nbsp;</o:p></p>{signature}");
         let mut draft = Draft { kind, source_id: source_id.map(String::from), ..Draft::default() };

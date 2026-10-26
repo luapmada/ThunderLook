@@ -34,6 +34,7 @@ mod reading;
 mod reminders;
 mod rules;
 mod safety;
+mod signatures;
 mod splitter;
 mod state;
 mod statusbar;

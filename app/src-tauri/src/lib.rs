@@ -17,6 +17,7 @@ mod reminders_cmds;
 mod safety_cmds;
 mod search_cmds;
 mod shared_calendar;
+mod signatures_cmds;
 mod tasks_recur_cmds;
 mod toast;
 
@@ -845,8 +846,8 @@ fn compose_from_template(app: AppHandle) -> Result<Option<Draft>, String> {
 }
 
 #[tauri::command(async)]
-fn signatures() -> Vec<Signature> {
-    thunderlook_mailbox::signatures()
+fn signatures(app: AppHandle) -> Vec<Signature> {
+    signatures_cmds::menu_list(&app)
 }
 
 /// Fichiers à joindre, choisis par l'utilisateur (vide s'il annule).
@@ -1634,7 +1635,10 @@ pub fn run() {
             folders_cmds::item_folder_create,
             folders_cmds::item_folder_rename,
             folders_cmds::item_folder_delete,
-            folders_cmds::calendar_folder_color
+            folders_cmds::calendar_folder_color,
+            signatures_cmds::signatures_stored,
+            signatures_cmds::signatures_store_save,
+            signatures_cmds::signatures_outlook
         ])
         .run(tauri::generate_context!())
         .expect("échec du démarrage de ThunderLook");
