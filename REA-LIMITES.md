@@ -361,3 +361,13 @@ Lu d'après la description de `Organizer.dat` (docs/mpe-fichiers.md § 1.5) et d
 - **Rappel** : seul le premier `AALARM`/`DALARM`/`PALARM`/`MALARM` est lu, en minutes avant le début ; répétition/sonnerie ignorées. Rappel en repère différent du début (UTC/local) ou après le début : non importé, avec avertissement.
 - **Écartés** : `ATTENDEE` (signalé), tâches `VTODO` du calendrier (signalées ; elles se lisent dans `taches.ics`), propriétés `X-*` autres que les identifiants. Identifiant retenu : `UID`, sinon `X-OUTLOOK-UID`, sinon `X-IRMC-LUID`.
 - **Photos de contacts** : le lecteur de vCard 2.1 lit `PHOTO;ENCODING=BASE64` (JPEG) mais l'import d'échange ne reprend jamais les photos (comportement existant, `norm_contact`).
+
+## À vérifier avec REA/Outlook — autocomplétion des destinataires et Carnet d'adresses (`crates/contacts/src/suggest.rs`, lot BC)
+
+Lecture seule, testé sous Linux sur des bases de test (`cargo test -p thunderlook-contacts suggest`) ; **jamais lancé sur la vraie base, interface non vue à l'écran**.
+
+- **Destinataires du courrier envoyé** : lus dans les `.eml` des 300 derniers messages du dossier de rôle `sent` (la base ne garde que les noms affichés dans `to_line`). Les destinataires plus anciens ne sont proposés que s'ils ont écrit eux-mêmes.
+- **Expéditeurs** : `from_addr` hors dossiers Envoyés, Brouillons, Boîte d'envoi, Éléments supprimés, Courrier indésirable ; seules les adresses SMTP (avec `@`) comptent, les adresses Exchange X.500 sont ignorées.
+- **Contacts** : adresses des Courriers 1 à 3 ; pour une adresse Exchange, l'adresse SMTP du « nom d'origine » (comme la fiche). Listes de distribution : insère tous les membres résolus ; les membres non résolus sont omis sans avertissement.
+- **Performance** : chaque requête relit tous les contacts et ouvre jusqu'à 300 `.eml` (délai de frappe 150 ms) ; sur 2 138 fiches, non mesuré. Pas de cache.
+- **Ordre** : contacts, listes, puis courrier ; début de mot d'abord. Outlook classe autrement (historique « saisie semi-automatique » `.nk2`/cache RoamCache, non lu ici) : [à vérifier] ce qu'il propose pour la même frappe.

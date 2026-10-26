@@ -5,6 +5,7 @@
 mod textfmt;
 pub mod dedupe;
 pub mod distlist;
+pub mod suggest;
 pub mod vcard;
 pub mod view;
 pub mod write;
