@@ -43,6 +43,84 @@ pub enum Theme {
     Dark,
 }
 
+/// Message d'origine dans une réponse (Options › Courrier).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReplyQuote {
+    /// Texte du message d'origine sous la réponse (comportement actuel).
+    #[default]
+    Include,
+    /// Réponse vide : le message d'origine n'est pas repris.
+    None,
+}
+
+/// Police par défaut de la rédaction ; `Interface` : celle de l'application (comportement actuel).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ComposeFont {
+    #[default]
+    Interface,
+    Arial,
+    Calibri,
+    Verdana,
+    Tahoma,
+    Georgia,
+    TimesNewRoman,
+    CourierNew,
+}
+
+impl ComposeFont {
+    pub const ALL: [ComposeFont; 8] = [
+        ComposeFont::Interface,
+        ComposeFont::Arial,
+        ComposeFont::Calibri,
+        ComposeFont::Verdana,
+        ComposeFont::Tahoma,
+        ComposeFont::Georgia,
+        ComposeFont::TimesNewRoman,
+        ComposeFont::CourierNew,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ComposeFont::Interface => "Police de l'interface",
+            ComposeFont::Arial => "Arial",
+            ComposeFont::Calibri => "Calibri",
+            ComposeFont::Verdana => "Verdana",
+            ComposeFont::Tahoma => "Tahoma",
+            ComposeFont::Georgia => "Georgia",
+            ComposeFont::TimesNewRoman => "Times New Roman",
+            ComposeFont::CourierNew => "Courier New",
+        }
+    }
+
+    /// Valeur de `font-family` ; `None` : ne rien imposer.
+    pub fn css(self) -> Option<&'static str> {
+        match self {
+            ComposeFont::Interface => None,
+            ComposeFont::Arial => Some("Arial, sans-serif"),
+            ComposeFont::Calibri => Some("Calibri, Carlito, sans-serif"),
+            ComposeFont::Verdana => Some("Verdana, sans-serif"),
+            ComposeFont::Tahoma => Some("Tahoma, sans-serif"),
+            ComposeFont::Georgia => Some("Georgia, serif"),
+            ComposeFont::TimesNewRoman => Some("\"Times New Roman\", Times, serif"),
+            ComposeFont::CourierNew => Some("\"Courier New\", monospace"),
+        }
+    }
+}
+
+/// Module affiché au lancement.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StartModule {
+    #[default]
+    Mail,
+    Calendar,
+    Contacts,
+    Tasks,
+    Notes,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -87,6 +165,18 @@ pub struct Settings {
     pub notifications: bool,
     /// Son à l'arrivée d'un rappel.
     pub reminder_sound: bool,
+    /// Réponses : reprise ou non du message d'origine.
+    pub reply_quote: ReplyQuote,
+    /// Police et taille (points) du texte d'un nouveau message.
+    pub compose_font: ComposeFont,
+    pub compose_font_size: u8,
+    /// Enregistrement automatique d'un message en cours de rédaction, en minutes ; 0 : jamais.
+    pub draft_autosave_minutes: u32,
+    /// Insérer la signature par défaut dans les nouveaux messages / dans les réponses et transferts.
+    pub signature_on_new: bool,
+    pub signature_on_reply: bool,
+    /// Module affiché au lancement.
+    pub start_module: StartModule,
 }
 
 impl Default for Settings {
@@ -117,6 +207,13 @@ impl Default for Settings {
             default_task_reminder: None,
             notifications: true,
             reminder_sound: false,
+            reply_quote: ReplyQuote::Include,
+            compose_font: ComposeFont::Interface,
+            compose_font_size: 11,
+            draft_autosave_minutes: 0,
+            signature_on_new: true,
+            signature_on_reply: true,
+            start_module: StartModule::Mail,
         }
     }
 }
@@ -147,6 +244,8 @@ impl Settings {
         self.mark_read_delay = self.mark_read_delay.min(600);
         self.default_note_color = self.default_note_color.clamp(0, 4);
         self.default_task_reminder = self.default_task_reminder.map(|m| m.min(1439));
+        self.compose_font_size = self.compose_font_size.clamp(8, 36);
+        self.draft_autosave_minutes = self.draft_autosave_minutes.min(120);
         self
     }
 
@@ -193,6 +292,32 @@ mod tests {
         assert!(s.work_start < s.work_end && s.work_end <= 1440);
         assert_eq!((s.default_note_color, s.default_task_reminder), (4, Some(1439)));
         assert_eq!(Settings::default().clamped(), Settings::default());
+    }
+
+    #[test]
+    fn mail_options_default_to_current_behaviour() {
+        let s = Settings::default();
+        assert_eq!((s.reply_quote, s.compose_font, s.compose_font_size, s.draft_autosave_minutes), (ReplyQuote::Include, ComposeFont::Interface, 11, 0));
+        assert!(s.signature_on_new && s.signature_on_reply);
+        assert_eq!(s.start_module, StartModule::Mail);
+        assert!(ComposeFont::Interface.css().is_none() && ComposeFont::ALL.iter().skip(1).all(|f| f.css().is_some()));
+    }
+
+    #[test]
+    fn mail_options_round_trip_and_old_file() {
+        let s = Settings { reply_quote: ReplyQuote::None, compose_font: ComposeFont::TimesNewRoman, compose_font_size: 14, draft_autosave_minutes: 5, signature_on_new: false, signature_on_reply: false, start_module: StartModule::Calendar, ..Settings::default() };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"composeFont\":\"timesNewRoman\"") && json.contains("\"startModule\":\"calendar\""));
+        assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), s);
+        let old: Settings = serde_json::from_str(OLD).unwrap();
+        assert_eq!((old.reply_quote, old.start_module, old.draft_autosave_minutes), (ReplyQuote::Include, StartModule::Mail, 0));
+    }
+
+    #[test]
+    fn mail_options_are_clamped() {
+        let s = Settings { compose_font_size: 0, draft_autosave_minutes: 9_999, ..Settings::default() }.clamped();
+        assert_eq!((s.compose_font_size, s.draft_autosave_minutes), (8, 120));
+        assert_eq!(Settings { compose_font_size: 200, ..Settings::default() }.clamped().compose_font_size, 36);
     }
 
     #[test]

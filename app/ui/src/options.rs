@@ -4,13 +4,13 @@
 use leptos::{html, prelude::*, task::spawn_local};
 use thunderlook_model::{
     MessageOp, Selection,
-    settings::{ReadingPane, Settings, Theme},
+    settings::{ComposeFont, ReadingPane, ReplyQuote, Settings, StartModule, Theme},
 };
 use wasm_bindgen::JsCast;
 
 use crate::{
     ipc,
-    state::{Dialog, Ui, use_ui},
+    state::{Dialog, Module, Ui, use_ui},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -42,6 +42,26 @@ const FIRST_DAYS: [(u8, &str); 3] = [(1, "Lundi"), (0, "Dimanche"), (6, "Samedi"
 const NOTE_COLORS: [(i32, &str); 5] = [(0, "Bleue"), (1, "Verte"), (2, "Rose"), (3, "Jaune"), (4, "Blanche")];
 const DURATIONS: [u32; 7] = [15, 30, 45, 60, 90, 120, 240];
 const REMINDERS: [(i32, &str); 8] = [(0, "0 minute"), (5, "5 minutes"), (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure"), (120, "2 heures"), (1_440, "1 jour"), (10_080, "1 semaine")];
+
+const START_MODULES: [(StartModule, &str); 5] = [
+    (StartModule::Mail, "Courrier"),
+    (StartModule::Calendar, "Calendrier"),
+    (StartModule::Contacts, "Contacts"),
+    (StartModule::Tasks, "Tâches"),
+    (StartModule::Notes, "Notes"),
+];
+const AUTOSAVE_MINUTES: [u32; 6] = [0, 1, 3, 5, 10, 30];
+
+/// Module à afficher au lancement, d'après les réglages.
+pub fn start_module(s: &Settings) -> Module {
+    match s.start_module {
+        StartModule::Mail => Module::Mail,
+        StartModule::Calendar => Module::Calendar,
+        StartModule::Contacts => Module::Contacts,
+        StartModule::Tasks => Module::Tasks,
+        StartModule::Notes => Module::Notes,
+    }
+}
 
 fn hm(minutes: u16) -> String {
     format!("{:02}:{:02}", minutes / 60, minutes % 60)
@@ -281,6 +301,60 @@ pub fn OptionsDialog() -> impl IntoView {
                 <option value="off" selected=move || s().reading_pane == ReadingPane::Off>"Masqué"</option>
             </select>
         </label>
+        <label class="field">
+            <span>"Au lancement, afficher"</span>
+            <select aria-label="Au lancement, afficher" on:change=move |ev| {
+                let v = event_target_value(&ev);
+                if let Some(&(m, _)) = START_MODULES.iter().find(|(m, _)| format!("{m:?}") == v) {
+                    set(&|s| s.start_module = m);
+                }
+            }>
+                {START_MODULES.iter().map(|&(m, l)| view! { <option value=format!("{m:?}") selected=move || s().start_module == m>{l}</option> }).collect_view()}
+            </select>
+        </label>
+        <label class="field">
+            <span>"Réponses"</span>
+            <select aria-label="Réponses" on:change=move |ev| {
+                let q = if event_target_value(&ev) == "none" { ReplyQuote::None } else { ReplyQuote::Include };
+                set(&|s| s.reply_quote = q);
+            }>
+                <option value="include" selected=move || s().reply_quote == ReplyQuote::Include>"Inclure le message d'origine"</option>
+                <option value="none" selected=move || s().reply_quote == ReplyQuote::None>"Ne pas inclure le message d'origine"</option>
+            </select>
+        </label>
+        <div class="field-row">
+            <label class="field">
+                <span>"Police des nouveaux messages"</span>
+                <select aria-label="Police des nouveaux messages" on:change=move |ev| {
+                    let v = event_target_value(&ev);
+                    if let Some(f) = ComposeFont::ALL.into_iter().find(|f| format!("{f:?}") == v) {
+                        set(&|s| s.compose_font = f);
+                    }
+                }>
+                    {ComposeFont::ALL.into_iter().map(|f| view! { <option value=format!("{f:?}") selected=move || s().compose_font == f>{f.label()}</option> }).collect_view()}
+                </select>
+            </label>
+            {number("Taille (points)", 8, 36, |s| u32::from(s.compose_font_size), |s, v| s.compose_font_size = v.clamp(8, 36) as u8)}
+        </div>
+        <label class="field">
+            <span>"Enregistrer automatiquement le brouillon"</span>
+            <select aria-label="Enregistrer automatiquement le brouillon" on:change=move |ev| {
+                let v = event_target_value(&ev).parse().unwrap_or(0);
+                set(&|s| s.draft_autosave_minutes = v);
+            }>
+                {move || {
+                    let cur = s().draft_autosave_minutes;
+                    let mut all: Vec<u32> = AUTOSAVE_MINUTES.to_vec();
+                    if !all.contains(&cur) { all.push(cur); all.sort_unstable(); }
+                    all.into_iter().map(|m| view! {
+                        <option value=m.to_string() selected=move || cur == m>{if m == 0 { "Jamais".to_string() } else { format!("Toutes les {m} min") }}</option>
+                    }).collect_view()
+                }}
+            </select>
+        </label>
+        {check("Insérer la signature dans les nouveaux messages", |s| s.signature_on_new, |s, v| s.signature_on_new = v)}
+        {check("Insérer la signature dans les réponses et transferts", |s| s.signature_on_reply, |s, v| s.signature_on_reply = v)}
+        <p class="dialog-note">"Format de réponse, police, brouillon automatique et signature : enregistrés ici, pas encore appliqués à la rédaction."</p>
     };
 
     let tasks_notes = move || view! {
