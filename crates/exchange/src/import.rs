@@ -714,6 +714,17 @@ fn default_folder(conn: &Connection, item: ItemKind) -> Result<i64> {
     found.ok_or_else(|| format!("Aucun dossier pour les nouveaux éléments ({}).", item.name()))
 }
 
+/// Catégorie (définie dans les sources) dont le nom est le premier mot de l'objet, sans tenir compte de la casse.
+pub fn subject_category(conn: &Connection, subject: &str) -> Option<String> {
+    let first = subject.split_whitespace().next()?.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+    if first.chars().count() < 2 {
+        return None;
+    }
+    let mut stmt = conn.prepare("SELECT DISTINCT name FROM category").ok()?;
+    let names: Vec<String> = stmt.query_map([], |r| r.get::<_, String>(0)).ok()?.filter_map(|r| r.ok()).collect();
+    names.into_iter().find(|n| n.trim().to_lowercase() == first)
+}
+
 fn edit_of(e: &EventData) -> thunderlook_calendar::write::Edit {
     thunderlook_calendar::write::Edit {
         subject: e.subject.clone(),
@@ -782,6 +793,13 @@ fn create(conn: &mut Connection, dir: &Path, payload: &Payload) -> Result<String
         }
         Payload::Event(e) => {
             let folder = if e.calendar_id.is_empty() { default_folder(conn, ItemKind::Event)? } else { num(&e.calendar_id, 'c')? };
+            // Le téléphone n'envoie pas les catégories : un rendez-vous créé là-bas dont l'objet commence par le nom d'une
+            // catégorie (« ADI Dupont ») prend cette catégorie, donc sa couleur, comme dans Outlook.
+            let mut e = e.clone();
+            if e.categories.trim().is_empty() {
+                e.categories = subject_category(conn, &e.subject).unwrap_or_default();
+            }
+            let e = &e;
             Ok(format!("a{}", match &e.series {
                 Some(ics) => thunderlook_calendar::write::create_series(conn, dir, folder, &edit_of(e), &recurrence_of(ics)?)?,
                 None => thunderlook_calendar::write::create(conn, dir, folder, &edit_of(e))?,

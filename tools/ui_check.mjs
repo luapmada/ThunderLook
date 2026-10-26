@@ -482,10 +482,11 @@ CHECKS.push(['J9 : calendrier (vues, navigateur, superposition, détail), compar
     }
     log(`6 mars 2023 avec Calendar Annexe : ${want.map(([h, s]) => `${s} à ${h} h`).join(', ')}`);
     await js(`[...document.querySelectorAll('.cal-timed .cal-ev')].find(b => b.textContent.includes('Gendarmerie')).click()`);
-    await until(`document.querySelector('.cal-details h3')?.textContent === 'Gendarmerie'`, 'détail du rendez-vous');
-    const when = await js(`document.querySelector('.cal-details dd')?.textContent`);
-    if (!when.startsWith('15:30 – 16:30')) throw new Error(`détail : « ${when} »`);
-    log(`clic : détail « Gendarmerie », ${when}`);
+    await until(`!!document.querySelector('.cal-ev.selected')`, 'rendez-vous sélectionné');
+    const when = await js(`document.querySelector('.cal-ev.selected').getAttribute('aria-label')`);
+    if (!when.startsWith('Gendarmerie, 15:30 – 16:30')) throw new Error(`étiquette : « ${when} »`);
+    log(`clic : « Gendarmerie » sélectionné, ${when}; aucun volet de détail (comme Outlook)`);
+    if (await js(`!!document.querySelector('.cal-details')`)) throw new Error('le volet de détail ne doit plus exister');
     await key('Escape');
     if (!wasOn) await js(`${annexe}.click()`);
     await until(`document.querySelectorAll('.cal-timed').length === 0`, 'Calendar Annexe masqué');

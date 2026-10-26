@@ -56,7 +56,8 @@ pub fn appointment_shift(app: AppHandle, cache: State<CalendarCache>, id: String
         Some((o, busy, a.reminder_minutes))
     })?;
     let (o, busy, reminder) = found.ok_or("rendez-vous introuvable")?;
-    if o.all_day {
+    // Un événement de la journée entière ne se décale que de jours entiers (glisser dans la vue Mois), début et fin ensemble.
+    if o.all_day && (start_shift_min != end_shift_min || start_shift_min % 1440 != 0) {
         return Err("Un événement de la journée entière se déplace dans sa boîte « Rendez-vous ».".into());
     }
     let start = local(o.start_ms) + Duration::minutes(start_shift_min);
@@ -74,7 +75,7 @@ pub fn appointment_shift(app: AppHandle, cache: State<CalendarCache>, id: String
                 location: o.location.clone().unwrap_or_default(),
                 start,
                 end,
-                all_day: false,
+                all_day: o.all_day,
                 reminder: reminder.map(|m| m as i32),
                 busy,
                 ..Default::default()

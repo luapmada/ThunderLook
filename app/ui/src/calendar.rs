@@ -19,6 +19,8 @@ const HOUR_PX: f64 = 44.0;
 const HOURS_W: f64 = 56.0;
 /// Déplacement minimal du pointeur (px) avant qu'un appui devienne un glissement.
 const DRAG_PX: f64 = 4.0;
+/// Type de données du glisser-déposer d'un rendez-vous entre deux jours de la vue Mois : `identifiant|jour d'origine`.
+const MONTH_DRAG: &str = "application/x-thunderlook-event";
 
 /// Recharge la vue quand le module, le type de vue, la date ou les calendriers affichés changent.
 pub fn watch(ui: Ui) {
@@ -124,6 +126,15 @@ fn shift_days(date: &str, days: i32) -> String {
     format!("{:04}-{:02}-{:02}", d.get_utc_full_year(), d.get_utc_month() + 1, d.get_utc_date())
 }
 
+/// Nombre de jours de `from` à `to` (`AAAA-MM-JJ`).
+fn day_diff(from: &str, to: &str) -> i64 {
+    let n = |d: &str| {
+        let f = |r: std::ops::Range<usize>| d.get(r).and_then(|s| s.parse::<f64>().ok()).unwrap_or(1.0);
+        js_sys::Date::utc(f(0..4), f(5..7) - 1.0) + (f(8..10) - 1.0) * 86_400_000.0
+    };
+    ((n(to) - n(from)) / 86_400_000.0).round() as i64
+}
+
 /// Premier jour du mois précédent ou suivant celui d'une date `AAAA-MM-JJ`.
 fn shift_month(date: &str, delta: i32) -> String {
     let y: i32 = date.get(0..4).and_then(|s| s.parse().ok()).unwrap_or(2000);
@@ -158,7 +169,7 @@ pub fn key(ui: Ui, ev: &web_sys::KeyboardEvent) -> bool {
 }
 
 #[component]
-fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool) -> impl IntoView {
+fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool, #[prop(default = String::new())] date: String) -> impl IntoView {
     let ui = use_ui();
     let id = event.id.clone();
     let selected = {
@@ -177,8 +188,18 @@ fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool) -> impl Into
         ui.categories.with(|cs| cs.iter().find(|c| c.name.to_lowercase() == name).and_then(|c| c.color.clone()))
     };
     let cat_style = category_color.clone();
+    // Vue Mois : glisser un rendez-vous d'un jour à l'autre (comme Outlook) ; l'heure ne change pas.
+    let draggable = (month && shared && !event.continued).then_some("true");
+    let drag_id = event.id.clone();
     view! {
         <button
+            draggable=draggable
+            on:dragstart=move |e: web_sys::DragEvent| {
+                if let Some(dt) = e.data_transfer() {
+                    let _ = dt.set_data(MONTH_DRAG, &format!("{drag_id}|{date}"));
+                    dt.set_effect_allowed("move");
+                }
+            }
             class=format!("cal-ev cal-c{} busy-{}", event.color, event.busy)
             class:cal-cat=move || category_color().is_some()
             style=move || cat_style().map(|c| format!("--c: {c}")).unwrap_or_default()
@@ -556,6 +577,8 @@ fn MonthGrid(view: CalendarView) -> impl IntoView {
                         let cell_date = d.date.clone();
                         let new_date = d.date.clone();
                         let more_date = d.date.clone();
+                        let drop_date = d.date.clone();
+                        let chip_date = d.date.clone();
                         view! {
                             <div
                                 class="cal-cell"
@@ -564,6 +587,20 @@ fn MonthGrid(view: CalendarView) -> impl IntoView {
                                 role="group"
                                 aria-label=d.date.clone()
                                 on:contextmenu=move |e: leptos::ev::MouseEvent| slot_menu(ui, &e, &cell_date)
+                                on:dragover=move |e: web_sys::DragEvent| {
+                                    if e.data_transfer().is_some_and(|dt| dt.types().iter().any(|t| t.as_string().as_deref() == Some(MONTH_DRAG))) {
+                                        e.prevent_default();
+                                    }
+                                }
+                                on:drop=move |e: web_sys::DragEvent| {
+                                    let Some(data) = e.data_transfer().map(|dt| dt.get_data(MONTH_DRAG).unwrap_or_default()) else { return };
+                                    let Some((id, from)) = data.split_once('|') else { return };
+                                    e.prevent_default();
+                                    let days = day_diff(from, &drop_date);
+                                    if days != 0 {
+                                        shift(ui, id.to_string(), days * 1440, days * 1440);
+                                    }
+                                }
                                 // Double clic sur un jour (hors rendez-vous) : nouveau rendez-vous ce jour-là.
                                 on:dblclick=move |_| crate::appointment::open_new_at(ui, Some(new_date.clone()), false)
                             >
@@ -577,7 +614,7 @@ fn MonthGrid(view: CalendarView) -> impl IntoView {
                                 >
                                     {d.label.clone()}
                                 </button>
-                                {items.into_iter().take(SHOWN).map(|e| view! { <Chip event=e month=true /> }).collect_view()}
+                                {items.into_iter().take(SHOWN).map(|e| view! { <Chip event=e month=true date=chip_date.clone() /> }).collect_view()}
                                 {(extra > 0).then(|| view! {
                                     <button
                                         class="cal-more"
@@ -597,88 +634,6 @@ fn MonthGrid(view: CalendarView) -> impl IntoView {
                     .collect_view()}
             </div>
         </div>
-    }
-}
-
-#[component]
-fn Details() -> impl IntoView {
-    let ui = use_ui();
-    let shared = move |id: &str| ui.cal_view.with(|v| v.as_ref().is_some_and(|v| v.calendars.iter().any(|c| c.id == id && c.shared)));
-    let calendar_name = move |id: &str| {
-        ui.cal_view.with(|v| v.as_ref().and_then(|v| v.calendars.iter().find(|c| c.id == id).map(|c| c.name.clone())).unwrap_or_default())
-    };
-    move || {
-        ui.cal_selected.get().map(|e| {
-            let busy = match e.busy.as_str() {
-                "free" => "Disponible",
-                "tentative" => "Provisoire",
-                "oof" => "Absent(e) du bureau",
-                "elsewhere" => "Travail ailleurs",
-                _ => "Occupé(e)",
-            };
-            view! {
-                <section class="cal-details" aria-label="Détail du rendez-vous">
-                    <div class="cal-details-head">
-                        <span class=format!("cal-swatch cal-c{}", e.color)></span>
-                        <h3>{e.subject.clone()}</h3>
-                        <button class="icon-btn" aria-label="Fermer le détail" title="Fermer (Échap)" on:click=move |_| ui.cal_selected.set(None)>
-                            <Svg icon=X />
-                        </button>
-                    </div>
-                    <dl>
-                        <dt>"Quand"</dt>
-                        <dd>{e.when.clone()}{e.recurring.then_some(if e.exception { " — occurrence modifiée d'une série" } else { " — série périodique" })}</dd>
-                        {e.location.clone().map(|l| view! { <dt>"Lieu"</dt><dd>{l}</dd> })}
-                        <dt>"Calendrier"</dt>
-                        <dd>{calendar_name(&e.calendar_id)}</dd>
-                        <dt>"Afficher comme"</dt>
-                        <dd>{busy}{e.private.then_some(" — privé")}</dd>
-                        {e.reminder_minutes.map(|m| view! { <dt>"Rappel"</dt><dd>{reminder(m)}</dd> })}
-                        {(!e.categories.is_empty()).then(|| view! { <dt>"Catégories"</dt><dd>{e.categories.join(", ")}</dd> })}
-                        {e.is_meeting.then(|| view! {
-                            <dt>"Organisateur"</dt><dd>{e.organizer.clone()}</dd>
-                            <dt>"Participants"</dt><dd>{e.attendees.clone()}</dd>
-                        })}
-                    </dl>
-                    {shared(&e.calendar_id).then(|| {
-                        let (edit_id, del_id, series_id) = (e.id.clone(), e.id.clone(), e.id.clone());
-                        let confirm = RwSignal::new(false);
-                        let recurring = e.recurring;
-                        view! {
-                            <div class="cal-details-actions">
-                                <button class="btn" on:click=move |_| crate::appointment::open_edit(ui, edit_id.clone())>"Ouvrir"</button>
-                                <Show when=move || !confirm.get() fallback=move || {
-                                    let (del_id, series_id) = (del_id.clone(), series_id.clone());
-                                    view! {
-                                        <span class="confirm-text">{if recurring { "Supprimer dans Outlook :" } else { "Supprimer dans Outlook ?" }}</span>
-                                        <button class="btn danger" on:click=move |_| crate::appointment::delete(ui, del_id.clone(), false)>
-                                            {if recurring { "Cette occurrence" } else { "Supprimer" }}
-                                        </button>
-                                        {recurring.then(|| {
-                                            let series_id = series_id.clone();
-                                            view! { <button class="btn danger" on:click=move |_| crate::appointment::delete(ui, series_id.clone(), true)>"Toute la série"</button> }
-                                        })}
-                                        <button class="btn" on:click=move |_| confirm.set(false)>"Annuler"</button>
-                                    }
-                                }>
-                                    <button class="btn" on:click=move |_| confirm.set(true)>"Supprimer…"</button>
-                                </Show>
-                            </div>
-                        }
-                    })}
-                </section>
-            }
-        })
-    }
-}
-
-fn reminder(m: i64) -> String {
-    match m {
-        0 => "à l'heure du début".into(),
-        m if m % 10_080 == 0 => format!("{} semaine(s) avant", m / 10_080),
-        m if m % 1_440 == 0 => format!("{} jour(s) avant", m / 1_440),
-        m if m % 60 == 0 => format!("{} heure(s) avant", m / 60),
-        m => format!("{m} minutes avant"),
     }
 }
 
@@ -735,7 +690,6 @@ pub fn CalendarPane() -> impl IntoView {
                     Some(v) => view! { <TimeGrid view=v /> }.into_any(),
                 }}
             </div>
-            <Details />
         </section>
     }
 }

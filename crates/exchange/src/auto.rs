@@ -310,7 +310,8 @@ fn pass(conn: &mut Connection, data_dir: &Path, dir: &Path, p: &Params) -> Resul
             aside.warnings += 1;
         }
     }
-    // Seuil : tout ce qui changerait (suppressions et conflits compris : un signal de masse reste un signal).
+    // Seuil : seulement ce qui serait appliqué. Suppressions et conflits sont toujours mis de côté, donc sans risque ; les compter
+    // bloquerait chaque passage tant que des conflits anciens restent en attente (le nouvel élément du téléphone n'entrerait jamais).
     let mut touched: Vec<(ItemKind, usize)> = Vec::new();
     let mut count = |k: ItemKind| match touched.iter_mut().find(|(i, _)| *i == k) {
         Some((_, n)) => *n += 1,
@@ -318,15 +319,14 @@ fn pass(conn: &mut Connection, data_dir: &Path, dir: &Path, p: &Params) -> Resul
     };
     let mut auto: Vec<Change> = Vec::new();
     for c in &rep.changes {
-        count(c.item);
         match c.kind {
             ChangeKind::Deleted => aside.deletions += 1,
             _ if c.conflict.is_some() => aside.conflicts += 1,
-            _ => auto.push(c.clone()),
+            _ => {
+                count(c.item);
+                auto.push(c.clone());
+            }
         }
-    }
-    for c in &rep.conflicts {
-        count(c.item);
     }
     let sizes = |k: ItemKind| if files_only { rep.seen.iter().filter(|s| s.item == k).count() } else { manifest.file(k.file()).map_or(0, |f| f.ids.len()) };
     let over = if p.ignore_threshold { Vec::new() } else { over_threshold(&touched, sizes, p) };

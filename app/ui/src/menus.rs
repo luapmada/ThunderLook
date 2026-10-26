@@ -87,14 +87,18 @@ fn calendar_event_context(ui: Ui, id: String) -> Vec<MenuEntry> {
         .collect();
     let clear_id = id.clone();
     cats.push(editable(MenuEntry::action("Effacer toutes les catégories", move || appointment::update(ui, clear_id.clone(), |f| f.categories.clear()))).separated());
-    let (private_id, delete_id) = (id.clone(), id.clone());
-    let private = ev.private;
-    vec![
+    let (private_id, delete_id, series_id) = (id.clone(), id.clone(), id.clone());
+    let (private, recurring) = (ev.private, ev.recurring);
+    let mut entries = vec![
         editable(MenuEntry::radio("Privé", private, move || appointment::update(ui, private_id.clone(), move |f| f.private = !private))),
         MenuEntry::submenu("Afficher en tant que", busy),
         MenuEntry::submenu("Classer", cats),
-        editable(MenuEntry::action("Supprimer", move || appointment::delete(ui, delete_id.clone(), false))).separated(),
-    ]
+        editable(MenuEntry::action(if recurring { "Supprimer cette occurrence" } else { "Supprimer" }, move || appointment::delete(ui, delete_id.clone(), false))).separated(),
+    ];
+    if recurring {
+        entries.push(editable(MenuEntry::action("Supprimer toute la série", move || appointment::delete(ui, series_id.clone(), true))));
+    }
+    entries
 }
 
 /// Clic droit sur un créneau vide.

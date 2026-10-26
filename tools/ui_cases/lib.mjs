@@ -9,7 +9,7 @@ import os from 'node:os';
 import zlib from 'node:zlib';
 
 export { sleep };
-export const port = 9333;
+export const port = Number(process.env.TL_CDP_PORT) || 9333;
 
 // --- Lancement et client CDP ----------------------------------------------------------------------
 export function launch(exe) {

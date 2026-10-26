@@ -83,17 +83,19 @@ export const chips = (prefix) => js(`[...document.querySelectorAll('.cal-ev')].m
 export async function selectChip(prefix, index = 0) {
   const ok = await js(`(() => { const e = [...document.querySelectorAll('.cal-ev')].filter(e => e.getAttribute('aria-label').startsWith(${q(prefix)}))[${index}]; if (!e) return false; e.click(); return true; })()`);
   if (!ok) throw new Error(`rendez-vous « ${prefix} » absent de la période affichée`);
-  await until(`!!document.querySelector('.cal-details')`, 'détail du rendez-vous');
+  await until(`!!document.querySelector('.cal-ev.selected')`, 'rendez-vous sélectionné');
 }
 export async function openSelected() {
-  await mustClick('.cal-details-actions', 'Ouvrir');
+  await js(`document.querySelector('.cal-ev.selected').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
   await until(`!!document.querySelector('.dialog input[aria-label="Objet"]')`, 'boîte Rendez-vous');
 }
 /** Supprime le rendez-vous sélectionné : `series` vrai = « Toute la série », sinon cette occurrence / le rendez-vous. */
 export async function deleteSelected(series = false) {
-  await mustClick('.cal-details-actions', 'Supprimer…');
-  const recurring = await js(`/série/.test(document.querySelector('.cal-details dd')?.textContent ?? '') || [...document.querySelectorAll('.cal-details-actions button')].some(b => b.textContent.trim() === 'Toute la série')`);
-  await mustClick('.cal-details-actions', series ? 'Toute la série' : (recurring ? 'Cette occurrence' : 'Supprimer'));
+  await js(`document.querySelector('.cal-ev.selected').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 }))`);
+  await sleep(300);
+  const label = series ? 'Supprimer toute la série' : 'Supprimer';
+  const ok = await js(`(() => { const b = [...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.trim().startsWith(${q(label)})); if (!b) return false; b.click(); return true; })()`);
+  if (!ok) throw new Error(`entrée « ${label} » absente du menu du rendez-vous`);
   await sleep(800);
 }
 /**
@@ -135,7 +137,7 @@ export async function sweepAppointments(weeks = 9) {
     for (let w = 0; w < weeks; w++) {
       for (let i = 0; i < 12 && (await chips(PREFIX)).length > 0; i++) {
         await selectChip(PREFIX, 0);
-        const series = await js(`[...document.querySelectorAll('.cal-details dd')].some(d => d.textContent.includes('série périodique') || d.textContent.includes('occurrence modifiée'))`);
+        const series = await js(`!!document.querySelector('.cal-ev.selected .cal-flag')`);
         await deleteSelected(series);
       }
       await nextPeriod();
