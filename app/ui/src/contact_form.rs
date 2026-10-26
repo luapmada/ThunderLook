@@ -178,8 +178,12 @@ pub fn ContactDialog() -> impl IntoView {
                         <button class="btn" type="button" prop:disabled=move || !has_photo() on:click=move |_| set(&|f| f.photo = Some(String::new()))>"Retirer la photo"</button>
                     </div>
                     <div class="appt-row">
+                        {field("Titre", |f| f.prefix.clone(), |f, v| f.prefix = v)}
                         {field("Prénom", |f| f.given_name.clone(), |f, v| f.given_name = v)}
+                        {field("Deuxième prénom", |f| f.middle_name.clone(), |f, v| f.middle_name = v)}
                         {field("Nom", |f| f.surname.clone(), |f, v| f.surname = v)}
+                        {field("Suffixe", |f| f.suffix.clone(), |f, v| f.suffix = v)}
+                        {field("Surnom", |f| f.nickname.clone(), |f, v| f.nickname = v)}
                     </div>
                     <div class="appt-row">
                         {field("Société", |f| f.company.clone(), |f, v| f.company = v)}
@@ -197,6 +201,17 @@ pub fn ContactDialog() -> impl IntoView {
                         {field("Domicile", |f| f.home_phone.clone(), |f, v| f.home_phone = v)}
                     </div>
                     <div class="appt-row">
+                        {field("Bureau 2", |f| f.business2.clone(), |f, v| f.business2 = v)}
+                        {field("Domicile 2", |f| f.home2.clone(), |f, v| f.home2 = v)}
+                        {field("Autre téléphone", |f| f.other_phone.clone(), |f, v| f.other_phone = v)}
+                    </div>
+                    <div class="appt-row">
+                        {field("Télécopie bureau", |f| f.business_fax.clone(), |f, v| f.business_fax = v)}
+                        {field("Télécopie domicile", |f| f.home_fax.clone(), |f, v| f.home_fax = v)}
+                        {field("Voiture", |f| f.car_phone.clone(), |f, v| f.car_phone = v)}
+                        {field("Récepteur d'appels", |f| f.pager.clone(), |f, v| f.pager = v)}
+                    </div>
+                    <div class="appt-row">
                         {field("Adresse du bureau", |f| f.work_street.clone(), |f, v| f.work_street = v)}
                         {field("Code postal", |f| f.work_postal.clone(), |f, v| f.work_postal = v)}
                         {field("Ville", |f| f.work_city.clone(), |f, v| f.work_city = v)}
@@ -207,6 +222,16 @@ pub fn ContactDialog() -> impl IntoView {
                         {field("Code postal (domicile)", |f| f.home_postal.clone(), |f, v| f.home_postal = v)}
                         {field("Ville (domicile)", |f| f.home_city.clone(), |f, v| f.home_city = v)}
                         {field("Pays (domicile)", |f| f.home_country.clone(), |f, v| f.home_country = v)}
+                    </div>
+                    <div class="appt-row">
+                        {field("Autre adresse", |f| f.other_street.clone(), |f, v| f.other_street = v)}
+                        {field("Code postal (autre)", |f| f.other_postal.clone(), |f, v| f.other_postal = v)}
+                        {field("Ville (autre)", |f| f.other_city.clone(), |f, v| f.other_city = v)}
+                        {field("Pays (autre)", |f| f.other_country.clone(), |f, v| f.other_country = v)}
+                    </div>
+                    <div class="appt-row">
+                        {field("Messagerie instantanée", |f| f.im_address.clone(), |f, v| f.im_address = v)}
+                        {field("Conjoint(e)", |f| f.spouse.clone(), |f, v| f.spouse = v)}
                     </div>
                     <div class="appt-row">
                         {field("Page web", |f| f.web_page.clone(), |f, v| f.web_page = v)}

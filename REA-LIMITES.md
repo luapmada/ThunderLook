@@ -361,3 +361,12 @@ Lu d'après la description de `Organizer.dat` (docs/mpe-fichiers.md § 1.5) et d
 - **Rappel** : seul le premier `AALARM`/`DALARM`/`PALARM`/`MALARM` est lu, en minutes avant le début ; répétition/sonnerie ignorées. Rappel en repère différent du début (UTC/local) ou après le début : non importé, avec avertissement.
 - **Écartés** : `ATTENDEE` (signalé), tâches `VTODO` du calendrier (signalées ; elles se lisent dans `taches.ics`), propriétés `X-*` autres que les identifiants. Identifiant retenu : `UID`, sinon `X-OUTLOOK-UID`, sinon `X-IRMC-LUID`.
 - **Photos de contacts** : le lecteur de vCard 2.1 lit `PHOTO;ENCODING=BASE64` (JPEG) mais l'import d'échange ne reprend jamais les photos (comportement existant, `norm_contact`).
+
+## À vérifier avec REA/Outlook — fidélité des contacts (lot BB, `crates/contacts`, 26/10)
+
+Testé sous Linux (`cargo test -p thunderlook-contacts -p thunderlook-exchange`) ; **aucune écriture dans Outlook, jamais lancé sur la vraie base ni avec MPE**.
+
+- **Types vCard inventés** : « autre téléphone » s'écrit `TEL;OTHER` et « autre adresse » `ADR;OTHER` (pas de type standard) ; messagerie `IMPP`, conjoint `X-SPOUSE`. Ce que MPE/Samsung écrit et relit pour ces champs n'est pas établi : si le téléphone les supprime, l'import les propose en modification (jamais appliquée sans accord).
+- **Propriétés MAPI utilisées** (identifiants de [MS-OXPROPS], non vus dans une vraie fiche Outlook ici) : 0x3A45 titre, 0x3A44 second prénom, 0x3A05 suffixe, 0x3A4F surnom, 0x3A24/0x3A25 télécopies, 0x3A1B/0x3A2F deuxièmes numéros, 0x3A1E voiture, 0x3A21 récepteur d'appels, 0x3A1F autre, 0x3A63… adresse « autre », 0x3A48 conjoint, `PidLidInstantMessagingAddress`. À comparer à l'écran avec une fiche Outlook remplie.
+- **Région/État des adresses** : toujours pas dans le formulaire, mais une modification ne l'efface plus (avant : effacée à chaque enregistrement).
+- **Autres téléphones d'Outlook** (Assistant, Rappel, Société, RNIS, Principal, Radio, Télex, TTY) : toujours non portés ; ils restent intacts en base à la modification, absents du `.vcf`.

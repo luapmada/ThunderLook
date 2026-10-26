@@ -42,8 +42,12 @@ pub fn form_from(c: &Contact, data_dir: &Path) -> ContactForm {
     ContactForm {
         id: Some(format!("p{id}")),
         folder_id: format!("k{}", c.folder_id),
+        prefix: c.prefix.clone(),
         given_name: c.given_name.clone(),
+        middle_name: c.middle_name.clone(),
         surname: c.surname.clone(),
+        suffix: c.suffix.clone(),
+        nickname: c.nickname.clone(),
         company: c.company.clone(),
         job_title: c.job_title.clone(),
         department: c.department.clone(),
@@ -53,6 +57,13 @@ pub fn form_from(c: &Contact, data_dir: &Path) -> ContactForm {
         mobile: phone("Mobile"),
         business: phone("Bureau"),
         home_phone: phone("Domicile"),
+        business_fax: phone("Télécopie bureau"),
+        home_fax: phone("Télécopie domicile"),
+        business2: phone("Bureau 2"),
+        home2: phone("Domicile 2"),
+        car_phone: phone("Voiture"),
+        pager: phone("Récepteur d'appels"),
+        other_phone: phone("Autre"),
         work_street: c.work.street.clone(),
         work_city: c.work.city.clone(),
         work_postal: c.work.postal_code.clone(),
@@ -61,7 +72,13 @@ pub fn form_from(c: &Contact, data_dir: &Path) -> ContactForm {
         home_city: c.home.city.clone(),
         home_postal: c.home.postal_code.clone(),
         home_country: c.home.country.clone(),
+        other_street: c.other.street.clone(),
+        other_city: c.other.city.clone(),
+        other_postal: c.other.postal_code.clone(),
+        other_country: c.other.country.clone(),
         web_page: c.web_page.clone(),
+        im_address: c.im_address.clone(),
+        spouse: c.spouse.clone(),
         birthday: if y > 0 { format!("{y:04}-{m:02}-{d:02}") } else { String::new() },
         notes: notes.unwrap_or_default(),
         photo: photo.filter(|(_, b)| crate::is_jpeg(b)).map(|(_, b)| crate::photo_uri(&b)),
@@ -123,8 +140,12 @@ fn props_of(named: &Named, f: &ContactForm, n: &Names) -> Result<Vec<(u16, Optio
     let ids = Ids::new(named);
     let mut v: Vec<(u16, Option<Value>)> = Vec::new();
     text(&mut v, Some(0x3001), &n.display);
+    text(&mut v, Some(0x3A45), &f.prefix);
     text(&mut v, Some(0x3A06), &f.given_name);
+    text(&mut v, Some(0x3A44), &f.middle_name);
     text(&mut v, Some(0x3A11), &f.surname);
+    text(&mut v, Some(0x3A05), &f.suffix);
+    text(&mut v, Some(0x3A4F), &f.nickname);
     text(&mut v, Some(0x3A16), &f.company);
     text(&mut v, Some(0x3A17), &f.job_title);
     text(&mut v, Some(0x3A18), &f.department);
@@ -142,13 +163,34 @@ fn props_of(named: &Named, f: &ContactForm, n: &Names) -> Result<Vec<(u16, Optio
     text(&mut v, Some(0x3A1C), &f.mobile);
     text(&mut v, Some(0x3A08), &f.business);
     text(&mut v, Some(0x3A09), &f.home_phone);
-    for (id, val) in ids.work.iter().zip([&f.work_street, &f.work_city, &String::new(), &f.work_postal, &f.work_country]) {
-        text(&mut v, *id, val);
-    }
-    for (id, val) in [0x3A5D, 0x3A59, 0x3A5C, 0x3A5B, 0x3A5A].into_iter().zip([&f.home_street, &f.home_city, &String::new(), &f.home_postal, &f.home_country]) {
+    for (id, val) in [
+        (0x3A24, &f.business_fax),
+        (0x3A25, &f.home_fax),
+        (0x3A1B, &f.business2),
+        (0x3A2F, &f.home2),
+        (0x3A1E, &f.car_phone),
+        (0x3A21, &f.pager),
+        (0x3A1F, &f.other_phone),
+    ] {
         text(&mut v, Some(id), val);
     }
+    // La région (3ᵉ propriété de chaque adresse) n'est pas dans le formulaire : on n'y touche pas.
+    let w = &ids.work;
+    for (id, val) in [(w[0], &f.work_street), (w[1], &f.work_city), (w[3], &f.work_postal), (w[4], &f.work_country)] {
+        text(&mut v, id, val);
+    }
+    let addrs = [
+        ([0x3A5D, 0x3A59, 0x3A5B, 0x3A5A], [&f.home_street, &f.home_city, &f.home_postal, &f.home_country]),
+        ([0x3A63, 0x3A5F, 0x3A61, 0x3A60], [&f.other_street, &f.other_city, &f.other_postal, &f.other_country]),
+    ];
+    for (ids4, vals) in addrs {
+        for (id, val) in ids4.into_iter().zip(vals) {
+            text(&mut v, Some(id), val);
+        }
+    }
     text(&mut v, Some(0x3A51), &f.web_page);
+    text(&mut v, ids.im, &f.im_address);
+    text(&mut v, Some(0x3A48), &f.spouse);
     text(&mut v, ids.html, "");
     let cats: Vec<String> = f.categories.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
     if let Some(id) = ids.keywords {
@@ -328,6 +370,15 @@ mod tests {
         names.push(1);
         names.extend_from_slice(&8u32.to_le_bytes());
         names.extend_from_slice(b"Keywords");
+        // Messagerie instantanée, adresse professionnelle (0x8045 à 0x8049) et trois courriels.
+        let mut lids = vec![0x8062u32, 0x8045, 0x8046, 0x8047, 0x8048, 0x8049];
+        lids.extend([0x8080u32, 0x8090, 0x80A0].into_iter().flat_map(|b| [b, b + 2, b + 3, b + 4]));
+        for (i, lid) in lids.into_iter().enumerate() {
+            names.extend_from_slice(&(0x8002u16 + i as u16).to_le_bytes());
+            names.extend_from_slice(crate::PSETID_ADDRESS.as_bytes());
+            names.push(0);
+            names.extend_from_slice(&lid.to_le_bytes());
+        }
         conn.execute("INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at, props) VALUES (1, 'tl', '', '', 't', 0, 0, ?1)", [names]).unwrap();
         conn.execute("INSERT INTO folder (id, source_id, nid, name, role, hidden, position) VALUES (1, 1, 1, 'Contacts', 'folder', 0, 0)", []).unwrap();
         (dir, conn)
@@ -371,6 +422,88 @@ mod tests {
         // Pas un JPEG : refusé, rien n'est écrit.
         let bad = ContactForm { surname: "X".into(), photo: Some("data:image/png;base64,iVBORw0KGgo=".into()), ..Default::default() };
         assert!(create(&mut conn, &dir, 1, &bad).is_err());
+    }
+
+    /// Formulaire où chaque champ porte une valeur distincte (aucun champ n'est laissé vide).
+    fn tout_rempli() -> ContactForm {
+        ContactForm {
+            prefix: "Dr".into(),
+            given_name: "Léa".into(),
+            middle_name: "Marie".into(),
+            surname: "Martin".into(),
+            suffix: "Jr".into(),
+            nickname: "Lélé".into(),
+            company: "ADI".into(),
+            job_title: "Directrice".into(),
+            department: "Atelier".into(),
+            email1: "lea@x.fr".into(),
+            email2: "lea2@x.fr".into(),
+            email3: "lea3@x.fr".into(),
+            mobile: "0601".into(),
+            business: "0502".into(),
+            home_phone: "0503".into(),
+            business_fax: "0504".into(),
+            home_fax: "0505".into(),
+            business2: "0506".into(),
+            home2: "0507".into(),
+            car_phone: "0608".into(),
+            pager: "0609".into(),
+            other_phone: "0510".into(),
+            work_street: "1 rue A".into(),
+            work_city: "Fenioux".into(),
+            work_postal: "17350".into(),
+            work_country: "France".into(),
+            home_street: "2 rue B".into(),
+            home_city: "Niort".into(),
+            home_postal: "79000".into(),
+            home_country: "France".into(),
+            other_street: "3 rue C".into(),
+            other_city: "Surgères".into(),
+            other_postal: "17700".into(),
+            other_country: "France".into(),
+            web_page: "https://x.fr".into(),
+            im_address: "lea@jabber.x".into(),
+            spouse: "Paul".into(),
+            birthday: "1980-04-12".into(),
+            notes: "Une note".into(),
+            categories: "Clients".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tous_les_champs_survivent_a_la_base_puis_au_vcf() {
+        let (dir, mut conn) = fixture("champs");
+        let f = ContactForm { photo: Some(jpeg(3)), ..tout_rempli() };
+        let id = create(&mut conn, &dir, 1, &f).unwrap();
+        let back = form_of(&conn, &dir, id).unwrap();
+        assert_eq!(ContactForm { id: None, folder_id: String::new(), ..back.clone() }, f);
+
+        // Base → .vcf → base : aucun champ perdu, dans les deux versions.
+        for v in [crate::vcard::Version::V21, crate::vcard::Version::V30] {
+            let parsed = crate::vcard::parse(&crate::vcard::export(&[back.clone()], v)).unwrap();
+            assert!(parsed[0].warnings.is_empty(), "{v:?} : {:?}", parsed[0].warnings);
+            assert_eq!(parsed[0].form, ContactForm { id: None, folder_id: String::new(), ..back.clone() }, "{v:?}");
+        }
+    }
+
+    #[test]
+    fn la_modification_ne_touche_pas_ce_que_le_formulaire_ne_porte_pas() {
+        let (dir, mut conn) = fixture("region");
+        let id = create(&mut conn, &dir, 1, &tout_rempli()).unwrap();
+        // Une région déposée par Outlook (propriété « État » de l'adresse « autre » : 0x3A62), absente du formulaire.
+        let old: Vec<u8> = conn.query_row("SELECT props FROM message WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+        let withstate = bag::merge(&old, &[(0x3A62, Some(Value::Unicode("Charente-Maritime".into())))]).unwrap();
+        conn.execute("UPDATE message SET props = ?2 WHERE id = ?1", params![id, withstate]).unwrap();
+
+        let mut f = form_of(&conn, &dir, id).unwrap();
+        f.other_city = "Rochefort".into();
+        f.pager = String::new();
+        update(&mut conn, &dir, id, &f).unwrap();
+        let c = load(&conn, None, Some(id)).unwrap().contacts.remove(0);
+        assert_eq!((c.other.state.as_str(), c.other.city.as_str()), ("Charente-Maritime", "Rochefort"));
+        let g = form_of(&conn, &dir, id).unwrap();
+        assert_eq!((g.pager.as_str(), g.car_phone.as_str(), g.business_fax.as_str()), ("", "0608", "0504"));
     }
 
     #[test]

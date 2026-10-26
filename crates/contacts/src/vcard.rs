@@ -2,7 +2,9 @@
 //!
 //! Écriture : 2.1 ou 3.0. Lecture : 2.1, 3.0 et 4.0 (le format exact qu'écrit MPE n'est pas établi). L'identifiant du
 //! formulaire part dans `UID` ; à la lecture, `UID` ou à défaut `X-OUTLOOK-UID` va dans [`Parsed::uid`] et le formulaire
-//! rendu a `id: None` et `folder_id` vide (à remplir par l'appelant). `PHOTO` (JPEG en base64) et `CATEGORIES` sont lus et écrits ; une photo qui n'est pas un JPEG intégré est ignorée, avec avertissement.
+//! rendu a `id: None` et `folder_id` vide (à remplir par l'appelant). Titre, second prénom, suffixe (`N`), surnom, deuxièmes
+//! numéros, télécopies, voiture, récepteur d'appels, « autre » (types `OTHER`, non standard), adresse « autre », messagerie
+//! instantanée (`IMPP`) et conjoint (`X-SPOUSE`) font l'aller-retour ; seul le type exact écrit par MPE reste à confirmer. `PHOTO` (JPEG en base64) et `CATEGORIES` sont lus et écrits ; une photo qui n'est pas un JPEG intégré est ignorée, avec avertissement.
 
 use thunderlook_model::contacts::ContactForm;
 
@@ -63,10 +65,14 @@ pub fn export(forms: &[ContactForm], version: Version) -> String {
         w.out.push_str("BEGIN:VCARD\r\n");
         w.out.push_str(if version == Version::V21 { "VERSION:2.1\r\n" } else { "VERSION:3.0\r\n" });
         let (given, surname) = (w.esc(&f.given_name), w.esc(&f.surname));
-        w.line("N", &[], &format!("{surname};{given};;;"));
+        let (middle, prefix, suffix) = (w.esc(&f.middle_name), w.esc(&f.prefix), w.esc(&f.suffix));
+        w.line("N", &[], &format!("{surname};{given};{middle};{prefix};{suffix}"));
         let full = [f.given_name.trim(), f.surname.trim()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" ");
         let full = if full.is_empty() { f.company.trim().to_string() } else { full };
         w.line("FN", &[], &w.esc(&full));
+        if !f.nickname.is_empty() {
+            w.line("NICKNAME", &[], &w.esc(&f.nickname));
+        }
         if !f.company.is_empty() || !f.department.is_empty() {
             let org = format!("{};{}", w.esc(&f.company), w.esc(&f.department));
             w.line("ORG", &[], org.trim_end_matches(';'));
@@ -78,7 +84,18 @@ pub fn export(forms: &[ContactForm], version: Version) -> String {
             let pref: &[&str] = if i == 0 { &["PREF", "INTERNET"] } else { &["INTERNET"] };
             w.line("EMAIL", pref, &w.esc(m));
         }
-        for (num, types) in [(&f.mobile, &["CELL", "VOICE"][..]), (&f.business, &["WORK", "VOICE"]), (&f.home_phone, &["HOME", "VOICE"])] {
+        for (num, types) in [
+            (&f.mobile, &["CELL", "VOICE"][..]),
+            (&f.business, &["WORK", "VOICE"]),
+            (&f.home_phone, &["HOME", "VOICE"]),
+            (&f.business2, &["WORK", "VOICE"]),
+            (&f.home2, &["HOME", "VOICE"]),
+            (&f.business_fax, &["FAX", "WORK"]),
+            (&f.home_fax, &["FAX", "HOME"]),
+            (&f.car_phone, &["CAR"]),
+            (&f.pager, &["PAGER"]),
+            (&f.other_phone, &["OTHER"]),
+        ] {
             if !num.is_empty() {
                 w.line("TEL", types, &w.esc(num));
             }
@@ -86,6 +103,7 @@ pub fn export(forms: &[ContactForm], version: Version) -> String {
         for (t, street, city, postal, country) in [
             ("WORK", &f.work_street, &f.work_city, &f.work_postal, &f.work_country),
             ("HOME", &f.home_street, &f.home_city, &f.home_postal, &f.home_country),
+            ("OTHER", &f.other_street, &f.other_city, &f.other_postal, &f.other_country),
         ] {
             if [street, city, postal, country].iter().any(|s| !s.is_empty()) {
                 let v = format!(";;{};{};;{};{}", w.esc(street), w.esc(city), w.esc(postal), w.esc(country));
@@ -94,6 +112,12 @@ pub fn export(forms: &[ContactForm], version: Version) -> String {
         }
         if !f.web_page.is_empty() {
             w.line("URL", &[], &w.esc(&f.web_page));
+        }
+        if !f.im_address.is_empty() {
+            w.line("IMPP", &[], &w.esc(&f.im_address));
+        }
+        if !f.spouse.is_empty() {
+            w.line("X-SPOUSE", &[], &w.esc(&f.spouse));
         }
         if !f.birthday.is_empty() {
             w.line("BDAY", &[], &f.birthday);
@@ -195,6 +219,7 @@ fn record(n: usize, props: Vec<Prop>, truncated: bool) -> Parsed {
             "N" => {
                 let parts = textfmt::split_unescaped(&raw, ';');
                 (f.surname, f.given_name) = (field(&parts, 0), field(&parts, 1));
+                (f.middle_name, f.prefix, f.suffix) = (field(&parts, 2), field(&parts, 3), field(&parts, 4));
                 got_n = true;
             }
             "FN" => fn_name = simple(),
@@ -203,6 +228,17 @@ fn record(n: usize, props: Vec<Prop>, truncated: bool) -> Parsed {
                 (f.company, f.department) = (field(&parts, 0), field(&parts, 1));
             }
             "TITLE" => f.job_title = simple(),
+            "NICKNAME" => f.nickname = textfmt::split_unescaped(&raw, ',').first().map(|n| textfmt::unescape(n).trim().to_string()).unwrap_or_default(),
+            "X-SPOUSE" => f.spouse = simple(),
+            "RELATED" if p.has_type("SPOUSE") => f.spouse = simple(),
+            "IMPP" | "X-IMPP" | "X-AIM" | "X-MSN" | "X-YAHOO" | "X-JABBER" | "X-SKYPE" | "X-SKYPE-USERNAME" | "X-ICQ" | "X-GOOGLE-TALK" | "X-GADUGADU" | "X-GROUPWISE" => {
+                let v = simple();
+                if f.im_address.is_empty() {
+                    f.im_address = v;
+                } else if !v.is_empty() && v != f.im_address {
+                    w.push(format!("deuxième adresse de messagerie instantanée ignorée ({v})"));
+                }
+            }
             "URL" => {
                 urls += 1;
                 if urls == 1 {
@@ -236,35 +272,50 @@ fn record(n: usize, props: Vec<Prop>, truncated: bool) -> Parsed {
                 }
                 let t = p.types();
                 let has = |x: &str| t.iter().any(|y| y == x);
-                let slot = if has("CELL") {
-                    Some(0)
-                } else if ["FAX", "PAGER", "CAR", "VIDEO", "MODEM", "ISDN", "BBS", "MSG"].iter().any(|x| has(x)) {
-                    None
+                // Cases essayées dans l'ordre : mobile, bureau, domicile, télécopie bureau, télécopie domicile, bureau 2, domicile 2,
+                // voiture, récepteur d'appels, autre.
+                let untyped = !["CELL", "FAX", "PAGER", "CAR", "OTHER", "WORK", "HOME"].iter().any(|x| has(x));
+                let pref: &[usize] = if has("CELL") {
+                    &[0, 9]
+                } else if has("FAX") {
+                    if has("HOME") && !has("WORK") { &[4, 3] } else { &[3, 4] }
+                } else if has("PAGER") {
+                    &[8]
+                } else if has("CAR") {
+                    &[7]
+                } else if ["VIDEO", "MODEM", "ISDN", "BBS", "MSG"].iter().any(|x| has(x)) {
+                    w.push(format!("téléphone de type {} ignoré ({v})", t.join(",")));
+                    continue;
+                } else if has("OTHER") {
+                    &[9]
                 } else if has("WORK") {
-                    Some(1)
+                    &[1, 5, 9]
                 } else if has("HOME") {
-                    Some(2)
+                    &[2, 6, 9]
                 } else {
-                    Some(3)
+                    &[0, 1, 2, 9]
                 };
-                let slots = [&mut f.mobile, &mut f.business, &mut f.home_phone];
-                match slot {
-                    None => w.push(format!("téléphone de type {} ignoré ({v})", t.join(","))),
-                    Some(3) => match slots.into_iter().find(|s| s.is_empty()) {
-                        Some(s) => {
-                            *s = v.clone();
+                let slots = [
+                    &mut f.mobile,
+                    &mut f.business,
+                    &mut f.home_phone,
+                    &mut f.business_fax,
+                    &mut f.home_fax,
+                    &mut f.business2,
+                    &mut f.home2,
+                    &mut f.car_phone,
+                    &mut f.pager,
+                    &mut f.other_phone,
+                ];
+                match pref.iter().copied().find(|&i| slots[i].is_empty()) {
+                    Some(i) => {
+                        *slots[i] = v.clone();
+                        if untyped {
                             w.push(format!("téléphone {v} sans type (CELL/WORK/HOME) : rangé dans la première case libre"));
                         }
-                        None => w.push(format!("téléphone {v} sans type et sans case libre : ignoré")),
-                    },
-                    Some(i) => {
-                        let s = slots.into_iter().nth(i).expect("case");
-                        if s.is_empty() {
-                            *s = v;
-                        } else {
-                            w.push(format!("deuxième téléphone du même type ignoré ({v})"));
-                        }
                     }
+                    None if untyped => w.push(format!("téléphone {v} sans type et sans case libre : ignoré")),
+                    None => w.push(format!("deuxième téléphone du même type ignoré ({v})")),
                 }
             }
             "ADR" => {
@@ -278,27 +329,40 @@ fn record(n: usize, props: Vec<Prop>, truncated: bool) -> Parsed {
                     continue;
                 }
                 let t = p.types();
-                let work = t.iter().any(|x| x == "WORK");
-                let home = t.iter().any(|x| x == "HOME");
-                let wf_free = f.work_street.is_empty() && f.work_city.is_empty() && f.work_postal.is_empty() && f.work_country.is_empty();
-                let hf_free = f.home_street.is_empty() && f.home_city.is_empty() && f.home_postal.is_empty() && f.home_country.is_empty();
-                let to_work = if work {
-                    true
+                let has = |x: &str| t.iter().any(|y| y == x);
+                let (work, home) = (has("WORK"), has("HOME"));
+                // 0 bureau, 1 domicile, 2 autre.
+                let free = |f: &ContactForm, i: u8| match i {
+                    0 => f.work_street.is_empty() && f.work_city.is_empty() && f.work_postal.is_empty() && f.work_country.is_empty(),
+                    1 => f.home_street.is_empty() && f.home_city.is_empty() && f.home_postal.is_empty() && f.home_country.is_empty(),
+                    _ => f.other_street.is_empty() && f.other_city.is_empty() && f.other_postal.is_empty() && f.other_country.is_empty(),
+                };
+                let target: u8 = if work {
+                    0
                 } else if home {
-                    false
-                } else if hf_free {
+                    1
+                } else if has("OTHER") || has("POSTAL") || has("PARCEL") || has("DOM") || has("INTL") {
+                    2
+                } else if free(&f, 1) {
                     w.push("ADR sans type (WORK/HOME) : rangée en domicile".into());
-                    false
+                    1
                 } else {
                     w.push("ADR sans type (WORK/HOME) : rangée en travail".into());
-                    true
+                    0
                 };
-                if to_work && wf_free {
-                    (f.work_street, f.work_city, f.work_postal, f.work_country) = a;
-                } else if !to_work && hf_free {
-                    (f.home_street, f.home_city, f.home_postal, f.home_country) = a;
+                let target = if free(&f, target) {
+                    Some(target)
+                } else if target != 2 && free(&f, 2) {
+                    w.push(format!("deuxième adresse du même type : rangée en « autre » ({})", a.1));
+                    Some(2)
                 } else {
-                    w.push(format!("deuxième adresse du même type ignorée ({})", a.1));
+                    None
+                };
+                match target {
+                    Some(0) => (f.work_street, f.work_city, f.work_postal, f.work_country) = a,
+                    Some(1) => (f.home_street, f.home_city, f.home_postal, f.home_country) = a,
+                    Some(_) => (f.other_street, f.other_city, f.other_postal, f.other_country) = a,
+                    None => w.push(format!("deuxième adresse du même type ignorée ({})", a.1)),
                 }
             }
             "PHOTO" => {
@@ -371,6 +435,23 @@ mod tests {
             mobile: "06 12 34 56 78".into(),
             business: "05 46 00 00 00".into(),
             home_phone: "+33 5 46 11 11 11".into(),
+            prefix: "Dr".into(),
+            middle_name: "Jean-Paul".into(),
+            suffix: "Jr".into(),
+            nickname: "Ren; le Grand".into(),
+            business_fax: "05 46 00 00 01".into(),
+            home_fax: "05 46 11 11 12".into(),
+            business2: "05 46 00 00 02".into(),
+            home2: "05 46 11 11 13".into(),
+            car_phone: "06 99 00 00 00".into(),
+            pager: "06 98 00 00 00".into(),
+            other_phone: "04 00 00 00 00".into(),
+            other_street: "1 place du Marché\nCS 2".into(),
+            other_city: "Surgères".into(),
+            other_postal: "17700".into(),
+            other_country: "France".into(),
+            im_address: "rene@jabber.example".into(),
+            spouse: "Hélène; Dupont".into(),
             work_street: "12 rue de l'Église\nBât. B".into(),
             work_city: "Fenioux".into(),
             work_postal: "17350".into(),
@@ -432,6 +513,36 @@ mod tests {
     }
 
     #[test]
+    fn champs_supplementaires_dans_la_fiche() {
+        let f = full();
+        let v30 = export(&[f.clone()], Version::V30);
+        for k in ["N:Dupont-Léger;René;Jean-Paul;Dr;Jr", "NICKNAME:Ren\\; le Grand", "TEL;TYPE=FAX,WORK:", "TEL;TYPE=CAR:", "TEL;TYPE=PAGER:", "ADR;TYPE=OTHER:", "IMPP:", "X-SPOUSE:"] {
+            assert!(v30.contains(k), "{k} absent de {v30}");
+        }
+        let v21 = export(&[f.clone()], Version::V21);
+        assert!(v21.contains("TEL;FAX;WORK:") && v21.contains("TEL;OTHER:"), "{v21}");
+    }
+
+    #[test]
+    fn numeros_et_adresses_en_trop_vont_dans_les_cases_libres() {
+        // Deux numéros « bureau », deux « domicile », deux mobiles : rien n'est perdu tant qu'une case reste libre.
+        let txt = "BEGIN:VCARD\nVERSION:3.0\nN:A;B;;;\nTEL;TYPE=WORK:1\nTEL;TYPE=WORK:2\nTEL;TYPE=HOME:3\nTEL;TYPE=HOME:4\nTEL;TYPE=CELL:5\nTEL;TYPE=CELL:6\nTEL;TYPE=FAX:7\nTEL;TYPE=FAX:8\nTEL;TYPE=FAX:9\n\
+ADR;TYPE=WORK:;;a;V1;;1;F\nADR;TYPE=WORK:;;b;V2;;2;F\nADR;TYPE=WORK:;;c;V3;;3;F\nEND:VCARD\n";
+        let p = &parse(txt).unwrap()[0];
+        let f = &p.form;
+        assert_eq!((f.business.as_str(), f.business2.as_str(), f.home_phone.as_str(), f.home2.as_str()), ("1", "2", "3", "4"));
+        assert_eq!((f.mobile.as_str(), f.other_phone.as_str(), f.business_fax.as_str(), f.home_fax.as_str()), ("5", "6", "7", "8"));
+        assert_eq!((f.work_city.as_str(), f.other_city.as_str()), ("V1", "V2"));
+        assert!(p.warnings.iter().any(|w| w.contains('9')) && p.warnings.iter().any(|w| w.contains("V3")), "{:?}", p.warnings);
+    }
+
+    #[test]
+    fn messagerie_et_conjoint_vcard_4_et_extensions() {
+        let p = &parse("BEGIN:VCARD\nVERSION:4.0\nFN:Léa Martin\nIMPP:xmpp:lea@x.fr\nRELATED;TYPE=spouse:Paul\nNICKNAME:Lélé,Léa\nEND:VCARD\n").unwrap()[0];
+        assert_eq!((p.form.im_address.as_str(), p.form.spouse.as_str(), p.form.nickname.as_str()), ("xmpp:lea@x.fr", "Paul", "Lélé"));
+    }
+
+    #[test]
     fn uid_roundtrip() {
         let mut f = full();
         f.id = Some("p77".into());
@@ -468,7 +579,8 @@ UID:abc-1\r\nEND:VCARD\r\n";
         assert_eq!(f.web_page, "https://example.fr/une/adresse/tres/longue/qui/est/repliee/sur/deux/lignes");
         assert_eq!(p[0].uid.as_deref(), Some("abc-1"));
         assert!(p[0].warnings.iter().any(|w| w.contains("PHOTO")), "{:?}", p[0].warnings);
-        assert!(p[0].warnings.iter().any(|w| w.contains("FAX")));
+        assert_eq!(f.business_fax, "05 46 22 22 22");
+        assert!(!p[0].warnings.iter().any(|w| w.contains("FAX")), "{:?}", p[0].warnings);
     }
 
     #[test]

@@ -55,6 +55,13 @@ pub fn world(name: &str) -> World {
     }
     lid(&mut names, NOTE, 0x8B00);
     lid(&mut names, ADDRESS, 0x8015);
+    // Messagerie instantanée (0x8062) et courriels 1 à 3 : sans eux, ces champs ne s'écrivent pas dans la base de test.
+    lid(&mut names, ADDRESS, 0x8062);
+    for base in [0x8080u32, 0x8090, 0x80A0] {
+        for k in [0, 2, 3, 4] {
+            lid(&mut names, ADDRESS, base + k);
+        }
+    }
     names.extend_from_slice(&next.to_le_bytes());
     names.extend_from_slice(PUBLIC_STRINGS.as_bytes());
     names.push(1);

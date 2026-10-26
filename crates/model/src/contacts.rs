@@ -121,8 +121,15 @@ pub struct ContactForm {
     pub id: Option<String>,
     /// Dossier `k<id>`.
     pub folder_id: String,
+    /// Titre de civilité (M., Mme, Dr…) : `PidTagDisplayNamePrefix`.
+    pub prefix: String,
     pub given_name: String,
+    /// Second prénom : `PidTagMiddleName`.
+    pub middle_name: String,
     pub surname: String,
+    /// Suffixe (Jr, III…) : `PidTagGeneration`.
+    pub suffix: String,
+    pub nickname: String,
     pub company: String,
     pub job_title: String,
     pub department: String,
@@ -132,6 +139,17 @@ pub struct ContactForm {
     pub mobile: String,
     pub business: String,
     pub home_phone: String,
+    /// Télécopie du bureau / du domicile.
+    pub business_fax: String,
+    pub home_fax: String,
+    /// Deuxièmes numéros du bureau et du domicile.
+    pub business2: String,
+    pub home2: String,
+    pub car_phone: String,
+    /// Récepteur d'appels.
+    pub pager: String,
+    /// Téléphone « Autre ».
+    pub other_phone: String,
     pub work_street: String,
     pub work_city: String,
     pub work_postal: String,
@@ -140,7 +158,16 @@ pub struct ContactForm {
     pub home_city: String,
     pub home_postal: String,
     pub home_country: String,
+    /// Adresse « Autre » (région non portée, comme pour les deux autres adresses).
+    pub other_street: String,
+    pub other_city: String,
+    pub other_postal: String,
+    pub other_country: String,
     pub web_page: String,
+    /// Adresse de messagerie instantanée (`PidLidInstantMessagingAddress`).
+    pub im_address: String,
+    /// Conjoint(e).
+    pub spouse: String,
     /// `AAAA-MM-JJ`, vide si inconnu.
     pub birthday: String,
     pub notes: String,
