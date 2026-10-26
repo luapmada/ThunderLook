@@ -3,10 +3,19 @@
 //! Le corps se modifie dans un `iframe` isolé : `sandbox` sans `allow-scripts` (aucun script du message cité ne
 //! s'exécute), CSP sans contenu distant, `designMode` activé par l'interface. Enregistrement : Ctrl+S, bouton,
 //! et automatiquement chaque minute si le message a changé. L'envoi viendra avec SMTP (J7).
+//!
+//! Mise en forme (lot AS) : `execCommand` dans l'iframe (police, taille, couleur, surlignage, alignement, lien) ;
+//! image insérée en URI `data:` (le cœur la transforme en pièce intégrée `cid:` à l'enregistrement). Importance et
+//! confirmation de lecture vivent dans le brouillon et deviennent des en-têtes du message.
 
 use leptos::{html, prelude::*, task::spawn_local};
-use thunderlook_model::{ComposeKind, Draft, Signature};
-use wasm_bindgen::{JsCast, closure::Closure};
+use icondata_lu::{
+    LuAlignCenter as ALIGN_CENTER, LuAlignLeft as ALIGN_LEFT, LuAlignRight as ALIGN_RIGHT, LuArrowBigDown as IMPORTANCE_LOW,
+    LuArrowBigUp as IMPORTANCE_HIGH, LuBaseline as FONT_COLOR, LuHighlighter as HIGHLIGHT, LuImagePlus as IMAGE_PLUS,
+    LuLink as LINK, LuMailCheck as MAIL_CHECK, LuType as FONT,
+};
+use thunderlook_model::{ComposeKind, Draft, Importance, Signature};
+use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
 use crate::{
     actions,
@@ -19,6 +28,33 @@ use crate::{
 
 /// Délai de l'enregistrement automatique (ms).
 const AUTOSAVE_MS: i32 = 60_000;
+
+/// Polices du menu « Police ».
+const FONTS: &[&str] = &["Aptos", "Arial", "Calibri", "Cambria", "Courier New", "Georgia", "Segoe UI", "Tahoma", "Times New Roman", "Verdana"];
+
+/// Tailles de `execCommand("fontSize")` (1 à 7, balise `<font size>`) et leur équivalent en points.
+const SIZES: &[(&str, &str)] = &[("1", "8"), ("2", "10"), ("3", "12"), ("4", "14"), ("5", "18"), ("6", "24"), ("7", "36")];
+
+/// Couleurs standard de la palette d'Office.
+const COLORS: &[(&str, &str)] = &[
+    ("Rouge foncé", "#C00000"),
+    ("Rouge", "#FF0000"),
+    ("Orange", "#FFC000"),
+    ("Jaune", "#FFFF00"),
+    ("Vert clair", "#92D050"),
+    ("Vert", "#00B050"),
+    ("Bleu clair", "#00B0F0"),
+    ("Bleu", "#0070C0"),
+    ("Bleu foncé", "#002060"),
+    ("Violet", "#7030A0"),
+];
+
+/// Couleurs de surlignage.
+const HIGHLIGHTS: &[(&str, &str)] =
+    &[("Jaune", "#FFFF00"), ("Vert vif", "#00FF00"), ("Turquoise", "#00FFFF"), ("Rose", "#FF00FF"), ("Gris", "#C0C0C0")];
+
+/// Taille maximale d'une image insérée dans le corps (elle part dans le message).
+const MAX_IMAGE: f64 = 10.0 * 1024.0 * 1024.0;
 
 fn editor_doc(html: &str, styles: &str) -> String {
     format!(
@@ -102,6 +138,117 @@ fn exec(frame: NodeRef<html::Iframe>, command: &str, value: Option<&str>) {
     }
 }
 
+fn escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// Cible d'un lien saisi : schéma conservé s'il est sûr, `mailto:` pour une adresse, `https://` sinon. `None` :
+/// schéma refusé (`javascript:`, `data:`…).
+fn link_target(input: &str) -> Option<String> {
+    let t = input.trim();
+    let scheme = t.split_once(':').map(|(s, _)| s.to_ascii_lowercase()).filter(|s| {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')) && !s.contains('.')
+    });
+    match scheme.as_deref() {
+        Some("http" | "https" | "mailto" | "ftp" | "file" | "tel") => Some(t.to_string()),
+        Some(_) => None,
+        None if t.contains('@') && !t.contains('/') => Some(format!("mailto:{t}")),
+        None => Some(format!("https://{t}")),
+    }
+}
+
+/// Texte sélectionné dans l'éditeur.
+fn selected_text(doc: &web_sys::HtmlDocument) -> String {
+    js_sys::Reflect::get(doc, &JsValue::from_str("getSelection"))
+        .ok()
+        .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+        .and_then(|f| f.call0(doc).ok())
+        .and_then(|s| s.dyn_into::<js_sys::Object>().ok())
+        .map(|s| String::from(s.to_string()))
+        .unwrap_or_default()
+}
+
+/// « Lien » (Ctrl+K) : adresse demandée ; sur une sélection, elle devient le lien ; sans sélection, l'adresse est
+/// insérée comme lien. Une adresse vide retire le lien de la sélection.
+fn insert_link(ui: Ui, frame: NodeRef<html::Iframe>) {
+    let Some(doc) = frame_doc(frame) else { return };
+    let Ok(Some(input)) = window().prompt_with_message_and_default("Adresse du lien (vide : retirer le lien) :", "https://") else {
+        return;
+    };
+    let input = input.trim();
+    if input.is_empty() || input == "https://" {
+        exec(frame, "unlink", None);
+    } else {
+        let Some(url) = link_target(input) else {
+            ui.error.set(Some("Adresse refusée : seuls http, https, mailto, ftp, file et tel sont acceptés.".into()));
+            return;
+        };
+        if selected_text(&doc).trim().is_empty() {
+            exec(frame, "insertHTML", Some(&format!("<a href=\"{0}\">{0}</a>", escape(&url))));
+        } else {
+            exec(frame, "createLink", Some(&url));
+        }
+    }
+    ui.compose_dirty.set(true);
+}
+
+fn get(o: &JsValue, key: &str) -> Option<JsValue> {
+    js_sys::Reflect::get(o, &JsValue::from_str(key)).ok().filter(|v| !v.is_undefined() && !v.is_null())
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= c.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
+}
+
+/// Image choisie dans le sélecteur de fichiers, en URI `data:`. `None` : rien de choisi.
+async fn picked_image(input: &web_sys::HtmlInputElement) -> Option<Result<String, String>> {
+    let file = get(input.as_ref(), "files").and_then(|f| get(&f, "0"))?;
+    let mime = get(&file, "type").and_then(|t| t.as_string()).unwrap_or_default();
+    if !matches!(mime.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/bmp" | "image/webp") {
+        return Some(Err("Format d'image non pris en charge (PNG, JPEG, GIF, BMP ou WebP).".into()));
+    }
+    if get(&file, "size").and_then(|s| s.as_f64()).unwrap_or(0.0) > MAX_IMAGE {
+        return Some(Err("Image trop lourde pour le corps du message (10 Mo au plus) : joignez-la plutôt.".into()));
+    }
+    let read = get(&file, "arrayBuffer")?.dyn_into::<js_sys::Function>().ok()?;
+    let promise = read.call0(&file).ok()?.dyn_into::<js_sys::Promise>().ok()?;
+    let buffer = match wasm_bindgen_futures::JsFuture::from(promise).await {
+        Ok(b) => b,
+        Err(_) => return Some(Err("Lecture de l'image impossible.".into())),
+    };
+    Some(Ok(format!("data:{mime};base64,{}", base64(&js_sys::Uint8Array::new(&buffer).to_vec()))))
+}
+
+/// Menu de couleurs : « Automatique » (`auto`) puis la palette, chaque entrée appliquant `command`.
+fn color_entries(
+    ui: Ui,
+    frame: NodeRef<html::Iframe>,
+    command: &'static str,
+    auto: (&'static str, &'static str),
+    list: &'static [(&'static str, &'static str)],
+) -> Vec<MenuEntry> {
+    std::iter::once(auto)
+        .chain(list.iter().copied())
+        .enumerate()
+        .map(|(i, (name, color))| {
+            let entry = MenuEntry::action(name, move || {
+                exec(frame, command, Some(color));
+                ui.compose_dirty.set(true);
+            })
+            .with_swatch((i > 0).then(|| color.to_string()));
+            if i == 1 { entry.separated() } else { entry }
+        })
+        .collect()
+}
+
 #[component]
 pub fn ComposePane() -> impl IntoView {
     let ui = use_ui();
@@ -128,6 +275,10 @@ pub fn ComposePane() -> impl IntoView {
         if ev.ctrl_key() && ev.key() == "Enter" {
             ev.prevent_default();
             send(ui, frame);
+        }
+        if ev.ctrl_key() && ev.key().eq_ignore_ascii_case("k") {
+            ev.prevent_default();
+            insert_link(ui, frame);
         }
     }));
     let on_input = StoredValue::new_local(Closure::<dyn Fn(web_sys::Event)>::new(move |_| ui.compose_dirty.set(true)));
@@ -251,6 +402,67 @@ pub fn ComposePane() -> impl IntoView {
     };
     let signature_entries = signature_entries(ui, signatures, frame);
 
+    // Image dans le corps : sélecteur de fichiers du système (champ caché), à la position du curseur.
+    let image_input = NodeRef::<html::Input>::new();
+    let on_image = move |_| {
+        let Some(input) = image_input.get_untracked() else { return };
+        spawn_local(async move {
+            let picked = picked_image(&input).await;
+            input.set_value("");
+            match picked {
+                Some(Ok(uri)) => {
+                    exec(frame, "insertHTML", Some(&format!("<img src=\"{uri}\">")));
+                    ui.compose_dirty.set(true);
+                }
+                Some(Err(e)) => ui.error.set(Some(e)),
+                None => {}
+            }
+        });
+    };
+    let font_entries: Vec<MenuEntry> = FONTS
+        .iter()
+        .map(|&f| {
+            MenuEntry::action(f, move || {
+                exec(frame, "fontName", Some(f));
+                ui.compose_dirty.set(true);
+            })
+        })
+        .collect();
+    let size_entries: Vec<MenuEntry> = SIZES
+        .iter()
+        .map(|&(v, pt)| {
+            MenuEntry::action(format!("{pt} pt"), move || {
+                exec(frame, "fontSize", Some(v));
+                ui.compose_dirty.set(true);
+            })
+        })
+        .collect();
+    let color_menu = color_entries(ui, frame, "foreColor", ("Automatique", "#000000"), COLORS);
+    let highlight_menu = color_entries(ui, frame, "hiliteColor", ("Aucune couleur", "transparent"), HIGHLIGHTS);
+    let align = move |command: &'static str| move |_| exec(frame, command, None);
+
+    // Importance (bascule comme le ruban d'Outlook) et confirmation de lecture.
+    let importance = move || ui.compose.with(|d| d.as_ref().map(|d| d.importance).unwrap_or_default());
+    let toggle_importance = move |level: Importance| {
+        move |_| {
+            ui.compose.update(|d| {
+                if let Some(d) = d {
+                    d.importance = if d.importance == level { Importance::Normal } else { level };
+                }
+            });
+            ui.compose_dirty.set(true);
+        }
+    };
+    let receipt = move || ui.compose.with(|d| d.as_ref().is_some_and(|d| d.read_receipt));
+    let toggle_receipt = move |_| {
+        ui.compose.update(|d| {
+            if let Some(d) = d {
+                d.read_receipt = !d.read_receipt;
+            }
+        });
+        ui.compose_dirty.set(true);
+    };
+
     let title = match kind {
         ComposeKind::New => "Nouveau message",
         ComposeKind::Reply => "Répondre",
@@ -290,6 +502,38 @@ pub fn ComposePane() -> impl IntoView {
                     <span>"Joindre"</span>
                 </button>
                 <MenuButton label="Signature" icon=PENCIL entries=signature_entries class="cmd" />
+                <button
+                    class="cmd icon-only"
+                    title="Importance haute"
+                    aria-label="Importance haute"
+                    aria-pressed=move || (importance() == Importance::High).to_string()
+                    on:click=toggle_importance(Importance::High)
+                >
+                    <Svg icon=IMPORTANCE_HIGH />
+                </button>
+                <button
+                    class="cmd icon-only"
+                    title="Importance faible"
+                    aria-label="Importance faible"
+                    aria-pressed=move || (importance() == Importance::Low).to_string()
+                    on:click=toggle_importance(Importance::Low)
+                >
+                    <Svg icon=IMPORTANCE_LOW />
+                </button>
+                <button
+                    class="cmd icon-only"
+                    title="Demander une confirmation de lecture"
+                    aria-label="Demander une confirmation de lecture"
+                    aria-pressed=move || receipt().to_string()
+                    on:click=toggle_receipt
+                >
+                    <Svg icon=MAIL_CHECK />
+                </button>
+                <span class="compose-sep" aria-hidden="true"></span>
+                <MenuButton label="Police" icon=FONT entries=font_entries show_label=false title="Police" class="cmd icon-only" />
+                <MenuButton label="Taille" icon=FONT entries=size_entries title="Taille de police" class="cmd" />
+                <MenuButton label="Couleur de police" icon=FONT_COLOR entries=color_menu show_label=false title="Couleur de police" class="cmd icon-only" />
+                <MenuButton label="Surligner" icon=HIGHLIGHT entries=highlight_menu show_label=false title="Couleur de surbrillance du texte" class="cmd icon-only" />
                 <span class="compose-sep" aria-hidden="true"></span>
                 <button class="cmd icon-only" title="Gras (Ctrl+G)" aria-label="Gras" on:click=move |_| exec(frame, "bold", None)>
                     <Svg icon=BOLD />
@@ -306,6 +550,40 @@ pub fn ComposePane() -> impl IntoView {
                 <button class="cmd icon-only" title="Liste numérotée" aria-label="Liste numérotée" on:click=move |_| exec(frame, "insertOrderedList", None)>
                     <Svg icon=LIST_ORDERED />
                 </button>
+                <button class="cmd icon-only" title="Aligner à gauche" aria-label="Aligner à gauche" on:click=align("justifyLeft")>
+                    <Svg icon=ALIGN_LEFT />
+                </button>
+                <button class="cmd icon-only" title="Centrer" aria-label="Centrer" on:click=align("justifyCenter")>
+                    <Svg icon=ALIGN_CENTER />
+                </button>
+                <button class="cmd icon-only" title="Aligner à droite" aria-label="Aligner à droite" on:click=align("justifyRight")>
+                    <Svg icon=ALIGN_RIGHT />
+                </button>
+                <span class="compose-sep" aria-hidden="true"></span>
+                <button class="cmd icon-only" title="Lien (Ctrl+K)" aria-label="Lien" aria-keyshortcuts="Control+K" on:click=move |_| insert_link(ui, frame)>
+                    <Svg icon=LINK />
+                </button>
+                <button
+                    class="cmd icon-only"
+                    title="Insérer une image dans le corps"
+                    aria-label="Image"
+                    on:click=move |_| {
+                        if let Some(i) = image_input.get_untracked() {
+                            i.click();
+                        }
+                    }
+                >
+                    <Svg icon=IMAGE_PLUS />
+                </button>
+                <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/bmp,image/webp"
+                    hidden=true
+                    tabindex="-1"
+                    aria-hidden="true"
+                    node_ref=image_input
+                    on:change=on_image
+                />
                 <span class="tabs-spacer"></span>
                 <button class="cmd" title="Fermer la rédaction" on:click=discard>
                     <Svg icon=X />

@@ -547,6 +547,12 @@ pub struct Draft {
     /// Compte d'envoi (`s<source>`, champ « De ») ; absent : compte du message d'origine, sinon le premier.
     #[serde(default)]
     pub from_account: Option<String>,
+    /// « Importance haute / faible » (en-têtes `Importance` et `X-Priority`).
+    #[serde(default)]
+    pub importance: Importance,
+    /// « Demander une confirmation de lecture » (en-tête `Disposition-Notification-To`, RFC 8098).
+    #[serde(default)]
+    pub read_receipt: bool,
 }
 
 /// Signature d'Outlook (`%APPDATA%\Microsoft\Signatures`), images intégrées en URI `data:`.
