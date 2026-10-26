@@ -98,7 +98,8 @@ try {
         exit 0
     }
     $main = $main[0]
-    $others = @($wins | Where-Object { $_.Handle -ne $main.Handle })
+    # ThunderRT6Main (fenetre d'application VB6) et PictureBox sans titre sont presents en permanence : pas des dialogues.
+    $others = @($wins | Where-Object { $_.Handle -ne $main.Handle -and $_.Class -ne 'ThunderRT6Main' -and -not ($_.Class -eq 'ThunderRT6PictureBoxDC' -and $_.Title -eq '') })
     if ($others.Count -gt 0) {
         Write-Log ('Rien : fenetre(s) de dialogue MPE ouverte(s) (synchro en cours ou confirmation en attente) : ' +
             (($others | ForEach-Object { '[' + $_.Class + '] "' + $_.Title + '"' }) -join ', '))
