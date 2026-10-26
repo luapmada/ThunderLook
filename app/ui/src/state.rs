@@ -251,6 +251,7 @@ pub struct Ui {
     /// Rappels dus (barre d'état) et panneau ouvert.
     pub reminders: RwSignal<Vec<crate::reminders::Reminder>>,
     pub reminders_open: RwSignal<bool>,
+    pub flag_dialog: RwSignal<bool>,
     /// Boîte « Échange avec le téléphone » ouverte (Ctrl+Maj+T).
     pub phone_exchange: RwSignal<bool>,
     /// Écran « Sauvegardes » ouvert (menu Fichier).
@@ -329,6 +330,7 @@ impl Ui {
             pending_open: RwSignal::new(None),
             reminders: RwSignal::new(Vec::new()),
             reminders_open: RwSignal::new(false),
+            flag_dialog: RwSignal::new(false),
             phone_exchange: RwSignal::new(false),
             backups: RwSignal::new(false),
             help: RwSignal::new(None),

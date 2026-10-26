@@ -510,6 +510,7 @@ pub fn App() -> impl IntoView {
             <JunkOptionsDialog />
             <crate::global_search::GlobalSearchPanel />
             <crate::reminders::RemindersPanel />
+            <crate::flag_dialog::FlagDialog />
             <crate::exchange::ExchangeDialog />
             <crate::options::OptionsDialog />
             <crate::options::OptionsEffects />

@@ -14,7 +14,7 @@ use thunderlook_store::rusqlite::Connection;
 
 pub mod state;
 
-pub use state::{dismiss, snooze};
+pub use state::{dismiss, mail_clear, mail_get, mail_set, snooze};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -46,11 +46,13 @@ impl Default for Window {
 pub enum Kind {
     Appointment,
     Task,
+    /// Message suivi (indicateur) avec rappel posé dans ThunderLook.
+    Mail,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Reminder {
-    /// Stable : `a<rendez-vous>@<AAAA-MM-JJ>` (jour local de l'occurrence) ou `t<tâche>`.
+    /// Stable : `a<rendez-vous>@<AAAA-MM-JJ>` (jour local de l'occurrence), `t<tâche>` ou `m<message>`.
     pub id: String,
     pub kind: Kind,
     pub title: String,
@@ -113,8 +115,39 @@ pub fn due(conn: &Connection, data_dir: &Path, now_ms: i64, window: Window) -> R
     for r in task_reminders(conn)? {
         keep(r);
     }
+    for r in mail_reminders(conn, &st.mail)? {
+        keep(r);
+    }
     out.sort_by(|a, b| (a.when_ms, &a.id).cmp(&(b.when_ms, &b.id)));
     Ok(out)
+}
+
+/// Rappels de suivi des messages : seulement ceux dont l'heure a été posée (dialogue « Personnalisé… ») et dont
+/// l'indicateur est toujours posé (`flag_status = 2`) ; terminé, effacé ou message supprimé : plus de rappel.
+/// Début affiché = échéance de l'indicateur, sinon l'heure du rappel.
+fn mail_reminders(conn: &Connection, mail: &std::collections::BTreeMap<String, i64>) -> Result<Vec<Reminder>> {
+    let mut st = conn
+        .prepare("SELECT m.subject, m.from_name, m.flag_status, m.flag_due, f.name FROM message m JOIN folder f ON f.id = m.folder_id WHERE m.id = ?1")
+        .map_err(e)?;
+    let mut out = Vec::new();
+    for (id, when_ms) in mail {
+        let Some(n) = id.strip_prefix('m').and_then(|n| n.parse::<i64>().ok()) else { continue };
+        let row = st
+            .query_row([n], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, Option<i64>>(3)?, r.get::<_, String>(4)?)))
+            .ok();
+        let Some((subject, from, status, due, folder)) = row else { continue };
+        if status != 2 || is_deleted(&folder) {
+            continue;
+        }
+        let location = Some(from.trim().to_string()).filter(|f| !f.is_empty()).map(|f| format!("De {f}"));
+        out.push(Reminder { id: id.clone(), kind: Kind::Mail, title: subject, when_ms: *when_ms, event_start_ms: due.unwrap_or(*when_ms), location });
+    }
+    Ok(out)
+}
+
+fn is_deleted(name: &str) -> bool {
+    let n = name.to_lowercase();
+    n.contains("supprim") || n == "deleted items"
 }
 
 fn is_trash(name: &str) -> bool {

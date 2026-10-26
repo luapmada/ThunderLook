@@ -15,6 +15,7 @@ mod dedupe;
 mod dialogs;
 mod exchange;
 mod mpe_import;
+mod flag_dialog;
 mod folders;
 mod from_mail;
 mod global_search;

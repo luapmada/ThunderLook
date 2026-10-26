@@ -3,12 +3,13 @@
 
 use leptos::{prelude::*, task::spawn_local};
 use serde::Deserialize;
+use thunderlook_model::SearchScope;
 use wasm_bindgen::JsValue;
 
 use crate::{
     global_search,
     ipc,
-    state::{Ui, use_ui},
+    state::{Module, Ui, use_ui},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -16,12 +17,13 @@ use crate::{
 pub enum Kind {
     Appointment,
     Task,
+    Mail,
 }
 
 /// Même forme que `thunderlook_reminders::Reminder` (la crate n'est pas compilable en WebAssembly).
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Reminder {
-    /// `a<rendez-vous>@<AAAA-MM-JJ>` ou `t<tâche>`.
+    /// `a<rendez-vous>@<AAAA-MM-JJ>`, `t<tâche>` ou `m<message>`.
     pub id: String,
     pub kind: Kind,
     pub title: String,
@@ -77,7 +79,7 @@ pub fn watch(ui: Ui) {
     reload(ui);
 }
 
-fn reload(ui: Ui) {
+pub fn reload(ui: Ui) {
     spawn_local(async move {
         match ipc::reminders_due().await {
             Ok(list) => ui.reminders.set(list),
@@ -123,7 +125,17 @@ fn open(ui: Ui, r: &Reminder) {
             None => global_search::open_appointment(ui, &r.id, ""),
         },
         Kind::Task => global_search::open_task(ui, &r.id),
+        Kind::Mail => open_mail(ui, &r.id),
     }
+}
+
+/// Affiche le message suivi : retour au courrier, recherche vide sur « Tous les éléments », message sélectionné.
+fn open_mail(ui: Ui, id: &str) {
+    ui.module.set(Module::Mail);
+    ui.search_scope.set(SearchScope::All);
+    ui.pending_message.set(Some(id.to_string()));
+    ui.search_text.set(String::new());
+    ui.view_epoch.update(|e| *e += 1);
 }
 
 const STYLE: &str = "
@@ -173,6 +185,9 @@ pub fn RemindersPanel() -> impl IntoView {
             <div class="gs-backdrop" on:pointerdown=move |_| ui.reminders_open.set(false)></div>
             <div class="rem-panel" role="region" aria-label="Rappels" on:keydown=on_key>
                 <h2>"Rappels"</h2>
+                <Show when=move || ui.reminders.with(Vec::is_empty)>
+                    <p class="rem-sub">"Aucun rappel."</p>
+                </Show>
                 <For each=move || ui.reminders.get() key=|r| (r.id.clone(), r.when_ms) let:r>
                     {
                         let (open_r, snooze_id, dismiss_id) = (r.clone(), r.id.clone(), r.id.clone());
