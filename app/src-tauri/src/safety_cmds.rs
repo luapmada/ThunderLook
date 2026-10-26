@@ -35,12 +35,22 @@ fn run(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
     let mut done = Vec::new();
     let items = thunderlook_safety::backup(dir, KEEP_DAILY);
     let base = thunderlook_safety::backup_db(dir, KEEP_DB);
+    // Copie du courrier local (`eml/`), incrémentale et au plus une fois par jour ; un fichier en échec est signalé sans bloquer le reste.
+    let mail = thunderlook_safety::backup_mail_daily(dir).and_then(|r| match r {
+        Some(r) if !r.failed.is_empty() => Err(format!("copie du courrier : {} fichier(s) non copié(s), dont {}", r.failed.len(), r.failed[0])),
+        r => Ok(r),
+    });
     done.extend(items.as_ref().ok().and_then(Option::as_ref).cloned());
     done.extend(base.as_ref().ok().and_then(Option::as_ref).cloned());
-    match (items, base) {
-        (Ok(_), Ok(_)) => Ok(done),
-        (Err(e), _) => Err(e),
-        (_, Err(e)) => {
+    if let Ok(Some(r)) = &mail {
+        if r.copied > 0 {
+            done.push(thunderlook_safety::mail_dir(dir));
+        }
+    }
+    match (items, base, mail) {
+        (Ok(_), Ok(_), Ok(_)) => Ok(done),
+        (Err(e), _, _) => Err(e),
+        (_, Err(e), _) | (_, _, Err(e)) => {
             thunderlook_safety::record_failure(dir, &e);
             Err(e)
         }
@@ -128,4 +138,71 @@ pub fn backups_open_folder(app: AppHandle) -> Result<(), String> {
     let dir = thunderlook_safety::backups_dir(&data_dir(&app)?);
     std::fs::create_dir_all(&dir).map_err(|e| format!("{} : {e}", dir.display()))?;
     app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailBackupRow {
+    pub created: String,
+    pub files: usize,
+    pub size: u64,
+    pub failed: usize,
+}
+
+/// Copie du courrier local. `action` : « status » (dernière copie), « check » (test, lecture seule) ou « restore » (remet les
+/// messages absents de `eml/`). Une seule commande pour les trois : l'écran « Sauvegardes » n'en a pas besoin de plus.
+#[tauri::command(async)]
+pub fn mail_backup(app: AppHandle, action: String) -> Result<MailBackupAnswer, String> {
+    let dir = data_dir(&app)?;
+    let message = match action.as_str() {
+        "status" => String::new(),
+        "check" => mail_check(&dir)?,
+        "restore" => mail_restore(&dir)?,
+        _ => return Err("action inconnue".into()),
+    };
+    let status = thunderlook_safety::mail_status(&dir).map(|s| MailBackupRow { created: s.created, files: s.files, size: s.bytes, failed: s.failed });
+    Ok(MailBackupAnswer { status, message })
+}
+
+#[derive(Serialize)]
+pub struct MailBackupAnswer {
+    pub status: Option<MailBackupRow>,
+    pub message: String,
+}
+
+/// Chaque message de `eml/` comparé octet pour octet à sa copie, plus contrôle d'intégrité de la dernière copie de la base.
+fn mail_check(dir: &std::path::Path) -> Result<String, String> {
+    let dir = dir.to_path_buf();
+    let c = std::thread::spawn(move || {
+        let mail = thunderlook_safety::verify_mail(&dir);
+        let db = thunderlook_safety::list_db_copies(&dir).first().map(|c| thunderlook_safety::verify_db(&c.path).map(|()| c.date));
+        (mail, db)
+    })
+    .join()
+    .map_err(|_| "le test s'est arrêté brutalement".to_string())?;
+    let (mail, db) = c;
+    let mut msg = if mail.is_ok() {
+        format!("Courrier : {} message(s) identiques à leur copie", mail.checked)
+    } else {
+        format!("Courrier : {} message(s) sans copie, {} différent(s) de leur copie (sur {}) — « Sauvegarder maintenant » recopie", mail.missing.len(), mail.different.len(), mail.checked)
+    };
+    if mail.only_in_copy > 0 {
+        msg.push_str(&format!(" ; {} message(s) supprimé(s) depuis, gardés dans la copie", mail.only_in_copy));
+    }
+    match db {
+        Some(Ok(d)) => msg.push_str(&format!(" · Base du {d} : intègre")),
+        Some(Err(e)) => msg.push_str(&format!(" · Base : {e}")),
+        None => msg.push_str(" · Pas encore de copie de la base"),
+    }
+    Ok(msg)
+}
+
+/// Remet dans `eml/` les messages de la copie qui n'y sont plus. Rien n'est écrasé. Les lignes de la base ne sont pas touchées.
+fn mail_restore(dir: &std::path::Path) -> Result<String, String> {
+    let r = thunderlook_safety::restore_mail(dir)?;
+    let mut msg = format!("Courrier : {} fichier(s) remis, {} déjà présent(s)", r.restored, r.present);
+    if !r.failed.is_empty() {
+        msg.push_str(&format!(" — {} non remis : {}", r.failed.len(), r.failed.iter().take(3).cloned().collect::<Vec<_>>().join(" ; ")));
+    }
+    Ok(msg)
 }

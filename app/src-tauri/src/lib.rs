@@ -1630,6 +1630,7 @@ pub fn run() {
             safety_cmds::backup_now,
             safety_cmds::backup_restore,
             safety_cmds::backups_open_folder,
+            safety_cmds::mail_backup,
             folders_cmds::item_folders,
             folders_cmds::item_folder_create,
             folders_cmds::item_folder_rename,
