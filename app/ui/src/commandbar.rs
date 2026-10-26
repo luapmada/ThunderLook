@@ -787,6 +787,7 @@ pub fn CommandBar() -> impl IntoView {
                     class="tab file"
                     entries=Signal::derive(move || vec![
                         MenuEntry::action("Sauvegardes…", move || ui.backups.set(true)),
+                        MenuEntry::action("Signatures…", move || ui.signatures_open.set(true)),
                         MenuEntry::action("Échange avec le téléphone…", move || ui.phone_exchange.set(true)),
                     ])
                 />

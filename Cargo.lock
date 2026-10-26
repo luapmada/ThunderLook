@@ -5171,6 +5171,7 @@ dependencies = [
  "mail-builder",
  "mail-parser",
  "md-5",
+ "serde",
  "serde_json",
  "thunderlook-mime",
  "thunderlook-model",

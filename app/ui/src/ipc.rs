@@ -860,3 +860,23 @@ pub async fn from_mail_note(id: &str) -> Result<thunderlook_model::items::NoteFo
 pub async fn from_mail_contact(id: &str) -> Result<thunderlook_model::contacts::ContactForm, String> {
     call("from_mail_contact", &IdArg { id }).await
 }
+
+// --- Signatures propres à ThunderLook (lot BE) ----------------------------------------------------------------------
+
+pub async fn signatures_stored() -> Result<Vec<crate::signatures::Stored>, String> {
+    call("signatures_stored", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct SignaturesArg<'a> {
+    list: &'a [crate::signatures::Stored],
+}
+
+pub async fn signatures_store_save(list: &[crate::signatures::Stored]) -> Result<(), String> {
+    call("signatures_store_save", &SignaturesArg { list }).await
+}
+
+/// Signatures du dossier d'Outlook (lecture seule), à copier dans le stockage de ThunderLook.
+pub async fn signatures_outlook() -> Result<Vec<Signature>, String> {
+    call("signatures_outlook", &NoArgs {}).await
+}

@@ -13,6 +13,7 @@ mod remote;
 mod rule_run;
 mod rules;
 mod search;
+mod signature_store;
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -31,6 +32,7 @@ pub use index::{body_text, index_pending};
 pub use oft::draft_from_oft;
 pub use remote::{file_message, under as imap_under};
 pub use rules::{FolderMatch, FolderResolver};
+pub use signature_store::{StoredSignature, for_compose as signature_for_compose, load as signatures_load, menu_list as signatures_menu, pick as signature_pick, save as signatures_save};
 pub use message::{AttachmentData, BLOCKED_EXTENSIONS, is_blocked, unique_names};
 
 pub type Result<T> = std::result::Result<T, String>;
