@@ -370,3 +370,12 @@ Testé sous Linux (`cargo test -p thunderlook-contacts -p thunderlook-exchange`)
 - **Propriétés MAPI utilisées** (identifiants de [MS-OXPROPS], non vus dans une vraie fiche Outlook ici) : 0x3A45 titre, 0x3A44 second prénom, 0x3A05 suffixe, 0x3A4F surnom, 0x3A24/0x3A25 télécopies, 0x3A1B/0x3A2F deuxièmes numéros, 0x3A1E voiture, 0x3A21 récepteur d'appels, 0x3A1F autre, 0x3A63… adresse « autre », 0x3A48 conjoint, `PidLidInstantMessagingAddress`. À comparer à l'écran avec une fiche Outlook remplie.
 - **Région/État des adresses** : toujours pas dans le formulaire, mais une modification ne l'efface plus (avant : effacée à chaque enregistrement).
 - **Autres téléphones d'Outlook** (Assistant, Rappel, Société, RNIS, Principal, Radio, Télex, TTY) : toujours non portés ; ils restent intacts en base à la modification, absents du `.vcf`.
+## À vérifier avec REA/Outlook — autocomplétion des destinataires et Carnet d'adresses (`crates/contacts/src/suggest.rs`, lot BC)
+
+Lecture seule, testé sous Linux sur des bases de test (`cargo test -p thunderlook-contacts suggest`) ; **jamais lancé sur la vraie base, interface non vue à l'écran**.
+
+- **Destinataires du courrier envoyé** : lus dans les `.eml` des 300 derniers messages du dossier de rôle `sent` (la base ne garde que les noms affichés dans `to_line`). Les destinataires plus anciens ne sont proposés que s'ils ont écrit eux-mêmes.
+- **Expéditeurs** : `from_addr` hors dossiers Envoyés, Brouillons, Boîte d'envoi, Éléments supprimés, Courrier indésirable ; seules les adresses SMTP (avec `@`) comptent, les adresses Exchange X.500 sont ignorées.
+- **Contacts** : adresses des Courriers 1 à 3 ; pour une adresse Exchange, l'adresse SMTP du « nom d'origine » (comme la fiche). Listes de distribution : insère tous les membres résolus ; les membres non résolus sont omis sans avertissement.
+- **Performance** : chaque requête relit tous les contacts et ouvre jusqu'à 300 `.eml` (délai de frappe 150 ms) ; sur 2 138 fiches, non mesuré. Pas de cache.
+- **Ordre** : contacts, listes, puis courrier ; début de mot d'abord. Outlook classe autrement (historique « saisie semi-automatique » `.nk2`/cache RoamCache, non lu ici) : [à vérifier] ce qu'il propose pour la même frappe.

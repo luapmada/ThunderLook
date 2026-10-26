@@ -2,6 +2,7 @@
 
 mod accounts;
 mod actions;
+mod address_book;
 mod app;
 mod appointment;
 mod autoreply;

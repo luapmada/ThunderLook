@@ -10,6 +10,7 @@ use wasm_bindgen::{JsCast, closure::Closure};
 
 use crate::{
     actions,
+    address_book::{AddressBook, AddressField, append},
     icons::*,
     ipc,
     menu::{MenuButton, MenuEntry},
@@ -178,9 +179,34 @@ pub fn ComposePane() -> impl IntoView {
             },
         )
     };
-    let (to, set_to) = field(|d| d.to.clone(), |d, v| d.to = v);
-    let (cc, set_cc) = field(|d| d.cc.clone(), |d, v| d.cc = v);
-    let (bcc, set_bcc) = field(|d| d.bcc.clone(), |d, v| d.bcc = v);
+    let (to, _) = field(|d| d.to.clone(), |d, v| d.to = v);
+    let (cc, _) = field(|d| d.cc.clone(), |d, v| d.cc = v);
+    let (bcc, _) = field(|d| d.bcc.clone(), |d, v| d.bcc = v);
+    // Champs de destinataires (autocomplétion) et Carnet d'adresses : écrivent dans le brouillon comme `field`.
+    let set_addr = move |set: fn(&mut Draft, String)| {
+        Callback::new(move |v: String| {
+            ui.compose.update(|d| {
+                if let Some(d) = d {
+                    set(d, v);
+                }
+            });
+            ui.compose_dirty.set(true);
+        })
+    };
+    let book_open = RwSignal::new(false);
+    let apply_book = Callback::new(move |(t, c, b): (Vec<String>, Vec<String>, Vec<String>)| {
+        ui.compose.update(|d| {
+            if let Some(d) = d {
+                d.to = append(&d.to, &t);
+                d.cc = append(&d.cc, &c);
+                d.bcc = append(&d.bcc, &b);
+            }
+        });
+        if !b.is_empty() {
+            show_bcc.set(true);
+        }
+        ui.compose_dirty.set(true);
+    });
     let (subject, set_subject) = field(|d| d.subject.clone(), |d, v| d.subject = v);
     // Champ « De » : comptes de messagerie. Sans compte choisi, le brouillon reste dans son fichier de données et
     // l'envoi passe par le compte par défaut (premier compte), comme avant le champ.
@@ -302,22 +328,22 @@ pub fn ComposePane() -> impl IntoView {
                         </select>
                     </label>
                 </Show>
-                <label class="compose-field">
-                    <span>"À"</span>
-                    <input id="compose-to" type="text" autocomplete="off" prop:value=to on:input=set_to />
-                </label>
-                <label class="compose-field">
-                    <span>"Cc"</span>
-                    <input type="text" autocomplete="off" prop:value=cc on:input=set_cc />
+                <div class="compose-field">
+                    <button class="link-btn" type="button" title="Ouvrir le Carnet d'adresses" on:click=move |_| book_open.set(true)>"À…"</button>
+                    <AddressField id="compose-to" label="À" value=Signal::derive(to) on_set=set_addr(|d, v| d.to = v) />
+                </div>
+                <div class="compose-field">
+                    <button class="link-btn" type="button" title="Ouvrir le Carnet d'adresses" on:click=move |_| book_open.set(true)>"Cc…"</button>
+                    <AddressField label="Cc" value=Signal::derive(cc) on_set=set_addr(|d, v| d.cc = v) />
                     <button class="link-btn" type="button" title="Afficher la ligne Cci" hidden=move || show_bcc.get() on:click=move |_| show_bcc.set(true)>
                         "Cci"
                     </button>
-                </label>
+                </div>
                 <Show when=move || show_bcc.get()>
-                    <label class="compose-field">
-                        <span>"Cci"</span>
-                        <input type="text" autocomplete="off" prop:value=bcc on:input=set_bcc />
-                    </label>
+                    <div class="compose-field">
+                        <button class="link-btn" type="button" title="Ouvrir le Carnet d'adresses" on:click=move |_| book_open.set(true)>"Cci…"</button>
+                        <AddressField label="Cci" value=Signal::derive(bcc) on_set=set_addr(|d, v| d.bcc = v) />
+                    </div>
                 </Show>
                 <label class="compose-field">
                     <span>"Objet"</span>
@@ -359,6 +385,7 @@ pub fn ComposePane() -> impl IntoView {
                     </div>
                 </Show>
             </div>
+            <AddressBook open=book_open on_apply=apply_book />
             <iframe
                 class="compose-body"
                 title="Corps du message"
