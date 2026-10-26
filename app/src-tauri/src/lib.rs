@@ -6,6 +6,7 @@
 mod address_cmds;
 mod attach_cmds;
 mod autoconfig_cmds;
+mod auto_sync_cmds;
 mod calendar_cmds;
 mod contacts_cmds;
 mod dedupe_cmds;
@@ -1523,6 +1524,7 @@ pub fn run() {
             start_scheduler(app.handle());
             reminders_cmds::start(app.handle());
             exchange_cmds::start(app.handle());
+            auto_sync_cmds::start(app.handle());
             safety_cmds::start(app.handle());
             Ok(())
         })
@@ -1610,6 +1612,11 @@ pub fn run() {
             exchange_cmds::phone_exchange_undo,
             exchange_cmds::phone_exchange_check_detail,
             exchange_cmds::phone_exchange_apply_detail,
+            auto_sync_cmds::auto_sync_state,
+            auto_sync_cmds::auto_sync_set,
+            auto_sync_cmds::auto_sync_journal,
+            auto_sync_cmds::auto_sync_run_now,
+            auto_sync_cmds::auto_sync_undo,
             mpe_import_cmds::mpe_import_devices,
             mpe_import_cmds::mpe_import_pick,
             mpe_import_cmds::mpe_import_check,

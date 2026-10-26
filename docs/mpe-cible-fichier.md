@@ -72,4 +72,12 @@ Après réglage dans MPE (F2 › Sync, cible « fichier » pour contacts, calend
 - Nouvelle section `[WebDAV]` : `vCardUrl=file://A:/…/contacts.vcf`, `vCardVersion=2`, `IcsURL_1=file://A:/…/calendrier.ics`, `Title_1`, `ReadOnly_1=0`, `vNoteUrl=file://A:/…/notes.vnt`.
 - `ContactSyncMode`, `EventSyncMode`, `NoteSyncMode` = 0 (bidirectionnel) ; les confirmations (`*Confirmation=1`) restent actives.
 - Sauvegarde avant réglage : `A:\AI_related\Claude_Code_Work\mpe-backup\2026-10-25\settings_S20.dat` (retour arrière : MPE fermé, remettre ce fichier).
-- Format écrit par MPE dans les trois fichiers : à relever après la première synchro (§ 5).
+- Format écrit par MPE dans les trois fichiers : voir § 10 (relevé statistique du 2026-10-26, S23).
+
+## 10. Format réellement écrit par MPE 2.3.0 (relevé statistique sur le S23, 2026-10-26, aucun contenu lu)
+Dossier `A:\AI_related\Claude_Code_Work\mpe-s23\`, écrit toutes les heures. **Remplace les « [non trouvé] » du § 5.**
+- `contacts.vcf` : **vCard 2.1**, 2 140 fiches. Chaque fiche : `UID` (**GUID aléatoire de MPE, pas un identifiant Outlook**), `REV`, `X-ACCOUNT:vnd.sec.contact.phone`, `N` et `FN` (parfois `;CHARSET=UTF-8`), `CATEGORIES`, `EMAIL;OTHER` (majoritaire) ou `EMAIL;HOME/WORK`, `TEL;CELL/HOME/WORK/MAIN/FAX;WORK` ou `TEL` sans type, `ADR;WORK` ou `HOME` (parfois `ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8`), `ORG`, `TITLE`, `NOTE` (QP et/ou `CHARSET=UTF-8`), `URL`, `BDAY`, `X-ANNIVERSARY`, `PHOTO;ENCODING=BASE64;TYPE=JPEG`.
+- `calendrier.ics` : **iCalendar 2.0**, `PRODID:-//FJ Software//MyPhoneExplorer 2.3.0//EN`, 372 `VEVENT` dont 61 avec `RRULE`, des `EXDATE`, `DTSTART;VALUE=DATE` pour les journées entières, `DTSTART;TZID=Romance` pour les autres (fuseau Windows « Romance Standard Time » tronqué).
+- `notes.vnt` : format non relevé.
+- Pas de `manifest.json`, pas de `taches.ics`. Le dossier est relu par la synchronisation automatique de ThunderLook (`docs/mpe-fichiers.md` § 0, `crates/exchange/tests/mpe_auto.rs`).
+- Pris en charge par ThunderLook : tout ce qui précède (testé sur des fichiers reconstitués d'après ce relevé). `TZID=Romance` était **refusé** pour les séries avant le lot BK (corrigé : reconnu comme Paris).

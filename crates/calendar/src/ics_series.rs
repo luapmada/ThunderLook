@@ -29,7 +29,7 @@ const TZ: TimeZone = TimeZone::PARIS;
 const NEVER_END: u32 = 0x5AE9_80DF;
 const DAYS: [&str; 7] = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 /// Fuseaux qui ont, pour ThunderLook, les règles de l'heure de Paris.
-const PARIS_ZONES: [&str; 14] = [
+const PARIS_ZONES: [&str; 16] = [
     "europe/paris",
     "europe/brussels",
     "europe/madrid",
@@ -40,10 +40,13 @@ const PARIS_ZONES: [&str; 14] = [
     "europe/zurich",
     "europe/vienna",
     "romance standard time",
+    // MyPhoneExplorer écrit « Romance » tout court (nom Windows tronqué).
+    "romance",
     "w. europe standard time",
     "central europe standard time",
     "central european standard time",
     "cet",
+    "cest",
 ];
 
 /// Une série lue du fichier.
@@ -790,6 +793,15 @@ mod tests {
         assert_eq!(hours, ["03-23 10:00", "03-30 10:00", "04-06 10:00"]);
         // En UTC : 09:00Z puis 08:00Z (le 29/03/2026 est le changement d'heure).
         assert_eq!(occ.iter().map(|o| chrono::DateTime::from_timestamp_millis(o.start_ms).unwrap().format("%H:%M").to_string()).collect::<Vec<_>>(), ["09:00", "08:00", "08:00"]);
+    }
+
+    #[test]
+    fn mpe_truncated_windows_zone_name_is_paris() {
+        // MyPhoneExplorer 2.3.0 écrit `TZID=Romance` (sans « Standard Time »).
+        let s = series(&ev("DTSTART;TZID=Romance:20260323T100000\r\nDTEND;TZID=Romance:20260323T110000\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\nEXDATE;TZID=Romance:20260330T100000\r\n"));
+        let occ = expand::occurrences(&s.appointment, 0, 4_102_444_800_000);
+        assert_eq!(occ.len(), 2);
+        assert_eq!(local_of(s.appointment.start_ms).to_string(), "2026-03-23 10:00:00");
     }
 
     #[test]

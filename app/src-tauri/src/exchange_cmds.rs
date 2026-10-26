@@ -12,7 +12,7 @@ use thunderlook_exchange::{ChangeKind, ItemKind};
 use crate::{CalendarCache, clear_calendar, data_dir, settings_path};
 
 /// Un seul export, relecture ou application à la fois (l'export automatique tourne dans son propre fil).
-static BUSY: Mutex<()> = Mutex::new(());
+pub(crate) static BUSY: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -126,6 +126,10 @@ pub fn phone_exchange_set_auto(app: AppHandle, minutes: u32) -> Result<ExchangeS
 pub fn phone_exchange_export(app: AppHandle, force: bool) -> Result<String, String> {
     let out = exchange_dir(&app)?;
     let _guard = lock()?;
+    let foreign = thunderlook_exchange::foreign_files(&out);
+    if !foreign.is_empty() {
+        return Err(format!("Ce dossier est écrit par MPE ({}) : un export de ThunderLook les écraserait. ThunderLook les relit tout seul (synchronisation automatique) et n'y écrit rien.", foreign.join(", ")));
+    }
     let touched = thunderlook_exchange::modified_files(&out);
     if !touched.is_empty() && !force {
         return Err(format!("MODIFIED:{}", touched.join(", ")));
@@ -157,11 +161,13 @@ pub fn phone_exchange_apply(app: AppHandle, keys: Vec<String>) -> Result<String,
     let dir = data_dir(&app)?;
     let mut conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
     let rep = thunderlook_exchange::import_changes(&conn, &dir, &inp)?;
-    let chosen: Vec<_> = rep.changes.into_iter().filter(|c| keys.contains(&c.key)).collect();
+    let chosen: Vec<_> = rep.changes.iter().filter(|c| keys.contains(&c.key)).cloned().collect();
     if chosen.is_empty() {
         return Ok("Rien à appliquer.".into());
     }
     let done = thunderlook_exchange::apply(&mut conn, &dir, &chosen)?;
+    // Dossier écrit par MPE : ce qui est réglé ici ne sera pas reproposé par la relecture automatique.
+    thunderlook_exchange::settle(&conn, &dir, &rep, &done.done)?;
     notify_changed(&app);
     let mut msg = format!("{} changement(s) appliqué(s)", done.applied);
     if !done.errors.is_empty() {
@@ -400,8 +406,8 @@ pub fn phone_exchange_apply_detail(app: AppHandle, keys: Vec<String>, choices: V
     let mut conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
     let rep = thunderlook_exchange::import_changes(&conn, &dir, &inp)?;
     let proposed = rep.changes.len() + rep.conflicts.len();
-    let mut chosen: Vec<_> = rep.changes.into_iter().filter(|c| keys.contains(&c.key)).collect();
-    for mut c in rep.conflicts {
+    let mut chosen: Vec<_> = rep.changes.iter().filter(|c| keys.contains(&c.key)).cloned().collect();
+    for mut c in rep.conflicts.iter().cloned() {
         c.resolution = match choices.iter().find(|x| x.key == c.key).map(|x| x.choice.as_str()) {
             Some("thunderlook") => Some(Resolution::KeepThunderlook),
             Some("phone") => Some(Resolution::KeepPhone),
@@ -411,11 +417,12 @@ pub fn phone_exchange_apply_detail(app: AppHandle, keys: Vec<String>, choices: V
             chosen.push(c);
         }
     }
-    let mut sum = ApplySummary { ignored: proposed - chosen.len(), warnings: rep.warnings, ..Default::default() };
+    let mut sum = ApplySummary { ignored: proposed - chosen.len(), warnings: rep.warnings.clone(), ..Default::default() };
     if chosen.is_empty() {
         return Ok(sum);
     }
     let done = thunderlook_exchange::apply(&mut conn, &dir, &chosen)?;
+    thunderlook_exchange::settle(&conn, &dir, &rep, &done.done)?;
     notify_changed(&app);
     sum.kept = done.kept;
     for c in chosen.iter().filter(|c| c.resolution != Some(Resolution::KeepThunderlook)) {
@@ -454,7 +461,9 @@ pub fn start(app: &AppHandle) {
                 let out = PathBuf::from(&s.dir);
                 if let Ok(_guard) = lock() {
                     let touched = thunderlook_exchange::modified_files(&out);
-                    if touched.is_empty() {
+                    if !thunderlook_exchange::foreign_files(&out).is_empty() {
+                        log::warn!("échange téléphone : export automatique ignoré, dossier écrit par MPE (relu seulement)");
+                    } else if touched.is_empty() {
                         let result = data_dir(&app).and_then(|dir| {
                             let conn = thunderlook_store::open(&dir).map_err(|e| e.to_string())?;
                             thunderlook_exchange::export_all(&conn, &dir, &out)

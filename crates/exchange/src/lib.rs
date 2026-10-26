@@ -10,9 +10,11 @@
 //!
 //! Rien n'est supprimé sans accord : une suppression est une simple proposition ([`Change::default_selected`] est faux).
 
+pub mod auto;
 mod conflict;
 mod import;
 pub mod mpe_files;
+mod phone;
 mod sha256;
 pub mod vcal10;
 
@@ -28,6 +30,7 @@ use thunderlook_store::rusqlite::Connection;
 
 pub use conflict::{Origin, Resolution};
 pub use import::{ApplyReport, apply, import_changes, import_changes_with, last_undo, undo};
+pub use phone::{files_signature, foreign_files, last_signature, set_signature, settle};
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -194,6 +197,21 @@ impl Default for ImportOptions {
     }
 }
 
+/// Un élément du fichier tel que la relecture l'a vu, en mode « fichiers seuls » (dossier sans `manifest.json`, écrit par MPE).
+/// De quoi tenir la base de comparaison à jour une fois les changements appliqués (voir [`settle`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Seen {
+    pub item: ItemKind,
+    /// Identifiant écrit dans le fichier (`UID`).
+    pub uid: String,
+    /// Identifiant local de l'élément retrouvé dans la base ; `None` pour un nouvel élément.
+    pub local: Option<String>,
+    /// Empreinte de la valeur lue dans le fichier.
+    pub fp: String,
+    /// Clé du changement (ou conflit) proposé pour cet élément ; `None` : rien à proposer.
+    pub key: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ImportReport {
     pub changes: Vec<Change>,
@@ -203,6 +221,12 @@ pub struct ImportReport {
     /// Éléments du fichier identiques à ceux de la base.
     pub unchanged: usize,
     pub warnings: Vec<String>,
+    /// Éléments lus, en mode « fichiers seuls » uniquement (jamais sérialisé : sert à [`settle`]).
+    #[serde(default, skip_serializing)]
+    pub seen: Vec<Seen>,
+    /// Natures dont le fichier a été relu, en mode « fichiers seuls » (un fichier absent ne fait rien oublier).
+    #[serde(default, skip_serializing)]
+    pub read: Vec<ItemKind>,
 }
 
 // --- Export ---------------------------------------------------------------------------------------------------------
