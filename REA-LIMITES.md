@@ -261,6 +261,14 @@ recopié. La terminée garde sa périodicité et reçoit `DeadOccurrence` = vrai
 Paris. Si la source n'a pas ces noms dans sa table, le rappel n'est pas écrit (silencieusement, comme les autres champs).
 `PidLidReminderSignalTime` (0x8560) non écrit : Outlook pourrait ne pas déclencher le rappel sans lui. À vérifier à l'écran.
 
+**% d'avancement et statuts (lot AY, 26/10)** — `PidLidPercentComplete` (0x8102, `PtypFloating64` 0.0..1.0) lu et écrit ;
+`PidLidTaskStatus` 0..4. [MS-OXOTASK] non relu (site Microsoft inaccessible depuis le cloud).
+- **Choix de ThunderLook, comportement d'Outlook NON vérifié** (`model::items::task_progress`) : terminée ⇔ 100 % ; 100 %
+  saisi → terminée ; « pas commencée » avec un % > 0 → « en cours » ; repasser en « pas commencée » ou rouvrir une terminée → 0 %.
+  À vérifier dans la boîte Tâche d'Outlook (mêmes bascules ?).
+- Une tâche importée « en cours » à 100 % (incohérente) est affichée terminée à la prochaine relecture/enregistrement.
+- VTODO : `PERCENT-COMPLETE` exporté tel quel ; `STATUS:NEEDS-ACTION` + % > 0 relu « en cours ».
+
 **Couleur de note** : `PidLidNoteColor` 0x8B00 / PSETID_Note `0006200E-…` confirmé par la doc (PT_LONG, 0 bleu, 1 vert, 2 rose,
 3 jaune, 4 blanc). Pas de base réelle en cloud : je n'ai PAS pu vérifier sur les notes importées que la propriété y est. Repli
 explicite : jaune (3) si la source n'a pas la propriété, si la note ne la porte pas, ou si la valeur est hors 0-4

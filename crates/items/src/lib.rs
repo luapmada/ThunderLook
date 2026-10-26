@@ -15,7 +15,7 @@ use thunderlook_calendar::{
     named::{Named, PS_PUBLIC_STRINGS, PSETID_COMMON},
     tz::TimeZone,
 };
-use thunderlook_model::items::{ItemFolder, NoteForm, NoteList, NoteQuery, NoteRow, TaskForm, TaskList, TaskQuery, TaskRow};
+use thunderlook_model::items::{ItemFolder, NoteForm, NoteList, NoteQuery, NoteRow, TaskForm, TaskList, TaskQuery, TaskRow, task_progress};
 use thunderlook_store::rusqlite::{Connection, OptionalExtension, params};
 
 type Result<T> = std::result::Result<T, String>;
@@ -163,6 +163,13 @@ fn status_of(bag: &Bag, ids: &TaskIds) -> i32 {
     ids.status.and_then(|i| bag.int(i)).unwrap_or(0) as i32
 }
 
+/// `PidLidPercentComplete` (`PtypFloating64`, 0.0..=1.0) → 0..=100, cohérent avec le statut (terminée = 100).
+fn percent_of(bag: &Bag, ids: &TaskIds, status: i32) -> i32 {
+    let raw = ids.percent.and_then(|i| bag.raw(i)).filter(|(ty, v)| *ty == 0x0005 && v.len() == 8);
+    let p = raw.and_then(|(_, v)| v.try_into().ok()).map(f64::from_le_bytes).filter(|p| p.is_finite()).map_or(0, |p| (p * 100.0).round() as i32);
+    if status == 2 { 100 } else { p.clamp(0, 99) }
+}
+
 fn task_row(id: i64, folder: i64, subject: String, importance: i64, bag: &Bag, ids: &TaskIds) -> TaskRow {
     let status = status_of(bag, ids);
     TaskRow {
@@ -176,6 +183,7 @@ fn task_row(id: i64, folder: i64, subject: String, importance: i64, bag: &Bag, i
         folder: format!("f{folder}"),
         start: ids.start.and_then(|i| bag.time_ms(i)).map(day_text).unwrap_or_default(),
         recurring: ids.f_recurring.and_then(|i| bag.bool(i)).unwrap_or(false),
+        percent: percent_of(bag, ids, status),
     }
 }
 
@@ -256,6 +264,7 @@ pub fn task_form(conn: &Connection, data_dir: &Path, id: i64) -> Result<TaskForm
         reminder,
         ..Default::default()
     };
+    form.percent = percent_of(&bag, &ids, form.status);
     let recurring = ids.f_recurring.and_then(|i| bag.bool(i)).unwrap_or(false);
     if let (true, Some(blob)) = (recurring, ids.recur.and_then(|i| bag.binary(i))) {
         // Périodicité illisible : affichée « personnalisée », donc conservée telle quelle à l'enregistrement.
@@ -277,10 +286,10 @@ fn task_props(n: &Named, f: &TaskForm, custom: Option<&[u8]>) -> Result<Vec<(u16
             v.push((id, val));
         }
     };
-    let status = f.status.clamp(0, 4);
+    let (status, percent) = task_progress(f.status, f.percent);
     put(ids.status, Some(Value::Long(status)));
     put(ids.complete, Some(Value::Bool(status == 2)));
-    put(ids.percent, Some(Value::Raw(0x0005, (if status == 2 { 1.0f64 } else { 0.0 }).to_le_bytes().to_vec())));
+    put(ids.percent, Some(Value::Raw(0x0005, (f64::from(percent) / 100.0).to_le_bytes().to_vec())));
     put(ids.start, day_ms(&f.start)?.map(Value::time_ms));
     put(ids.due, day_ms(&f.due)?.map(Value::time_ms));
     put(ids.completed_on, if status == 2 { Some(Value::time_ms(now_ms() / DAY_MS * DAY_MS)) } else { None });
@@ -326,7 +335,7 @@ pub fn task_save(conn: &mut Connection, data_dir: &Path, f: &TaskForm) -> Result
         None => false,
     };
     let id = save_inner(conn, data_dir, f, None)?;
-    if f.status == 2 && !was_done {
+    if task_progress(f.status, f.percent).0 == 2 && !was_done {
         if let Some(n) = id.strip_prefix('t').and_then(|x| x.parse().ok()) {
             spawn_next(conn, data_dir, n)?;
         }
@@ -362,7 +371,7 @@ fn spawn_next(conn: &mut Connection, data_dir: &Path, id: i64) -> Result<Option<
     let Some(next) = next else { return Ok(None) };
     let shift = next - anchor;
     let moved = |s: &str| date(s).map(|d| (d + shift).format("%Y-%m-%d").to_string()).unwrap_or_default();
-    let mut nf = TaskForm { id: None, status: 0, start: moved(&form.start), due: moved(&form.due), ..form.clone() };
+    let mut nf = TaskForm { id: None, status: 0, percent: 0, start: moved(&form.start), due: moved(&form.due), ..form.clone() };
     nf.reminder = form.reminder.as_deref().and_then(|r| chrono::NaiveDateTime::parse_from_str(r, "%Y-%m-%dT%H:%M").ok()).map(|t| (t + shift).format("%Y-%m-%dT%H:%M").to_string());
     let custom = if form.repeat == "custom" {
         Some(blob.to_vec())
@@ -432,7 +441,7 @@ fn save_inner(conn: &mut Connection, data_dir: &Path, f: &TaskForm, custom: Opti
 /// Marque une tâche terminée (ou non).
 pub fn task_complete(conn: &mut Connection, data_dir: &Path, id: i64, done: bool) -> Result<()> {
     let mut f = task_form(conn, data_dir, id)?;
-    f.status = if done { 2 } else { 0 };
+    (f.status, f.percent) = if done { (2, 100) } else { (0, 0) };
     task_save(conn, data_dir, &f).map(|_| ())
 }
 
@@ -652,6 +661,27 @@ mod tests {
         assert!(task_form(&conn, &dir, n).is_err());
         assert_eq!(thunderlook_safety::undo(&mut conn, &dir).unwrap(), "Annulé : suppression du tâche « Appeler le client »");
         assert_eq!(task_form(&conn, &dir, n).unwrap(), before);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn percent_and_status_round_trip() {
+        let (mut conn, dir) = db("percent", &TASK_LIDS);
+        let id = task_save(&mut conn, &dir, &TaskForm { status: 0, percent: 40, ..form("Rapport") }).unwrap();
+        let n: i64 = id[1..].parse().unwrap();
+        let back = task_form(&conn, &dir, n).unwrap();
+        assert_eq!((back.status, back.percent), (1, 40));
+        assert_eq!(tasks(&conn).unwrap().rows[0].percent, 40);
+        for status in [3, 4] {
+            task_save(&mut conn, &dir, &TaskForm { status, percent: 70, ..back.clone() }).unwrap();
+            assert_eq!(task_form(&conn, &dir, n).map(|f| (f.status, f.percent)).unwrap(), (status, 70));
+        }
+        task_save(&mut conn, &dir, &TaskForm { percent: 100, ..back.clone() }).unwrap();
+        let done = task_form(&conn, &dir, n).unwrap();
+        assert_eq!((done.status, done.percent), (2, 100));
+        assert!(tasks(&conn).unwrap().rows[0].complete);
+        task_complete(&mut conn, &dir, n, false).unwrap();
+        assert_eq!(task_form(&conn, &dir, n).map(|f| (f.status, f.percent)).unwrap(), (0, 0));
         let _ = std::fs::remove_dir_all(dir);
     }
 
