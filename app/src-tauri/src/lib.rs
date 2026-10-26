@@ -5,6 +5,7 @@
 
 mod address_cmds;
 mod attach_cmds;
+mod autoconfig_cmds;
 mod calendar_cmds;
 mod contacts_cmds;
 mod dedupe_cmds;
@@ -1547,6 +1548,7 @@ pub fn run() {
             rules,
             accounts,
             add_account,
+            autoconfig_cmds::detect_account,
             remove_account,
             set_account_rules,
             copy_rules,
