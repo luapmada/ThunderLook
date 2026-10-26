@@ -3,6 +3,7 @@
 mod accounts;
 mod actions;
 mod app;
+mod attach_preview;
 mod appointment;
 mod autoreply;
 mod calendar;
