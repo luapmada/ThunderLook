@@ -3,6 +3,7 @@
 //! Dossier de données, par ordre de priorité : variable d'environnement `THUNDERLOOK_DATA`,
 //! `dataDir` dans `config.json` (dossier de configuration de l'application), sinon `<données locales>\data`.
 
+mod autoconfig_cmds;
 mod calendar_cmds;
 mod contacts_cmds;
 mod dedupe_cmds;
@@ -1543,6 +1544,7 @@ pub fn run() {
             rules,
             accounts,
             add_account,
+            autoconfig_cmds::detect_account,
             remove_account,
             set_account_rules,
             copy_rules,

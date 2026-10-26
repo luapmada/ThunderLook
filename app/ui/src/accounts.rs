@@ -3,6 +3,7 @@
 //! d'identifiants de Windows ; il n'est jamais gardé par l'interface.
 
 use leptos::{html, prelude::*, task::spawn_local};
+use serde::{Deserialize, Serialize};
 use thunderlook_model::AccountSummary;
 use wasm_bindgen::JsCast;
 
@@ -10,6 +11,33 @@ use crate::{
     actions, ipc,
     state::{Dialog, use_ui},
 };
+
+/// Serveur proposé par la configuration automatique (copie de `thunderlook_sync::Server`, absent du côté WebAssembly).
+#[derive(Deserialize)]
+struct DetectedServer {
+    host: String,
+    port: u16,
+    security: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DetectedEndpoints {
+    imap: DetectedServer,
+    smtp: DetectedServer,
+    username: String,
+}
+
+#[derive(Deserialize)]
+struct Detected {
+    endpoints: DetectedEndpoints,
+    source: String,
+}
+
+#[derive(Serialize)]
+struct DetectArg<'a> {
+    address: &'a str,
+}
 
 #[component]
 pub fn AccountsDialog() -> impl IntoView {
@@ -75,6 +103,52 @@ pub fn AccountsDialog() -> impl IntoView {
         note.set(None);
         adding.set(true);
         focus_first();
+    };
+
+    // « Détecter les serveurs » : remplit les champs avec ce que propose la configuration automatique ; rien n'est
+    // enregistré, la vérification de la connexion se fait toujours à « Enregistrer ».
+    let detect = move || {
+        if busy.get_untracked() {
+            return;
+        }
+        let a = address.get_untracked();
+        if !a.contains('@') {
+            note.set(Some("Indiquez d'abord l'adresse de messagerie.".into()));
+            return;
+        }
+        busy.set(true);
+        note.set(Some("Recherche des serveurs…".into()));
+        spawn_local(async move {
+            let found = ipc::call::<_, Detected>("detect_account", &DetectArg { address: a.trim() }).await;
+            // L'adresse a changé pendant la recherche : le résultat ne la concerne plus.
+            if address.get_untracked() != a {
+                busy.set(false);
+                note.set(None);
+                return;
+            }
+            match found {
+                Ok(d) => {
+                    let (i, s) = (d.endpoints.imap, d.endpoints.smtp);
+                    imap.set(i.host);
+                    imap_port.set(i.port.to_string());
+                    imap_sec.set(i.security);
+                    smtp.set(s.host);
+                    smtp_port.set(s.port.to_string());
+                    smtp_sec.set(s.security);
+                    let login = d.endpoints.username;
+                    note.set(Some(if login.eq_ignore_ascii_case(a.trim()) {
+                        format!("Serveurs proposés ({}). Vérifiez-les, puis Enregistrer.", d.source)
+                    } else {
+                        format!(
+                            "Serveurs proposés ({}), mais ce fournisseur attend l'identifiant « {login} » : ThunderLook utilise l'adresse complète, la connexion risque d'être refusée.",
+                            d.source
+                        )
+                    }));
+                }
+                Err(e) => note.set(Some(e)),
+            }
+            busy.set(false);
+        });
     };
 
     let save = move || {
@@ -239,6 +313,9 @@ pub fn AccountsDialog() -> impl IntoView {
                     {move || if adding.get() {
                         view! {
                             {field("Adresse", "email", address, "username")}
+                            <div class="rules-toolbar">
+                                <button class="btn" disabled=move || busy.get() on:click=move |_| detect()>"Détecter les serveurs"</button>
+                            </div>
                             {field("Nom", "text", name, "name")}
                             {field("Mot de passe", "password", password, "current-password")}
                             {field("Serveur IMAP", "text", imap, "off")}
