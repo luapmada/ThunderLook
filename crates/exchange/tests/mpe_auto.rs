@@ -124,7 +124,8 @@ fn premiere_lecture_du_format_mpe_sans_manifeste_et_sans_rien_ecrire_dans_le_dos
     assert!(rep.files_only, "{rep:?}");
     assert_eq!(rep.created, 2 + 4 + 1, "{rep:?}");
     assert_eq!(rep.aside.total(), 0, "{rep:?}");
-    assert!(rep.losses >= 2, "FAX et téléphone sans type : informatifs, pas mis de côté ({rep:?})");
+    // Le FAX est conservé depuis le lot BB (fidélité des contacts) : il ne reste que le téléphone sans type.
+    assert!(rep.losses >= 1, "téléphone sans type : informatif, pas mis de côté ({rep:?})");
     assert_eq!(rep.exported, None, "jamais d'export dans un dossier écrit par MPE");
 
     // Le dossier de MPE n'a pas bougé d'un octet : ni manifeste, ni export.
