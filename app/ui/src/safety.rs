@@ -2,7 +2,7 @@
 //! « Sauvegardes » (menu Fichier). Le travail est dans `thunderlook-safety` ; ici, les appels et l'affichage.
 
 use leptos::{html, prelude::*, task::spawn_local};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thunderlook_model::format::size;
 use wasm_bindgen::JsCast;
 
@@ -21,6 +21,28 @@ pub struct BackupRow {
     pub created: String,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+/// Dernière copie du courrier local (`backups/courrier`).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailBackupRow {
+    pub created: String,
+    pub files: usize,
+    pub size: u64,
+    pub failed: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct MailBackupAnswer {
+    pub status: Option<MailBackupRow>,
+    pub message: String,
+}
+
+/// Argument de la commande `mail_backup` : « status », « check » ou « restore ».
+#[derive(Serialize)]
+pub struct MailArg<'a> {
+    pub action: &'a str,
 }
 
 /// Les listes des quatre modules se rechargent.
@@ -52,6 +74,26 @@ pub fn BackupsDialog() -> impl IntoView {
     let selected = RwSignal::new(Option::<String>::None);
     let note = RwSignal::new(String::new());
     let busy = RwSignal::new(false);
+    let mail = RwSignal::new(Option::<MailBackupRow>::None);
+    let mail_note = RwSignal::new(String::new());
+
+    let mail_action = move |action: &'static str| {
+        busy.set(true);
+        mail_note.set(if action == "check" { "Test en cours…".to_string() } else { String::new() });
+        spawn_local(async move {
+            match ipc::mail_backup(action).await {
+                Ok(a) => {
+                    mail.set(a.status);
+                    mail_note.set(a.message);
+                }
+                Err(e) => {
+                    mail_note.set(String::new());
+                    ui.error.set(Some(e));
+                }
+            }
+            busy.set(false);
+        });
+    };
 
     let refresh = move || {
         spawn_local(async move {
@@ -75,6 +117,7 @@ pub fn BackupsDialog() -> impl IntoView {
         }
         note.set(String::new());
         refresh();
+        mail_action("status");
         request_animation_frame(move || {
             if let Some(Ok(el)) = root.get_untracked().and_then(|r| r.query_selector("button").ok().flatten()).map(|el| el.dyn_into::<web_sys::HtmlElement>()) {
                 let _ = el.focus();
@@ -111,6 +154,7 @@ pub fn BackupsDialog() -> impl IntoView {
                 Err(e) => ui.error.set(Some(e)),
             }
             refresh();
+            mail_action("status");
             busy.set(false);
         });
     };
@@ -137,7 +181,7 @@ pub fn BackupsDialog() -> impl IntoView {
                         }
                     }>
                     <h2 id="bk-title">"Sauvegardes"</h2>
-                    <p class="dialog-note">"Une sauvegarde par jour, lancée quand l'ordinateur est au repos (14 gardées), un plein par semaine (8 gardés) : rendez-vous, contacts, tâches et notes, jamais le courrier. Une copie contrôlée de toute la base est aussi faite chaque semaine (2 gardées, dans le sous-dossier « base »). Une suppression ou une modification se défait aussi avec Ctrl+Z pendant 60 jours."</p>
+                    <p class="dialog-note">"Une sauvegarde par jour, lancée quand l'ordinateur est au repos (14 gardées), un plein par semaine (8 gardés) : rendez-vous, contacts, tâches et notes. Une copie contrôlée de toute la base est aussi faite chaque semaine (2 gardées, dans le sous-dossier « base »). Le courrier local (messages du dossier « eml », dont ceux importés d'un PST) est copié chaque jour, uniquement ce qui est nouveau, sans jamais rien retirer de la copie. Une suppression ou une modification se défait aussi avec Ctrl+Z pendant 60 jours."</p>
                     {move || {
                         rows.with(|r| r.iter().find_map(|b| b.error.clone())).map(|e| view! { <p class="dialog-note" role="alert" style="font-weight: 600;">{format!("Dernière sauvegarde en échec : {e}")}</p> })
                     }}
@@ -195,6 +239,21 @@ pub fn BackupsDialog() -> impl IntoView {
                         <button class="btn" prop:disabled=move || busy.get() on:click=move |_| now()>"Sauvegarder maintenant"</button>
                         <button class="btn" on:click=move |_| open_folder()>"Ouvrir le dossier"</button>
                     </div>
+                    <h3>"Courrier local"</h3>
+                    <p class="dialog-note">
+                        {move || {
+                            mail.with(|m| match m {
+                                Some(m) => format!("Dernière copie : {} — {} message(s), {}{}", m.created.replace('T', " "), m.files, size(m.size), if m.failed > 0 { format!(" — {} fichier(s) non copié(s), nouvel essai à la prochaine sauvegarde", m.failed) } else { String::new() }),
+                                None => "Aucune copie du courrier pour l'instant (« Sauvegarder maintenant » la fait).".to_string(),
+                            })
+                        }}
+                    </p>
+                    <div class="dialog-buttons">
+                        <button class="btn" prop:disabled=move || busy.get() on:click=move |_| mail_action("check")>"Tester la copie du courrier"</button>
+                        <button class="btn" prop:disabled=move || busy.get() || mail.with(Option::is_none) on:click=move |_| mail_action("restore")>"Remettre les messages manquants"</button>
+                    </div>
+                    <p class="dialog-note">"« Tester » compare chaque message à sa copie et contrôle la dernière copie de la base ; il ne modifie rien. « Remettre » ne recrée que les fichiers de message absents, sans rien écraser ; les dossiers et en-têtes viennent de la base (copie hebdomadaire dans « base »)."</p>
+                    <p class="dialog-note" aria-live="polite">{move || mail_note.get()}</p>
                     <p class="dialog-note" aria-live="polite">{move || note.get()}</p>
                     <div class="dialog-buttons">
                         <button class="btn" on:click=move |_| close()>"Fermer"</button>

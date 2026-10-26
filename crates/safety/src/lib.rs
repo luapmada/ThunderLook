@@ -10,6 +10,8 @@
 //! Aucune fonction d'ici ne supprime ni ne réécrit une ligne de la base sans en avoir enregistré l'ancien contenu avant.
 
 mod dbcopy;
+mod mailcopy;
+pub use mailcopy::{MailCheck, MailReport, MailRestore, MailStatus, backup_mail, backup_mail_daily, backup_mail_on, mail_dir, mail_status, restore_mail, verify_mail};
 pub use dbcopy::{DbCopy, KEEP_DB, backup_db, backup_db_on, db_dir, last_failure, list_db_copies, record_failure, restore_db, verify_db, wait_idle};
 
 use std::{

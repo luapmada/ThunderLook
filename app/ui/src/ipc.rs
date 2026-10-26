@@ -834,6 +834,8 @@ pub async fn backups_open_folder() -> Result<(), String> {
     call("backups_open_folder", &NoArgs {}).await
 }
 
+pub async fn mail_backup(action: &str) -> Result<crate::safety::MailBackupAnswer, String> { call("mail_backup", &crate::safety::MailArg { action }).await }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FromMailAppointmentArg<'a> {
