@@ -10,6 +10,7 @@
 //!
 //! Rien n'est supprimé sans accord : une suppression est une simple proposition ([`Change::default_selected`] est faux).
 
+pub mod auto;
 mod conflict;
 mod import;
 pub mod mpe_files;

@@ -60,6 +60,7 @@ pub fn StatusBar() -> impl IntoView {
             {move || ui.error.get().map(|e| view! { <span class="status-error" role="alert">{e}</span> })}
             {move || (ui.error.get().is_none()).then(|| ui.status.get()).flatten().map(|m| view! { <span class="status-msg" role="status">{m}</span> })}
             <crate::reminders::StatusCount />
+            <crate::exchange::AutoSyncStatus />
             <div class="end">
                 <button class="cmd" title="Options" on:click=move |_| crate::options::open(ui)>
                     <Svg icon=SETTINGS size=14 />
