@@ -13,6 +13,7 @@ mod dedupe_cmds;
 mod exchange_cmds;
 mod from_mail_cmds;
 mod folders_cmds;
+mod invite_cmds;
 mod items_cmds;
 mod mail_cmds;
 mod mail_reminders_cmds;
@@ -1568,6 +1569,11 @@ pub fn run() {
             save_attachment,
             attach_cmds::attachment_preview,
             attach_cmds::attachment_drag,
+            invite_cmds::invite_read,
+            invite_cmds::invite_respond,
+            invite_cmds::invite_apply_reply,
+            invite_cmds::invite_attendees,
+            invite_cmds::invite_send,
             mail_cmds::save_all_attachments,
             from_mail_cmds::from_mail_appointment,
             from_mail_cmds::from_mail_task,
