@@ -554,6 +554,11 @@ extern "C" {
 struct NoArgs {}
 
 #[derive(serde::Serialize)]
+struct RunArgs {
+    force: bool,
+}
+
+#[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AutoSetArgs {
     enabled: bool,
@@ -578,7 +583,7 @@ pub struct AutoSettings {
 
 impl Default for AutoSettings {
     fn default() -> Self {
-        AutoSettings { enabled: false, minutes: 60, auto_export: true }
+        AutoSettings { enabled: true, minutes: 15, auto_export: true }
     }
 }
 
@@ -616,6 +621,10 @@ pub struct AutoPass {
     pub exported: Option<bool>,
     pub export_note: String,
     pub errors: Vec<String>,
+    /// Dossier écrit par MPE : relu seul, jamais écrit.
+    pub files_only: bool,
+    /// Champs de fiche que ThunderLook ne reprend pas (télécopie…) : informatif.
+    pub losses: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
@@ -624,6 +633,7 @@ pub struct AutoView {
     pub settings: AutoSettings,
     pub last: Option<AutoPass>,
     pub last_read: Option<AutoPass>,
+    pub last_checked: Option<String>,
     pub dir_set: bool,
     pub can_undo: bool,
 }
@@ -652,6 +662,9 @@ fn outcome_text(p: &AutoPass) -> String {
                 Some(true) => s.push_str(", exporté"),
                 Some(false) => s.push_str(&format!(", {}", p.export_note)),
                 None => {}
+            }
+            if p.files_only && p.losses > 0 {
+                s.push_str(&format!(" ({} champ(s) de fiche non repris)", p.losses));
             }
             s
         }
@@ -689,7 +702,11 @@ pub fn AutoSyncStatus() -> impl IntoView {
             let blocked = v.last_read.as_ref().is_some_and(|p| p.outcome.kind == "blocked");
             let text = match &v.last {
                 None => format!("Synchro auto : toutes les {} min", v.settings.minutes),
-                Some(p) => format!("Synchro auto : {} — {}", local_time(&p.at), outcome_text(p)),
+                Some(p) => {
+                    // Fichiers inchangés : le dernier passage date d'avant, mais le dossier a bien été regardé depuis.
+                    let checked = v.last_checked.as_ref().filter(|c| **c != p.at).map(|c| format!(" (vérifié {})", local_time(c))).unwrap_or_default();
+                    format!("Synchro auto : {} — {}{checked}", local_time(&p.at), outcome_text(p))
+                }
             };
             let title = "Relecture automatique du dossier d'échange du téléphone (Fichier › Échange avec le téléphone)";
             view! {
@@ -729,11 +746,13 @@ pub fn AutoSyncZone() -> impl IntoView {
             }
         });
     };
-    let run_now = move || {
+    let confirm_force = RwSignal::new(false);
+    let run_now = move |force: bool| {
         busy.set(true);
+        confirm_force.set(false);
         message.set("Passage demandé : il démarre dans quelques secondes (fichiers instables = reporté).".into());
         spawn_local(async move {
-            if let Err(e) = auto_call::<()>("auto_sync_run_now", &NoArgs {}).await {
+            if let Err(e) = auto_call::<()>("auto_sync_run_now", &RunArgs { force }).await {
                 ui.error.set(Some(e));
             }
             busy.set(false);
@@ -770,7 +789,7 @@ pub fn AutoSyncZone() -> impl IntoView {
     view! {
         <section class="auto-sync" aria-label="Synchronisation automatique">
             <h3>"Synchronisation automatique"</h3>
-            <p class="dialog-note">"Quand la synchronisation du téléphone a écrit dans le dossier, ThunderLook relit les fichiers tout seul (jamais pendant qu'ils s'écrivent). Il applique seulement les créations et modifications venues du téléphone ; suppressions, conflits et séries refusées restent de côté."</p>
+            <p class="dialog-note">"Quand MPE a écrit dans le dossier (contacts.vcf, calendrier.ics, notes.vnt), ThunderLook relit les fichiers tout seul, jamais pendant qu'ils s'écrivent, et n'y écrit rien. Il applique seulement les créations et modifications venues du téléphone ; suppressions, conflits et séries refusées restent de côté. Un rendez-vous créé ou modifié sur le téléphone apparaît à la relecture suivante."</p>
             <label class="check">
                 <input type="checkbox" prop:disabled=move || !st.with(|v| v.dir_set)
                     prop:checked=move || s().enabled
@@ -793,7 +812,7 @@ pub fn AutoSyncZone() -> impl IntoView {
                 <input type="checkbox" prop:disabled=move || !s().enabled
                     prop:checked=move || s().auto_export
                     on:change=move |ev| { let s = s(); save(s.enabled, s.minutes, event_target_checked(&ev)) } />
-                <span>"Exporter après la relecture, seulement si le téléphone n'a rien modifié depuis le dernier export"</span>
+                <span>"Exporter après la relecture, seulement si le téléphone n'a rien modifié depuis le dernier export (sans effet pour un dossier écrit par MPE : il n'est jamais écrit)"</span>
             </label>
             {move || {
                 let v = st.get();
@@ -806,7 +825,19 @@ pub fn AutoSyncZone() -> impl IntoView {
                 let blocked = p.outcome.kind == "blocked";
                 Some(view! {
                     <div class="auto-sync-aside-box" aria-label="Mis de côté">
-                        {blocked.then(|| view! { <p class="exchange-warnings" role="alert">{format!("Seuil de sécurité dépassé : rien n'a été appliqué. {} Vérifiez les fichiers du téléphone, puis « Vérifier les changements » ci-dessus.", p.outcome.detail.clone().unwrap_or_default())}</p> })}
+                        {blocked.then(|| view! {
+                            <p class="exchange-warnings" role="alert">{format!("Seuil de sécurité dépassé : rien n'a été appliqué. {} S'il s'agit de la première lecture des fichiers de MPE, ou d'un changement attendu, appliquez-le en une fois ; sinon vérifiez les fichiers du téléphone, puis « Vérifier les changements » ci-dessus.", p.outcome.detail.clone().unwrap_or_default())}</p>
+                            <div class="dialog-buttons">
+                                {move || if confirm_force.get() {
+                                    view! {
+                                        <button class="btn danger" prop:disabled=move || busy.get() on:click=move |_| run_now(true)>"Oui, appliquer tout (annulable)"</button>
+                                        <button class="btn" on:click=move |_| confirm_force.set(false)>"Non"</button>
+                                    }.into_any()
+                                } else {
+                                    view! { <button class="btn" prop:disabled=move || busy.get() on:click=move |_| confirm_force.set(true)>"Appliquer malgré le seuil…"</button> }.into_any()
+                                }}
+                            </div>
+                        })}
                         <ul class="auto-sync-counters">
                             <li class:zero=a.deletions == 0>{format!("Suppressions : {}", a.deletions)}</li>
                             <li class:zero=a.conflicts == 0>{format!("Conflits : {}", a.conflicts)}</li>
@@ -818,7 +849,7 @@ pub fn AutoSyncZone() -> impl IntoView {
                 })
             }}
             <div class="dialog-buttons">
-                <button class="btn" prop:disabled=move || busy.get() || !st.with(|v| v.dir_set) on:click=move |_| run_now()>"Relire maintenant"</button>
+                <button class="btn" prop:disabled=move || busy.get() || !st.with(|v| v.dir_set) on:click=move |_| run_now(false)>"Relire maintenant"</button>
                 <button class="btn" prop:disabled=move || busy.get() || !st.with(|v| v.can_undo) on:click=move |_| undo()>"Annuler le dernier passage automatique"</button>
             </div>
             <p class="dialog-note" aria-live="polite">{move || message.get()}</p>

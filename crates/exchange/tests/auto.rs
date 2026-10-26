@@ -107,13 +107,13 @@ fn fichier_ecrit_il_y_a_un_instant_est_attendu() {
 }
 
 #[test]
-fn sans_manifeste_rien_n_est_lu() {
-    let mut w = world("auto-sans-manifeste");
+fn dossier_sans_aucun_fichier_rien_n_est_lu() {
+    let mut w = world("auto-dossier-vide");
     fill(&mut w);
     std::fs::create_dir_all(&w.out).unwrap();
-    write(&w, "contacts.vcf", &card("Seul", "01"));
+    write(&w, "notes-perso.txt", "pas un fichier du téléphone");
     let rep = pass(&mut w, &quick());
-    assert!(matches!(rep.outcome, Outcome::Skipped(_)), "{rep:?}");
+    assert!(matches!(rep.outcome, Outcome::Skipped(ref s) if s.contains("aucun fichier")), "{rep:?}");
     assert_eq!(counts(&w)[0], 2);
 }
 
@@ -306,8 +306,9 @@ fn journal_et_etat_conservent_les_passages() {
 }
 
 #[test]
-fn intervalle_borne_de_5_a_120_minutes_defaut_60() {
-    assert_eq!(Settings::default().minutes, 60);
+fn intervalle_borne_de_5_a_120_minutes_defaut_15() {
+    assert_eq!(Settings::default().minutes, 15);
+    assert!(Settings::default().enabled, "la relecture automatique est active dès qu'un dossier est choisi");
     let w = world("auto-reglages");
     for (asked, kept) in [(0, 5), (3, 5), (5, 5), (60, 60), (120, 120), (500, 120)] {
         let st = auto::set_settings(&w.dir, Settings { enabled: true, minutes: asked, auto_export: true }).unwrap();

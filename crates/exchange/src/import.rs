@@ -22,8 +22,8 @@ use thunderlook_contacts::vcard;
 use thunderlook_model::{contacts::ContactForm, items::{NoteForm, TaskForm}};
 use thunderlook_store::rusqlite::Connection;
 
-use crate::conflict::{self, Resolution, Verdict};
-use crate::{Change, ChangeKind, EventData, IdMap, ImportOptions, ImportReport, ItemKind, Manifest, Payload, Result, event_uid, read_manifest, sha256, undo_dir};
+use crate::conflict::{self, Origin, Resolution, Verdict};
+use crate::{Change, ChangeKind, EventData, IdMap, ImportOptions, ImportReport, ItemKind, Manifest, Payload, Result, Seen, event_uid, read_manifest, sha256, undo_dir};
 
 /// Champs jamais comparés ni écrasés : l'identité de l'élément et sa photo.
 const SKIP: [&str; 3] = ["id", "folderId", "photo"];
@@ -121,21 +121,29 @@ impl Matcher {
 /// Ce que `import_changes` sait du fichier en cours.
 struct Ctx<'a> {
     kind: ItemKind,
-    /// Identifiants exportés (manifeste) ; `None` sans manifeste : aucune suppression n'est alors proposée.
-    exported: Option<&'a [String]>,
+    /// Identifiants exportés (manifeste, ou base de comparaison en mode « fichiers seuls ») ; `None` : aucune suppression
+    /// n'est proposée.
+    exported: Option<Vec<String>>,
     /// Identifiant du fichier → identifiant local, tels qu'exportés (manifeste).
     uids: Option<&'a HashMap<String, String>>,
     /// Identifiant local → empreinte de la valeur exportée (manifeste) ; vide pour un ancien manifeste.
     values: Option<&'a HashMap<String, String>>,
     map: HashMap<String, String>,
+    /// Mode « fichiers seuls » (pas de manifeste) : `UID` du fichier → empreinte retenue au dernier règlement (voir `phone`).
+    base: Option<crate::phone::Prints>,
 }
 
 impl Ctx<'_> {
+    /// Empreinte d'une valeur lue, calculée seulement en mode « fichiers seuls ».
+    fn fp<T: Serialize>(&self, v: &T) -> String {
+        if self.base.is_some() { conflict::fingerprint(v) } else { String::new() }
+    }
+
     /// L'élément du fichier a été exporté, ou déjà importé (identifiant retenu), et n'est plus dans la base : supprimé ici
     /// depuis, pas « nouveau ». Le téléphone qui le garde ne le ressuscite pas.
     fn deleted_here(&self, uid: Option<&str>, m: &Matcher) -> bool {
         uid.is_some_and(|u| {
-            let by_manifest = self.uids.and_then(|x| x.get(u)).cloned().or_else(|| self.exported.filter(|e| e.iter().any(|x| x == u)).map(|_| u.to_string()));
+            let by_manifest = self.uids.and_then(|x| x.get(u)).cloned().or_else(|| self.exported.as_deref().filter(|e| e.iter().any(|x| x == u)).map(|_| u.to_string()));
             by_manifest.or_else(|| self.map.get(u).cloned()).is_some_and(|local| !m.ids.contains(&local))
         })
     }
@@ -149,25 +157,68 @@ impl Ctx<'_> {
         Change { key: format!("{}:{k}:{id}", self.kind.name()), kind, item: self.kind, id: id.to_string(), summary, ext_uid: ext_uid.filter(|u| !u.is_empty()).map(str::to_string), payload, conflict: None, resolution: None }
     }
 
+    /// Note l'élément lu (mode « fichiers seuls » seulement) : de quoi régler la base une fois les changements appliqués.
+    fn see(&self, rep: &mut ImportReport, uid: Option<&str>, local: Option<&str>, fp: String, key: Option<String>) {
+        if self.base.is_none() {
+            return;
+        }
+        if let Some(uid) = uid.filter(|u| !u.is_empty()) {
+            rep.seen.push(Seen { item: self.kind, uid: uid.to_string(), local: local.map(str::to_string), fp, key });
+        }
+    }
+
     /// Classe une modification venue du téléphone (le fichier diffère de la base) : modification à appliquer, élément
     /// intact côté téléphone (ThunderLook fait foi, rien à proposer) ou conflit (proposé à part).
     fn propose(&self, rep: &mut ImportReport, id: &str, summary: String, uid: Option<&str>, payload: Payload, canon: &impl Serialize, phone: &impl Serialize) {
-        let exported = self.values.and_then(|v| v.get(id)).map(String::as_str);
-        match conflict::classify(exported, &conflict::fingerprint(phone), &conflict::fingerprint(canon)) {
-            Verdict::Intact => rep.unchanged += 1,
-            Verdict::PhoneEdit => rep.changes.push(self.change(ChangeKind::Modified, id, summary, uid, payload)),
+        let phone_fp = conflict::fingerprint(phone);
+        let here_fp = conflict::fingerprint(canon);
+        let verdict = match &self.base {
+            // Base de ThunderLook : le fichier a encore la valeur lue / l'élément local a encore celle d'après le règlement.
+            Some(base) => match uid.and_then(|u| base.get(u)) {
+                Some(p) if p.phone == phone_fp => Verdict::Intact,
+                Some(p) if p.here == here_fp => Verdict::PhoneEdit,
+                Some(_) => Verdict::Conflict(Origin::Both),
+                None => Verdict::Conflict(Origin::Unknown),
+            },
+            None => conflict::classify(self.values.and_then(|v| v.get(id)).map(String::as_str), &phone_fp, &here_fp),
+        };
+        match verdict {
+            Verdict::Intact => {
+                rep.unchanged += 1;
+                self.see(rep, uid, Some(id), phone_fp, None);
+            }
+            Verdict::PhoneEdit => {
+                let c = self.change(ChangeKind::Modified, id, summary, uid, payload);
+                self.see(rep, uid, Some(id), phone_fp, Some(c.key.clone()));
+                rep.changes.push(c);
+            }
             Verdict::Conflict(origin) => {
                 let mut c = self.change(ChangeKind::Modified, id, summary, uid, payload);
                 c.key = format!("{}:conflict:{id}", self.kind.name());
                 c.conflict = Some(origin);
+                self.see(rep, uid, Some(id), phone_fp, Some(c.key.clone()));
                 rep.conflicts.push(c);
             }
         }
     }
 
+    /// Un nouvel élément du fichier : `Change` à créer, noté pour la base.
+    fn created(&self, rep: &mut ImportReport, id: &str, summary: String, uid: Option<&str>, payload: Payload, fp: String) {
+        let c = self.change(ChangeKind::New, id, summary, uid, payload);
+        self.see(rep, uid, None, fp, Some(c.key.clone()));
+        rep.changes.push(c);
+    }
+
+    /// Une modification du téléphone qui n'a pas à passer par le classement (série, note forcée par le téléphone).
+    fn modified(&self, rep: &mut ImportReport, id: &str, summary: String, uid: Option<&str>, payload: Payload, fp: String) {
+        let c = self.change(ChangeKind::Modified, id, summary, uid, payload);
+        self.see(rep, uid, Some(id), fp, Some(c.key.clone()));
+        rep.changes.push(c);
+    }
+
     /// Suppressions proposées : éléments exportés, toujours dans la base, absents du fichier.
     fn deletions(&self, m: &Matcher, rep: &mut ImportReport) {
-        let Some(exported) = self.exported else { return };
+        let Some(exported) = &self.exported else { return };
         for id in exported {
             if let Some(i) = m.exs.iter().position(|e| &e.id == id).filter(|i| !m.used.contains(i)) {
                 rep.changes.push(self.change(ChangeKind::Deleted, id, m.exs[i].title.clone(), None, Payload::None));
@@ -204,7 +255,17 @@ pub fn import_changes_with(conn: &Connection, data_dir: &Path, in_dir: &Path, op
             rep.unchanged += info.map_or(0, |i| i.count);
             continue;
         }
-        let ctx = Ctx { kind, exported: info.map(|i| i.ids.as_slice()), uids: info.map(|i| &i.uids), values: info.map(|i| &i.values), map: maps.get(kind.name()).cloned().unwrap_or_default() };
+        let map: HashMap<String, String> = maps.get(kind.name()).cloned().unwrap_or_default();
+        // Sans manifeste (dossier écrit par MPE) : la base de comparaison de ThunderLook (`phone`) en tient lieu.
+        let base = manifest.is_none().then(|| crate::phone::prints_of(data_dir, kind));
+        let exported = match (&base, info) {
+            (Some(b), _) => Some(b.keys().filter_map(|uid| map.get(uid).cloned()).collect()),
+            (None, i) => i.map(|i| i.ids.clone()),
+        };
+        let ctx = Ctx { kind, exported, uids: info.map(|i| &i.uids), values: info.map(|i| &i.values), map, base };
+        if ctx.base.is_some() {
+            rep.read.push(kind);
+        }
         let text = text_of(&bytes);
         match kind {
             ItemKind::Contact => contacts(conn, data_dir, &text, &ctx, &mut rep)?,
@@ -270,13 +331,17 @@ fn contacts(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Impo
                 let fields = diff_fields(canon, &phone);
                 if fields.is_empty() {
                     rep.unchanged += 1;
+                    ctx.see(rep, p.uid.as_deref(), Some(&id), ctx.fp(&phone), None);
                 } else {
                     let merged = overlay(existing, &phone, &fields);
                     let summary = format!("{} : {}", m.exs[i].title, fields.join(", "));
                     ctx.propose(rep, &id, summary, p.uid.as_deref(), Payload::Contact(merged), canon, &phone);
                 }
             }
-            None => rep.changes.push(ctx.change(ChangeKind::New, &format!("#{n}"), contact_title(&phone), p.uid.as_deref(), Payload::Contact(phone))),
+            None => {
+                let (fp, title) = (ctx.fp(&phone), contact_title(&phone));
+                ctx.created(rep, &format!("#{n}"), title, p.uid.as_deref(), Payload::Contact(phone), fp);
+            }
         }
     }
     ctx.deletions(&m, rep);
@@ -322,12 +387,16 @@ fn tasks(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut ImportR
                 let fields = diff_fields(canon, &phone);
                 if fields.is_empty() {
                     rep.unchanged += 1;
+                    ctx.see(rep, p.uid.as_deref(), Some(&id), ctx.fp(&phone), None);
                 } else {
                     let summary = format!("{} : {}", m.exs[i].title, fields.join(", "));
                     ctx.propose(rep, &id, summary, p.uid.as_deref(), Payload::Task(overlay(existing, &phone, &fields)), canon, &phone);
                 }
             }
-            None => rep.changes.push(ctx.change(ChangeKind::New, &format!("#{n}"), phone.subject.clone(), p.uid.as_deref(), Payload::Task(phone))),
+            None => {
+                let (fp, subject) = (ctx.fp(&phone), phone.subject.clone());
+                ctx.created(rep, &format!("#{n}"), subject, p.uid.as_deref(), Payload::Task(phone), fp);
+            }
         }
     }
     ctx.deletions(&m, rep);
@@ -370,12 +439,13 @@ fn notes(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, forced: bool, rep
                 let (canon, existing) = &data[&id];
                 if *canon == body {
                     rep.unchanged += 1;
+                    ctx.see(rep, uid.as_deref(), Some(&id), ctx.fp(&body), None);
                 } else {
                     let merged = NoteForm { body: body.clone(), ..existing.clone() };
                     let summary = format!("{} : texte", note_title(&body));
                     if forced {
                         // Le téléphone fait foi : remplacement coché d'office, la couleur existante est gardée (`..existing`).
-                        rep.changes.push(ctx.change(ChangeKind::Modified, &id, summary, uid.as_deref(), Payload::Note(merged)));
+                        ctx.modified(rep, &id, summary, uid.as_deref(), Payload::Note(merged), ctx.fp(&body));
                     } else {
                         ctx.propose(rep, &id, summary, uid.as_deref(), Payload::Note(merged), canon, &body);
                     }
@@ -383,7 +453,7 @@ fn notes(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, forced: bool, rep
             }
             None => {
                 let form = NoteForm { id: None, folder_id: String::new(), body: body.clone(), color: p.form.color };
-                rep.changes.push(ctx.change(ChangeKind::New, &format!("#{n}"), note_title(&body), uid.as_deref(), Payload::Note(form)));
+                ctx.created(rep, &format!("#{n}"), note_title(&body), uid.as_deref(), Payload::Note(form), ctx.fp(&body));
             }
         }
     }
@@ -497,12 +567,16 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
                 let fields = diff_fields(canon, &e);
                 if fields.is_empty() {
                     rep.unchanged += 1;
+                    ctx.see(rep, a.uid.as_deref(), Some(&id), ctx.fp(&e), None);
                 } else {
                     let summary = format!("{} : {}", m.exs[i].title, fields.join(", "));
                     ctx.propose(rep, &id, summary, a.uid.as_deref(), Payload::Event(overlay(existing, &e, &fields)), canon, &e);
                 }
             }
-            None => rep.changes.push(ctx.change(ChangeKind::New, &format!("#{n}"), format!("{} ({})", e.subject, e.start.replace('T', " ")), a.uid.as_deref(), Payload::Event(e))),
+            None => {
+                let (fp, summary) = (ctx.fp(&e), format!("{} ({})", e.subject, e.start.replace('T', " ")));
+                ctx.created(rep, &format!("#{n}"), summary, a.uid.as_deref(), Payload::Event(e), fp);
+            }
         }
     }
     // Séries refusées : jamais importées de travers, toujours signalées (sauf celles que ThunderLook ne sait pas non plus
@@ -539,11 +613,12 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
                 let fields = ics_series::changed(&base, &phone);
                 if fields.is_empty() {
                     rep.unchanged += 1;
+                    ctx.see(rep, uid, Some(&id), ctx.fp(&s.ics), None);
                 } else if let Some(why) = &s.inexact {
                     refuse(rep, why);
                 } else {
                     let summary = format!("{} : série ({})", m.exs[i].title, fields.join(", "));
-                    rep.changes.push(ctx.change(ChangeKind::Modified, &id, summary, uid, Payload::Event(series_event(&phone, s.ics.clone()))));
+                    ctx.modified(rep, &id, summary, uid, Payload::Event(series_event(&phone, s.ics.clone())), ctx.fp(&s.ics));
                 }
             }
             None => match &s.inexact {
@@ -551,13 +626,29 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
                 None => {
                     let e = series_event(&phone, s.ics.clone());
                     let summary = format!("{} ({}, série)", e.subject, e.start.replace('T', " "));
-                    rep.changes.push(ctx.change(ChangeKind::New, &format!("#s{n}"), summary, uid, Payload::Event(e)));
+                    ctx.created(rep, &format!("#s{n}"), summary, uid, Payload::Event(e), ctx.fp(&s.ics));
                 }
             },
         }
     }
     ctx.deletions(&m, rep);
     Ok(())
+}
+
+/// Empreinte (celle de `propose`) de l'élément local `id` tel qu'il est maintenant : la valeur « ici » qu'une base
+/// de comparaison retient après un règlement. `None` : élément introuvable, ou série (comparée autrement).
+pub(crate) fn here_print(conn: &Connection, dir: &Path, item: ItemKind, id: &str) -> Option<String> {
+    let n: i64 = id.get(1..)?.parse().ok()?;
+    Some(match item {
+        ItemKind::Contact => conflict::fingerprint(&canon_contact(&thunderlook_contacts::write::form_of(conn, dir, n).ok()?)),
+        ItemKind::Task => conflict::fingerprint(&canon_task(&thunderlook_items::task_form(conn, dir, n).ok()?)),
+        ItemKind::Note => conflict::fingerprint(&canon_note(&thunderlook_items::note_form(conn, dir, n).ok()?)),
+        ItemKind::Event => {
+            let cal = thunderlook_calendar::load(conn).ok()?;
+            let a = cal.appointments.iter().find(|a| a.id == n).filter(|a| a.recurrence.is_none())?;
+            conflict::fingerprint(&canon_event(a, dir))
+        }
+    })
 }
 
 // --- Application et annulation --------------------------------------------------------------------------------------
@@ -592,6 +683,9 @@ pub struct ApplyReport {
     pub kept: usize,
     /// Horodatage du fichier d'annulation, s'il y a de quoi annuler.
     pub undo: Option<String>,
+    /// Clés des changements réglés (appliqués, ou conflits tranchés en gardant ThunderLook) : à donner à [`crate::settle`].
+    #[serde(default)]
+    pub done: Vec<String>,
 }
 
 fn num(id: &str, prefix: char) -> Result<i64> {
@@ -732,6 +826,7 @@ pub fn apply(conn: &mut Connection, data_dir: &Path, changes: &[Change]) -> Resu
                 }
                 Some(Resolution::KeepThunderlook) => {
                     report.kept += 1;
+                    report.done.push(c.key.clone());
                     continue;
                 }
                 Some(Resolution::KeepPhone) => {}
@@ -766,6 +861,7 @@ pub fn apply(conn: &mut Connection, data_dir: &Path, changes: &[Change]) -> Resu
         match result {
             Ok(local) => {
                 report.applied += 1;
+                report.done.push(c.key.clone());
                 if let (Some(uid), Some(local)) = (&c.ext_uid, local) {
                     map.entry(item).or_default().insert(uid.clone(), local);
                 }
@@ -804,7 +900,10 @@ pub fn undo(conn: &mut Connection, data_dir: &Path, timestamp: &str) -> Result<u
             Ok(()) => done += 1,
             Err(e) => errors.push(e),
         }
-        map.entry(c.item.name().to_string()).or_default().retain(|_, local| *local != c.id);
+        // Dossier écrit par MPE : l'élément annulé est déjà réglé dans la base de comparaison, son identifiant reste
+        // retenu (vers un élément qui n'existe plus) pour que le fichier ne le recrée pas au passage suivant.
+        let settled = crate::phone::prints_of(data_dir, c.item);
+        map.entry(c.item.name().to_string()).or_default().retain(|uid, local| *local != c.id || settled.contains_key(uid));
     }
     for r in &rec.restore {
         let result = if r.deleted {

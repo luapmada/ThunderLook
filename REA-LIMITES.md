@@ -361,3 +361,14 @@ Lu d'après la description de `Organizer.dat` (docs/mpe-fichiers.md § 1.5) et d
 - **Rappel** : seul le premier `AALARM`/`DALARM`/`PALARM`/`MALARM` est lu, en minutes avant le début ; répétition/sonnerie ignorées. Rappel en repère différent du début (UTC/local) ou après le début : non importé, avec avertissement.
 - **Écartés** : `ATTENDEE` (signalé), tâches `VTODO` du calendrier (signalées ; elles se lisent dans `taches.ics`), propriétés `X-*` autres que les identifiants. Identifiant retenu : `UID`, sinon `X-OUTLOOK-UID`, sinon `X-IRMC-LUID`.
 - **Photos de contacts** : le lecteur de vCard 2.1 lit `PHOTO;ENCODING=BASE64` (JPEG) mais l'import d'échange ne reprend jamais les photos (comportement existant, `norm_contact`).
+
+## À vérifier avec MPE / le S23 — relecture automatique d'un dossier écrit par MPE (`crates/exchange/src/phone.rs`, lot BK)
+Testé sur des fichiers **reconstitués d'après le relevé statistique** de MPE 2.3.0 (`docs/mpe-cible-fichier.md` § 10), jamais sur les vrais fichiers.
+- **Première lecture** : bloquée par le seuil (2 140 fiches / 372 rendez-vous) jusqu'à « Appliquer malgré le seuil ». Les contacts déjà dans ThunderLook sont reconnus par nom + société + e-mail seulement : un contact connu de MPE sous un autre nom/e-mail donne un **doublon** ; un contact reconnu mais différent donne un **conflit « inconnu »**. À regarder à l'écran sur le S23 (nombre de conflits, doublons) avant d'accepter.
+- **`UID` de MPE stable ?** Tout repose sur l'`UID` (GUID) identique d'une écriture à l'autre. Si MPE le régénère à chaque synchro, chaque passage verra N éléments « nouveaux » (le seuil bloquera) : à vérifier en comparant deux relevés d'`UID` à une heure d'écart.
+- **Écriture de MPE en plusieurs temps** : les trois fichiers ne s'écrivent pas au même instant ; chacun est traité seul (stabilité 5 s + 10 s d'âge, fichier tronqué ignoré). Une écriture interrompue **après** `END:VCARD` mais incomplète ne se voit pas.
+- **Suppression sur le téléphone** : toujours mise de côté (compteur dans la barre d'état), jamais appliquée seule, et pour l'instant sans bouton « supprimer » dédié : passer par « Vérifier les changements » (cocher la suppression).
+- **Notes** : pas de format relevé ; une note sans identifiant stable modifiée sur le téléphone devient une nouvelle note (l'ancienne reste).
+- **Champs ignorés à la lecture** (FAX, téléphone en trop, `X-ANNIVERSARY`…) : si le téléphone les modifie seuls, ThunderLook ne le voit pas (rien de perdu côté téléphone, ThunderLook n'y écrit pas).
+- **Sens ThunderLook → téléphone** : n'existe pas dans ce mode (aucune écriture dans le dossier de MPE) ; un rendez-vous créé dans ThunderLook ne va pas sur le téléphone par ce dossier.
+

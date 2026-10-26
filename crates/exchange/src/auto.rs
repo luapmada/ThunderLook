@@ -14,6 +14,11 @@
 //! 6. **Export après import** seulement si le téléphone n'avait rien modifié depuis le dernier export (sinon l'export
 //!    écraserait ce qui est mis de côté).
 //!
+//! **Dossier écrit par MPE** (aucun `manifest.json`, `contacts.vcf` / `calendrier.ics` / `notes.vnt` seuls) : mode
+//! « fichiers seuls ». ThunderLook n'y écrit JAMAIS (ni export, ni manifeste) ; il compare chaque élément à la base qu'il
+//! tient lui-même (`phone`, `mpe-baseline.json`) : créé ou modifié sur le téléphone → appliqué ; supprimé → mis de côté.
+//! Tant que les fichiers n'ont pas changé depuis un passage sans reste, le passage suivant ne relit rien.
+//!
 //! Le verrou anti-chevauchement avec le passage manuel est posé par l'appelant (commandes Tauri). Ce module n'écrit
 //! jamais dans Outlook et ne pilote pas MPE : il lit des fichiers et écrit dans la base de ThunderLook.
 
@@ -31,7 +36,8 @@ use crate::{Change, ChangeKind, ItemKind, Result, read_manifest, write_atomic};
 
 pub const MIN_MINUTES: u32 = 5;
 pub const MAX_MINUTES: u32 = 120;
-pub const DEFAULT_MINUTES: u32 = 60;
+/// MPE écrit toutes les heures : relire plus souvent qu'elle ne synchronise, pour ne jamais la suivre de loin.
+pub const DEFAULT_MINUTES: u32 = 15;
 const JOURNAL_MAX: usize = 200;
 
 /// Réglages (`data_dir/auto-sync.json`, clé `settings`).
@@ -47,7 +53,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: false, minutes: DEFAULT_MINUTES, auto_export: true }
+        Settings { enabled: true, minutes: DEFAULT_MINUTES, auto_export: true }
     }
 }
 
@@ -69,11 +75,15 @@ pub struct Params {
     pub threshold_pct: f64,
     pub threshold_max: usize,
     pub threshold_floor: usize,
+    /// « Appliquer malgré le seuil » : le seuil de sécurité n'est pas opposé à ce passage (demandé à la main).
+    pub ignore_threshold: bool,
+    /// « Relire maintenant » : relit même si les fichiers n'ont pas changé depuis le dernier passage sans reste.
+    pub recheck: bool,
 }
 
 impl Default for Params {
     fn default() -> Self {
-        Params { auto_export: true, stable_gap: Duration::from_secs(5), min_age: Duration::from_secs(10), threshold_pct: 5.0, threshold_max: 50, threshold_floor: 3 }
+        Params { auto_export: true, stable_gap: Duration::from_secs(5), min_age: Duration::from_secs(10), threshold_pct: 5.0, threshold_max: 50, threshold_floor: 3, ignore_threshold: false, recheck: false }
     }
 }
 
@@ -108,7 +118,7 @@ pub enum Stability {
     Stable,
     /// Un fichier a changé entre les deux lectures, ou vient d'être écrit : MPE écrit peut-être.
     Unstable(String),
-    /// Pas de manifeste ou fichier du manifeste absent : rien à relire (un passage manuel ou un export d'abord).
+    /// Aucun fichier du téléphone, ou fichier du manifeste absent : rien à relire.
     Missing(String),
 }
 
@@ -123,8 +133,9 @@ pub fn check_stable(dir: &Path, p: &Params) -> Stability {
                 return Stability::Missing(format!("{} absent du dossier d'échange", f.name));
             }
         }
-    } else {
-        return Stability::Missing("manifest.json absent ou illisible".into());
+    } else if !ItemKind::all().iter().any(|k| second.iter().any(|(n, s)| n == k.file() && s.is_some())) {
+        // Dossier écrit par MPE : pas de manifeste, mais au moins un des fichiers du téléphone.
+        return Stability::Missing("aucun fichier du téléphone dans le dossier d'échange".into());
     }
     for ((name, a), (_, b)) in first.iter().zip(&second) {
         if a != b {
@@ -191,13 +202,21 @@ pub struct PassReport {
     pub exported: Option<bool>,
     pub export_note: String,
     pub errors: Vec<String>,
+    /// Dossier écrit par MPE (sans manifeste) : relu seul, jamais écrit.
+    pub files_only: bool,
+    /// Champs d'une fiche que le format de ThunderLook ne reprend pas (télécopie, adresse en trop…) : informatif, ni
+    /// mis de côté ni à traiter.
+    pub losses: usize,
 }
 
 impl Default for PassReport {
     fn default() -> Self {
-        PassReport { at: crate::now_stamp(), outcome: Outcome::Done, created: 0, modified: 0, aside: Aside::default(), undo: None, exported: None, export_note: String::new(), errors: Vec::new() }
+        PassReport { at: crate::now_stamp(), outcome: Outcome::Done, created: 0, modified: 0, aside: Aside::default(), undo: None, exported: None, export_note: String::new(), errors: Vec::new(), files_only: false, losses: 0 }
     }
 }
+
+/// Début du motif d'un passage ignoré parce que rien n'a changé : ni journalisé, ni compté comme dernier passage.
+pub const UNCHANGED: &str = "fichiers inchangés";
 
 fn skipped(why: String) -> PassReport {
     PassReport { outcome: Outcome::Skipped(why), ..Default::default() }
@@ -237,19 +256,59 @@ pub fn run_pass(conn: &mut Connection, data_dir: &Path, dir: &Path, p: &Params) 
     }
 }
 
+/// Fichier complet : sa dernière ligne non vide ferme l'enregistrement. MPE qui s'arrête au milieu d'une écriture laisse un
+/// fichier tronqué, stable mais faux : le lire ferait passer la dernière fiche pour une modification.
+fn incomplete(dir: &Path) -> Option<String> {
+    for kind in ItemKind::all() {
+        let Ok(bytes) = fs::read(dir.join(kind.file())) else { continue };
+        let text = String::from_utf8_lossy(&bytes);
+        let last = text.lines().map(str::trim).rev().find(|l| !l.is_empty());
+        let end = match kind {
+            ItemKind::Contact => "END:VCARD",
+            ItemKind::Note => "END:VNOTE",
+            ItemKind::Task | ItemKind::Event => "END:VCALENDAR",
+        };
+        match last {
+            None => return Some(format!("{} est vide", kind.file())),
+            Some(l) if !l.eq_ignore_ascii_case(end) => return Some(format!("{} semble tronqué (dernière ligne : « {} »)", kind.file(), l.chars().take(40).collect::<String>())),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn pass(conn: &mut Connection, data_dir: &Path, dir: &Path, p: &Params) -> Result<PassReport> {
     match check_stable(dir, p) {
         Stability::Stable => {}
         Stability::Unstable(w) | Stability::Missing(w) => return Ok(skipped(w)),
     }
+    let manifest = read_manifest(dir);
+    // Sans manifeste : dossier écrit par MPE, relu seul (voir l'en-tête du module).
+    let files_only = manifest.is_none();
+    let signature = files_only.then(|| crate::files_signature(dir));
+    if let Some(sig) = &signature {
+        if !p.recheck && crate::last_signature(data_dir).as_ref() == Some(sig) {
+            return Ok(skipped(format!("{UNCHANGED} depuis le dernier passage")));
+        }
+        if let Some(why) = incomplete(dir) {
+            return Ok(skipped(why));
+        }
+    }
     // Décidé AVANT d'appliquer : le téléphone a-t-il touché un fichier depuis le dernier export ?
-    let phone_untouched = crate::modified_files(dir).is_empty();
-    let manifest = read_manifest(dir).unwrap_or_default();
+    let phone_untouched = files_only || crate::modified_files(dir).is_empty();
+    let manifest = manifest.unwrap_or_default();
     let rep = crate::import_changes(conn, data_dir, dir)?;
 
     let mut aside = Aside { deletions: 0, conflicts: rep.conflicts.len(), series: 0, warnings: 0 };
+    let mut losses = 0;
     for w in &rep.warnings {
-        if w.contains("série") { aside.series += 1 } else { aside.warnings += 1 }
+        if w.contains(" : fiche ") {
+            losses += 1;
+        } else if w.contains("série") {
+            aside.series += 1;
+        } else {
+            aside.warnings += 1;
+        }
     }
     // Seuil : tout ce qui changerait (suppressions et conflits compris : un signal de masse reste un signal).
     let mut touched: Vec<(ItemKind, usize)> = Vec::new();
@@ -258,24 +317,29 @@ fn pass(conn: &mut Connection, data_dir: &Path, dir: &Path, p: &Params) -> Resul
         None => touched.push((k, 1)),
     };
     let mut auto: Vec<Change> = Vec::new();
-    for c in rep.changes {
+    for c in &rep.changes {
         count(c.item);
         match c.kind {
             ChangeKind::Deleted => aside.deletions += 1,
             _ if c.conflict.is_some() => aside.conflicts += 1,
-            _ => auto.push(c),
+            _ => auto.push(c.clone()),
         }
     }
     for c in &rep.conflicts {
         count(c.item);
     }
-    let sizes = |k: ItemKind| manifest.file(k.file()).map_or(0, |f| f.ids.len());
-    let over = over_threshold(&touched, sizes, p);
+    let sizes = |k: ItemKind| if files_only { rep.seen.iter().filter(|s| s.item == k).count() } else { manifest.file(k.file()).map_or(0, |f| f.ids.len()) };
+    let over = if p.ignore_threshold { Vec::new() } else { over_threshold(&touched, sizes, p) };
     if !over.is_empty() {
-        return Ok(PassReport { outcome: Outcome::Blocked(over.join(" ; ")), aside, ..Default::default() });
+        if let Some(sig) = &signature {
+            // Même fichier, même verdict : inutile de le redire (et de le journaliser) à chaque passage.
+            let _ = crate::set_signature(data_dir, sig);
+        }
+        return Ok(PassReport { outcome: Outcome::Blocked(over.join(" ; ")), aside, files_only, losses, ..Default::default() });
     }
 
-    let mut report = PassReport { aside, ..Default::default() };
+    let mut report = PassReport { aside, files_only, losses, ..Default::default() };
+    let mut done_keys: Vec<String> = Vec::new();
     if !auto.is_empty() {
         let done = crate::apply(conn, data_dir, &auto)?;
         report.undo = done.undo;
@@ -286,9 +350,15 @@ fn pass(conn: &mut Connection, data_dir: &Path, dir: &Path, p: &Params) -> Resul
             if c.kind == ChangeKind::New { report.created += 1 } else { report.modified += 1 }
         }
         report.errors = done.errors;
+        done_keys = done.done;
+    }
+    if files_only {
+        crate::settle(conn, data_dir, &rep, &done_keys)?;
+        // Rien ne reste à réessayer (échec d'application) : les mêmes fichiers n'ont plus à être relus.
+        let _ = crate::set_signature(data_dir, if report.errors.is_empty() { signature.as_deref().unwrap_or("") } else { "" });
     }
 
-    if p.auto_export {
+    if p.auto_export && !files_only {
         if !phone_untouched {
             report.exported = Some(false);
             report.export_note = "export non fait : le téléphone avait modifié des fichiers depuis le dernier export".into();
@@ -316,6 +386,8 @@ pub struct AutoState {
     /// Dernier passage qui a relu les fichiers (ni ignoré ni en erreur) : les compteurs de côté restent visibles même
     /// quand le passage suivant est ignoré (fichiers instables).
     pub last_read: Option<PassReport>,
+    /// Dernière fois que le dossier a été regardé (même sans rien relire parce que les fichiers n'avaient pas changé).
+    pub last_checked: Option<String>,
 }
 
 fn state_path(data_dir: &Path) -> PathBuf {
@@ -348,11 +420,18 @@ pub fn read_journal(data_dir: &Path) -> Vec<PassReport> {
 
 /// Consigne un passage dans le journal et dans l'état.
 pub fn record(data_dir: &Path, report: &PassReport) -> Result<AutoState> {
+    if matches!(&report.outcome, Outcome::Skipped(w) if w.starts_with(UNCHANGED)) {
+        let mut st = read_state(data_dir);
+        st.last_checked = Some(report.at.clone());
+        write_state(data_dir, &st)?;
+        return Ok(st);
+    }
     let mut journal = read_journal(data_dir);
     journal.insert(0, report.clone());
     journal.truncate(JOURNAL_MAX);
     write_atomic(&journal_path(data_dir), serde_json::to_string_pretty(&journal).map_err(|e| e.to_string())?.as_bytes())?;
     let mut st = read_state(data_dir);
+    st.last_checked = Some(report.at.clone());
     st.last = Some(report.clone());
     if matches!(report.outcome, Outcome::Done | Outcome::Blocked(_)) {
         st.last_read = Some(report.clone());

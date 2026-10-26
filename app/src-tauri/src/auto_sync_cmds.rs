@@ -19,8 +19,9 @@ use crate::{CalendarCache, clear_calendar, data_dir, exchange_cmds::BUSY, settin
 /// Délai avant de réessayer quand le passage n'a rien pu lire (fichiers instables, passage manuel en cours).
 const RETRY: Duration = Duration::from_secs(120);
 
-/// Passage immédiat demandé par l'utilisateur : la tâche de fond le prend au prochain tour.
-static RUN_NOW: Mutex<bool> = Mutex::new(false);
+/// Passage immédiat demandé par l'utilisateur : la tâche de fond le prend au prochain tour. `Some(true)` : « appliquer
+/// malgré le seuil » (le seuil de sécurité n'est pas opposé à ce passage-là).
+static RUN_NOW: Mutex<Option<bool>> = Mutex::new(None);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,10 +74,12 @@ pub fn auto_sync_journal(app: AppHandle) -> Result<Vec<PassReport>, String> {
     Ok(auto::read_journal(&data_dir(&app)?))
 }
 
-/// « Relire maintenant » : prochain tour de la tâche de fond (mêmes garde-fous qu'un passage programmé).
+/// « Relire maintenant » : prochain tour de la tâche de fond, même si les fichiers n'ont pas changé depuis le dernier
+/// passage. Mêmes garde-fous qu'un passage programmé, sauf `force` (« Appliquer malgré le seuil », après le blocage
+/// d'une première lecture ou d'un gros changement que l'utilisateur a vérifié).
 #[tauri::command(async)]
-pub fn auto_sync_run_now() -> Result<(), String> {
-    *RUN_NOW.lock().map_err(|_| "verrou empoisonné".to_string())? = true;
+pub fn auto_sync_run_now(force: Option<bool>) -> Result<(), String> {
+    *RUN_NOW.lock().map_err(|_| "verrou empoisonné".to_string())? = Some(force.unwrap_or(false));
     Ok(())
 }
 
@@ -98,12 +101,12 @@ pub fn auto_sync_undo(app: AppHandle) -> Result<String, String> {
 }
 
 /// Un passage, sous le verrou commun. `None` : le passage manuel tient le verrou, on réessaie plus tard.
-fn run_once(app: &AppHandle, settings: &Settings, exchange: &std::path::Path) -> Option<PassReport> {
+fn run_once(app: &AppHandle, settings: &Settings, exchange: &std::path::Path, requested: Option<bool>) -> Option<PassReport> {
     let _guard = BUSY.try_lock().ok()?;
     let dir = data_dir(app).ok()?;
     let report = match thunderlook_store::open(&dir) {
         Ok(mut conn) => {
-            let p = Params { auto_export: settings.auto_export, ..Params::default() };
+            let p = Params { auto_export: settings.auto_export, recheck: requested.is_some(), ignore_threshold: requested == Some(true), ..Params::default() };
             let (report, saved) = auto::run_and_record(&mut conn, &dir, exchange, &p);
             if let Err(e) = saved {
                 log::warn!("synchronisation automatique : état non enregistré : {e}");
@@ -140,9 +143,9 @@ pub fn start(app: &AppHandle) {
                 due = Instant::now() + interval;
             }
             was_on = on;
-            let now_requested = RUN_NOW.lock().map(|mut f| std::mem::take(&mut *f)).unwrap_or(false);
-            if let (Some(exchange), true) = (&exchange, now_requested || (on && Instant::now() >= due)) {
-                let next = match run_once(&app, &settings, exchange) {
+            let requested = RUN_NOW.lock().map(|mut f| f.take()).unwrap_or(None);
+            if let (Some(exchange), true) = (&exchange, requested.is_some() || (on && Instant::now() >= due)) {
+                let next = match run_once(&app, &settings, exchange, requested) {
                     Some(r) if matches!(r.outcome, Outcome::Skipped(_) | Outcome::Failed(_)) => RETRY.min(interval),
                     Some(_) => interval,
                     None => RETRY.min(interval),
