@@ -7,6 +7,7 @@ pub mod expand;
 pub mod ics;
 pub mod ics_series;
 pub mod imported;
+pub mod itip;
 pub mod named;
 pub mod recur;
 pub mod tz;
