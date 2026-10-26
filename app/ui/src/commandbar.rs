@@ -81,6 +81,7 @@ pub enum Action {
     CalExportCsv,
     ContactNew,
     ContactDelete,
+    ContactMessage,
     /// « Nettoyer les doublons » (Contacts).
     DedupeOpen,
     TaskNew,
@@ -183,11 +184,8 @@ fn perform(ui: Ui, action: Action) {
         Action::NoteDelete => crate::notes::delete_selected(ui),
         Action::Undo => crate::safety::undo(ui),
         Action::Help(anchor) => crate::help::open(ui, anchor),
-        Action::ContactDelete => {
-            if let Some(id) = ui.contact_selected.get_untracked() {
-                crate::contact_form::delete(ui, id);
-            }
-        }
+        Action::ContactDelete => crate::contacts::delete_selected(ui),
+        Action::ContactMessage => crate::contacts::message_selected(ui),
         Action::Print(kind) => crate::print::run(ui, kind),
         Action::CalImport => crate::calendar::import(ui),
         Action::CalExportIcs => crate::calendar::export(ui, false),
@@ -529,7 +527,7 @@ const CONTACTS_HOME: &[Group] = &[
         label: "Téléphone",
         cmds: &[wired("Importer (.vcf)", DOWNLOAD, None, true, true, Action::Exchange("contacts", true)), wired("Exporter (.vcf)", DOWNLOAD, None, true, true, Action::Exchange("contacts", false))],
     },
-    Group { label: "Communiquer", cmds: &[cmd("Nouveau message", MAIL_PLUS, None, false, true, true)] },
+    Group { label: "Communiquer", cmds: &[wired("Nouveau message", MAIL_PLUS, None, true, true, Action::ContactMessage)] },
     Group { label: "Indicateurs", cmds: &[cmd("Catégories", TAGS, None, true, true, false), cmd("Suivi", FLAG, None, true, true, false)] },
 ];
 

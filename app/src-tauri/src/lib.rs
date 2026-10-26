@@ -9,6 +9,7 @@ mod autoconfig_cmds;
 mod auto_sync_cmds;
 mod calendar_cmds;
 mod contacts_cmds;
+mod distlist_cmds;
 mod dedupe_cmds;
 mod exchange_cmds;
 mod from_mail_cmds;
@@ -1594,6 +1595,8 @@ pub fn run() {
             contact_list,
             contact_card,
             contacts_cmds::contact_dist_lists,
+            distlist_cmds::contact_dist_list_save,
+            distlist_cmds::contact_dist_list_delete,
             address_cmds::address_suggest,
             dedupe_cmds::dedupe_scan,
             dedupe_cmds::dedupe_detail,
