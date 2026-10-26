@@ -12,6 +12,9 @@ const DAY_MS: i64 = 86_400_000;
 pub(crate) struct State {
     #[serde(default)]
     pub dismissed: BTreeMap<String, i64>,
+    /// Rappels de suivi du courrier : identifiant du message (`m<n>`) → heure du rappel (UTC, ms).
+    #[serde(default)]
+    pub mail: BTreeMap<String, i64>,
 }
 
 /// Fichier absent ou illisible : état vide (un rappel de trop vaut mieux qu'un rappel perdu).
@@ -42,6 +45,11 @@ fn prune(st: &mut State, now: i64) {
     });
 }
 
+/// Rappel de suivi d'un message : retiré dès que le rappel a plus de 30 jours.
+fn prune_mail(st: &mut State, now: i64) {
+    st.mail.retain(|_, when| *when > now - 30 * DAY_MS);
+}
+
 fn set(dir: &Path, id: &str, until_ms: i64) -> Result<(), String> {
     let mut st = load(dir);
     st.dismissed.insert(id.to_string(), until_ms);
@@ -57,4 +65,30 @@ pub fn dismiss(dir: &Path, id: &str) -> Result<(), String> {
 /// Reporte le rappel `id` : il revient à `until_ms`.
 pub fn snooze(dir: &Path, id: &str, until_ms: i64) -> Result<(), String> {
     set(dir, id, until_ms)
+}
+
+/// Heure du rappel de suivi posé sur le message `id` (`m<n>`), s'il y en a un.
+pub fn mail_get(dir: &Path, id: &str) -> Option<i64> {
+    load(dir).mail.get(id).copied()
+}
+
+/// Pose (ou déplace) le rappel de suivi du message `id` à `when_ms`. Un rappel déjà ignoré ou reporté est de nouveau actif.
+pub fn mail_set(dir: &Path, id: &str, when_ms: i64) -> Result<(), String> {
+    let mut st = load(dir);
+    st.mail.insert(id.to_string(), when_ms);
+    st.dismissed.remove(id);
+    let now = now_ms();
+    prune_mail(&mut st, now);
+    prune(&mut st, now);
+    save(dir, &st)
+}
+
+/// Retire le rappel de suivi du message `id` (l'indicateur du message n'est pas touché).
+pub fn mail_clear(dir: &Path, id: &str) -> Result<(), String> {
+    let mut st = load(dir);
+    if st.mail.remove(id).is_none() && !st.dismissed.contains_key(id) {
+        return Ok(());
+    }
+    st.dismissed.remove(id);
+    save(dir, &st)
 }

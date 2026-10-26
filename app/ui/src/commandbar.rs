@@ -34,6 +34,8 @@ pub enum Action {
     ConversationsToggle,
     /// Boîte « Réglages de l'affichage » (J3b).
     ViewSettings,
+    /// « Fenêtre des rappels » : ouvre le panneau des rappels, même vide.
+    RemindersWindow,
     /// Rédaction (J5).
     Compose(ComposeKind),
     /// Menu « Nouveaux éléments » (message, modèle `.oft`).
@@ -122,6 +124,10 @@ fn perform(ui: Ui, action: Action) {
         }),
         Action::ConversationsToggle => ui.update_settings(|s| s.conversations = !s.conversations),
         Action::ViewSettings => ui.dialog.set(Some(Dialog::ViewSettings)),
+        Action::RemindersWindow => {
+            crate::reminders::reload(ui);
+            ui.reminders_open.set(true);
+        }
         Action::Compose(kind) => actions::compose(ui, kind),
         Action::NewFolder => ui.dialog.set(Some(Dialog::NewFolder { parent: folder })),
         Action::RenameFolder if plain => ui.dialog.set(Some(Dialog::Rename { id: folder, name })),
@@ -428,7 +434,7 @@ const VIEW: &[Group] = &[
             act("Espacement plus étroit", ROWS_3, Action::DensityToggle, false),
         ],
     },
-    Group { label: "Fenêtre", cmds: &[cmd("Fenêtre des rappels", CLOCK, None, false, false, true)] },
+    Group { label: "Fenêtre", cmds: &[Cmd { label: "Fenêtre des rappels", icon: CLOCK, shortcut: None, menu: false, compact: false, large: true, action: Action::RemindersWindow }] },
 ];
 
 const SEARCH_TAB: &[Group] = &[

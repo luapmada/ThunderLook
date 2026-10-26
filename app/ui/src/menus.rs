@@ -18,6 +18,7 @@ pub fn flag_entries(ui: Ui) -> Vec<MenuEntry> {
         .into_iter()
         .map(|a| MenuEntry::action(a.label(), move || actions::run(ui, MessageOp::Flag { action: a })))
         .collect();
+    v.push(MenuEntry::action("Personnalisé…", move || crate::flag_dialog::open(ui)).separated());
     v.push(MenuEntry::action(FlagAction::Complete.label(), move || actions::run(ui, MessageOp::Flag { action: FlagAction::Complete })).separated());
     v.push(MenuEntry::action(FlagAction::Clear.label(), move || actions::run(ui, MessageOp::Flag { action: FlagAction::Clear })));
     v

@@ -171,3 +171,58 @@ fn daylight_saving_change_does_not_shift_reminders() {
     let r = all("2026-10-20T00:00", "2026-11-01T00:00");
     assert_eq!(r[1].when_ms - r[0].when_ms, 7 * DAY_MS + HOUR_MS);
 }
+
+/// Message marqué (`flag_status = 2`) dans le dossier 1, avec échéance facultative.
+fn flagged_mail(conn: &Connection, subject: &str, status: i64, due: Option<i64>) -> String {
+    conn.execute(
+        "INSERT INTO message (folder_id, nid, message_class, subject, from_name, from_addr, to_line, cc_line, created_at, modified_at, received_at,
+            message_flags, is_read, flag_status, flag_due, importance, sensitivity, size, attachment_count, body_kind, preview, eml_path, props)
+         VALUES (1, (SELECT COALESCE(MAX(nid), 0) + 1 FROM message), 'IPM.Note', ?1, 'Paul', '', '', '', 0, 0, 0, 0, 1, ?2, ?3, 1, 0, 0, 0, 'text', '', '', x'')",
+        params![subject, status, due],
+    )
+    .unwrap();
+    format!("m{}", conn.last_insert_rowid())
+}
+
+#[test]
+fn mail_follow_up_reminder_is_due_at_set_time_and_follows_the_flag() {
+    let (dir, conn) = fixture("mail");
+    let when = utc("2026-10-26T09:00");
+    let id = flagged_mail(&conn, "Devis à relancer", 2, Some(utc("2026-10-26T00:00")));
+    let other = flagged_mail(&conn, "Sans rappel posé", 2, None);
+    let done = flagged_mail(&conn, "Déjà terminé", 1, None);
+    mail_set(&dir, &id, when).unwrap();
+    mail_set(&dir, &done, when).unwrap();
+    assert_eq!(mail_get(&dir, &id), Some(when));
+    assert_eq!(mail_get(&dir, &other), None);
+    let w = Window { lookback_ms: 60 * MIN, lookahead_ms: 0 };
+    assert!(due(&conn, &dir, when - MIN, w).unwrap().is_empty(), "pas avant l'heure");
+    let r = due(&conn, &dir, when + 5 * MIN, w).unwrap();
+    assert_eq!(ids(&r), [id.clone()], "seul le message encore marqué, avec rappel posé");
+    assert_eq!((r[0].kind, r[0].title.as_str(), r[0].when_ms, r[0].location.as_deref()), (Kind::Mail, "Devis à relancer", when, Some("De Paul")));
+    assert_eq!(r[0].event_start_ms, utc("2026-10-26T00:00"));
+    // Indicateur terminé ou effacé : le rappel disparaît.
+    conn.execute("UPDATE message SET flag_status = 1 WHERE id = ?1", [id[1..].parse::<i64>().unwrap()]).unwrap();
+    assert!(due(&conn, &dir, when + 5 * MIN, w).unwrap().is_empty());
+}
+
+#[test]
+fn mail_reminder_snooze_dismiss_reset_and_clear() {
+    let (dir, conn) = fixture("mail-state");
+    let id = flagged_mail(&conn, "Appeler", 2, None);
+    let when = utc("2026-10-26T09:00");
+    let w = Window { lookback_ms: 60 * MIN, lookahead_ms: 0 };
+    mail_set(&dir, &id, when).unwrap();
+    snooze(&dir, &id, when + 30 * MIN).unwrap();
+    assert!(due(&conn, &dir, when + 10 * MIN, w).unwrap().is_empty());
+    assert_eq!(ids(&due(&conn, &dir, when + 31 * MIN, w).unwrap()), [id.clone()]);
+    dismiss(&dir, &id).unwrap();
+    assert!(due(&conn, &dir, when + 31 * MIN, w).unwrap().is_empty());
+    // Une nouvelle heure posée réactive le rappel ignoré.
+    mail_set(&dir, &id, when + 40 * MIN).unwrap();
+    assert_eq!(ids(&due(&conn, &dir, when + 41 * MIN, w).unwrap()), [id.clone()]);
+    mail_clear(&dir, &id).unwrap();
+    assert_eq!(mail_get(&dir, &id), None);
+    assert!(due(&conn, &dir, when + 41 * MIN, w).unwrap().is_empty());
+    mail_clear(&dir, &id).unwrap();
+}

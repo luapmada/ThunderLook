@@ -17,7 +17,7 @@ extern "C" {
     async fn invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
 }
 
-async fn call<A: Serialize, T: DeserializeOwned>(cmd: &str, args: &A) -> Result<T, String> {
+pub(crate) async fn call<A: Serialize, T: DeserializeOwned>(cmd: &str, args: &A) -> Result<T, String> {
     // Les u64 (jetons de vue) passent en nombres JS : ils restent très en dessous de 2^53.
     let ser = serde_wasm_bindgen::Serializer::json_compatible();
     let args = args.serialize(&ser).map_err(|e| e.to_string())?;

@@ -12,6 +12,7 @@ mod from_mail_cmds;
 mod folders_cmds;
 mod items_cmds;
 mod mail_cmds;
+mod mail_reminders_cmds;
 mod mpe_import_cmds;
 mod options_cmds;
 mod reminders_cmds;
@@ -1578,6 +1579,9 @@ pub fn run() {
             reminders_cmds::reminders_due,
             reminders_cmds::reminder_dismiss,
             reminders_cmds::reminder_snooze,
+            mail_reminders_cmds::mail_reminder_get,
+            mail_reminders_cmds::mail_reminder_set,
+            mail_reminders_cmds::mail_reminder_clear,
             search_cmds::global_search,
             contact_folders,
             contact_list,
