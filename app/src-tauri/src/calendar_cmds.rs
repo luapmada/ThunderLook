@@ -15,7 +15,7 @@ use crate::{CalendarCache, clear_calendar, data_dir, with_calendar};
 const FORMAT: &str = "%Y-%m-%dT%H:%M";
 
 fn local(ms: i64) -> chrono::NaiveDateTime {
-    TimeZone::PARIS.to_local(chrono::DateTime::from_timestamp_millis(ms).map(|t| t.naive_utc()).unwrap_or_default())
+    TimeZone::local().to_local(chrono::DateTime::from_timestamp_millis(ms).map(|t| t.naive_utc()).unwrap_or_default())
 }
 
 /// `a<id>` ou `a<id>@<date d'origine>`.
@@ -41,7 +41,7 @@ pub fn appointment_shift(app: AppHandle, cache: State<CalendarCache>, id: String
         let o = match day {
             None => expand::occurrences(a, i64::MIN / 4, i64::MAX / 4).into_iter().next()?,
             Some(d) => {
-                let ms = |t: chrono::NaiveDateTime| TimeZone::PARIS.to_utc(t).and_utc().timestamp_millis();
+                let ms = |t: chrono::NaiveDateTime| TimeZone::local().to_utc(t).and_utc().timestamp_millis();
                 let noon = d.and_hms_opt(12, 0, 0).unwrap_or_default();
                 expand::occurrences(a, ms(noon - Duration::days(90)), ms(noon + Duration::days(90))).into_iter().find(|o| o.original_date == Some(d))?
             }

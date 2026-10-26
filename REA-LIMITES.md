@@ -389,3 +389,16 @@ Testé sur des fichiers **reconstitués d'après le relevé statistique** de MPE
 - **Champs ignorés à la lecture** (FAX, téléphone en trop, `X-ANNIVERSARY`…) : si le téléphone les modifie seuls, ThunderLook ne le voit pas (rien de perdu côté téléphone, ThunderLook n'y écrit pas).
 - **Sens ThunderLook → téléphone** : n'existe pas dans ce mode (aucune écriture dans le dossier de MPE) ; un rendez-vous créé dans ThunderLook ne va pas sur le téléphone par ce dossier.
 
+
+## À vérifier avec REA/Outlook — fuseaux horaires, jours fériés, « 7 prochains jours » (lot AZ, 26/10)
+- Fuseau de l'utilisateur (`crates/calendar/src/tz.rs`, `TimeZone::local`, Paris par défaut, réglé par « Fuseaux horaires »
+  dans l'en-tête du calendrier, gardé dans `fuseaux.json`) : sert à l'affichage, à la saisie, aux rappels, aux tâches et aux
+  textes d'échange MPE. Les FORMATS restent en Paris (`TimeZone::PARIS`) : `ics.rs` (VTIMEZONE « Romance Standard Time »),
+  `ics_series.rs`, `itip.rs`, `csv.rs`, `items/src/vtodo.rs`, export CSV de `lib.rs`. Un autre fuseau que Paris n'a jamais été
+  essayé à l'écran ; une série Outlook portant son propre `PidLidTimeZoneStruct` reste dans ce fuseau-là, et une série créée
+  par ThunderLook (sans ce struct) suit le fuseau de l'utilisateur : à vérifier dans Outlook après changement de fuseau.
+- Règles de la table `ZONES` : règle actuelle seulement (pas d'historique) ; Casablanca sans le changement du ramadan.
+- Jours fériés (`holidays.rs`) : 11 jours de métropole, ajoutés au bandeau « Journée » (non enregistrés, rien n'est écrit).
+  Doublon évité si un rendez-vous journée entière du même nom existe ce jour-là ; les noms qu'Outlook écrit avec « Ajouter des
+  jours fériés » (France) n'ont pas été vus : un nom différent donnerait deux entrées. Pas d'option pour les masquer.
+- « 7 prochains jours » : 7 colonnes à partir d'aujourd'hui, flèches de 7 jours ; comportement exact d'Outlook non vu.

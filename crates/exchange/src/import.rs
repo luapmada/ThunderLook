@@ -461,9 +461,9 @@ fn notes(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, forced: bool, rep
     Ok(())
 }
 
-fn paris(ms: i64) -> String {
+fn local_text(ms: i64) -> String {
     let utc = chrono::DateTime::from_timestamp_millis(ms).map(|t| t.naive_utc()).unwrap_or_default();
-    TimeZone::PARIS.to_local(utc).format("%Y-%m-%dT%H:%M").to_string()
+    TimeZone::local().to_local(utc).format("%Y-%m-%dT%H:%M").to_string()
 }
 
 fn event_of(a: &Appointment, body: Option<String>) -> EventData {
@@ -472,8 +472,8 @@ fn event_of(a: &Appointment, body: Option<String>) -> EventData {
         calendar_id: format!("c{}", a.folder_id),
         subject: a.subject.clone(),
         location: a.location.clone().unwrap_or_default(),
-        start: paris(a.start_ms),
-        end: paris(a.end_ms),
+        start: local_text(a.start_ms),
+        end: local_text(a.end_ms),
         all_day: a.all_day,
         reminder: a.reminder_minutes.map(|m| m as i32),
         busy: match a.busy {

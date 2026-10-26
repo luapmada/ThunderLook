@@ -136,7 +136,7 @@ pub fn occurrences(a: &Appointment, from_ms: i64, to_ms: i64) -> Vec<Occurrence>
             Vec::new()
         };
     };
-    let tz = a.time_zone.unwrap_or(TimeZone::PARIS);
+    let tz = a.time_zone.unwrap_or(TimeZone::local());
     // Marge d'un jour de chaque côté pour le décalage horaire, plus la durée d'une occurrence.
     let span = i64::from(r.end_offset.saturating_sub(r.start_offset)) / i64::from(MINUTES_PER_DAY) + 1;
     let to_date = |m: i64| chrono::DateTime::from_timestamp_millis(m).map(|t| t.naive_utc().date());

@@ -32,7 +32,7 @@ pub fn reminder_snooze(app: AppHandle, id: String, until_ms: i64) -> Result<(), 
 }
 
 fn clock(ms: i64) -> String {
-    let local = thunderlook_calendar::tz::TimeZone::PARIS.to_local(chrono::DateTime::from_timestamp_millis(ms).map(|t| t.naive_utc()).unwrap_or_default());
+    let local = thunderlook_calendar::tz::TimeZone::local().to_local(chrono::DateTime::from_timestamp_millis(ms).map(|t| t.naive_utc()).unwrap_or_default());
     local.format("%H:%M").to_string()
 }
 

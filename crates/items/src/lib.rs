@@ -182,12 +182,12 @@ fn task_row(id: i64, folder: i64, subject: String, importance: i64, bag: &Bag, i
 /// Rappel `AAAA-MM-JJTHH:MM` (heure de Paris) → instant UTC.
 fn reminder_ms(local: &str) -> Result<i64> {
     let t = chrono::NaiveDateTime::parse_from_str(local.trim(), "%Y-%m-%dT%H:%M").map_err(|_| format!("rappel invalide : {local}"))?;
-    Ok(TimeZone::PARIS.to_utc(t).and_utc().timestamp_millis())
+    Ok(TimeZone::local().to_utc(t).and_utc().timestamp_millis())
 }
 
 fn reminder_text(ms: i64) -> Option<String> {
     let utc = chrono::DateTime::from_timestamp_millis(ms)?.naive_utc();
-    Some(TimeZone::PARIS.to_local(utc).format("%Y-%m-%dT%H:%M").to_string())
+    Some(TimeZone::local().to_local(utc).format("%Y-%m-%dT%H:%M").to_string())
 }
 
 /// Toutes les tâches (hors corbeille), non terminées d'abord, par échéance.
@@ -223,7 +223,7 @@ pub fn tasks(conn: &Connection) -> Result<TaskList> {
 pub fn tasks_query(conn: &Connection, q: &TaskQuery) -> Result<TaskList> {
     let TaskList { rows, folders } = tasks(conn)?;
     let utc = chrono::DateTime::from_timestamp_millis(now_ms()).unwrap_or_default().naive_utc();
-    let today = TimeZone::PARIS.to_local(utc).date();
+    let today = TimeZone::local().to_local(utc).date();
     Ok(TaskList { rows: filter::filter_tasks(rows, q, today), folders })
 }
 
@@ -355,7 +355,7 @@ fn spawn_next(conn: &mut Connection, data_dir: &Path, id: i64) -> Result<Option<
     let next = if regen {
         let Some(freq) = trecur::frequency(&form.repeat) else { return Ok(None) };
         let utc = chrono::DateTime::from_timestamp_millis(now_ms()).unwrap_or_default().naive_utc();
-        trecur::next_regen(freq, form.repeat_every, TimeZone::PARIS.to_local(utc).date())
+        trecur::next_regen(freq, form.repeat_every, TimeZone::local().to_local(utc).date())
     } else {
         trecur::next_after(&trecur::decode(blob)?, anchor)
     };
@@ -728,7 +728,7 @@ mod tests {
         let next = rows.iter().find(|r| !r.complete).unwrap();
         let today = {
             let utc = chrono::DateTime::from_timestamp_millis(now_ms()).unwrap().naive_utc();
-            TimeZone::PARIS.to_local(utc).date()
+            TimeZone::local().to_local(utc).date()
         };
         let due = today + chrono::Duration::days(10);
         assert_eq!(next.due, due.format("%Y-%m-%d").to_string());

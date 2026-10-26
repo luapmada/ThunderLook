@@ -25,6 +25,7 @@ mod shared_calendar;
 mod signatures_cmds;
 mod tasks_recur_cmds;
 mod toast;
+mod tz_cmds;
 
 use std::{
     fs,
@@ -1521,6 +1522,7 @@ pub fn run() {
                     let _ = handle.run_on_main_thread(move || open_from_notification(&h, source, message));
                 });
             }
+            tz_cmds::start(app.handle());
             start_scheduler(app.handle());
             reminders_cmds::start(app.handle());
             exchange_cmds::start(app.handle());
@@ -1589,6 +1591,8 @@ pub fn run() {
             mail_reminders_cmds::mail_reminder_get,
             mail_reminders_cmds::mail_reminder_set,
             mail_reminders_cmds::mail_reminder_clear,
+            tz_cmds::time_zones,
+            tz_cmds::set_time_zones,
             search_cmds::global_search,
             contact_folders,
             contact_list,

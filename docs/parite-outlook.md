@@ -56,7 +56,7 @@ Fichiers fréquemment touchés par tous les lots (points de conflit de fusion, �
 | Fonction d'Outlook | État | Preuve |
 |---|---|---|
 | Vues Jour, Semaine de travail, Semaine, Mois | **fait** | `app/ui/src/calendar.rs`, `crates/calendar/src/view.rs` |
-| « 7 prochains jours », vue Planning [à vérifier] | **absent** (bouton désactivé) | `commandbar.rs` (CALENDAR_HOME) |
+| « 7 prochains jours », vue Planning [à vérifier] | « 7 prochains jours » **fait** (lot AZ) ; Planning **absent** | `crates/calendar/src/view.rs` (`NextSevenDays`), `commandbar.rs` |
 | Créer / modifier / supprimer un rendez-vous, journée entière, lieu, rappel, privé, disponibilité, catégories | **fait** | `appointment.rs`, `crates/calendar/src/write.rs` |
 | Séries : jour/semaine/mois/an, fin jamais/N/date ; modifier toute la série, UNE occurrence, supprimer UNE occurrence | **fait** (jamais testé dans Outlook) | `write.rs:354-402`, `REA-LIMITES.md` § séries |
 | Glisser-déposer, poignée de fin | **fait** | `write.rs:519` (`move_appointment`) |
@@ -64,8 +64,8 @@ Fichiers fréquemment touchés par tous les lots (points de conflit de fusion, �
 | Couleurs : catégories, bande de disponibilité | **fait** | `outlook-couleurs-menus.md` |
 | Clic droit (créneau, rendez-vous) | **partiel** : « Nouveau rendez-vous périodique », « événement périodique », « Transférer », réunions inactifs | `menus.rs:53,105-106` |
 | Réunions : participants, invitations, réponses, assistant de planification, disponibilité [à vérifier] | **absent** : aucun envoi ; les « participants » n'existent qu'en lecture CSV | `appointment.rs` (pas de champ), `crates/calendar/src/csv.rs:22-23,104-105` |
-| Fuseaux horaires multiples [à vérifier] | **absent** : un seul fuseau codé (Europe/Paris), 34 usages de `TimeZone::PARIS` | `crates/calendar/src/tz.rs:28` ; grep |
-| Jours fériés [à vérifier] | **absent** (hors jeux de test) | grep |
+| Fuseaux horaires multiples [à vérifier] | **fait** (lot AZ) : fuseau de l'utilisateur + second fuseau à côté des heures ; les formats de fichiers restent en Paris | `crates/calendar/src/tz.rs` (`ZONES`, `TimeZone::local`), `app/src-tauri/src/tz_cmds.rs` |
+| Jours fériés [à vérifier] | **fait** pour la France métropolitaine (lot AZ, affichés, non enregistrés) | `crates/calendar/src/holidays.rs` |
 | Numéros de semaine, début de semaine, heures de travail | **fait** | `crates/model/src/settings.rs`, `options.rs` |
 | `.ics` import/export, CSV | **fait** | `crates/calendar/src/{ics,ics_series,csv}.rs` |
 | Abonnement à un calendrier Internet/CalDAV [à vérifier] | **absent** (non voulu : MPE ne parle pas CalDAV, `handoff.md`) | — |

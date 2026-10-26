@@ -216,7 +216,7 @@ fn appointments(conn: &Connection, data_dir: &Path) -> Result<Vec<Item>, String>
     let cal = thunderlook_calendar::load(conn)?;
     let mut out = Vec::new();
     for a in &cal.appointments {
-        let tz = a.time_zone.unwrap_or(TimeZone::PARIS);
+        let tz = a.time_zone.unwrap_or(TimeZone::local());
         let start = chrono::DateTime::from_timestamp_millis(a.start_ms).map(|t| tz.to_local(t.naive_utc()));
         // Un rendez-vous d'une journée entière est enregistré à minuit local.
         let when = start.map(|t| t.format(if a.all_day { "%Y-%m-%d" } else { "%Y-%m-%d %H:%M" }).to_string()).unwrap_or_default();
