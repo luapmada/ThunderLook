@@ -88,15 +88,23 @@ pub fn NotesPane() -> impl IntoView {
     let (fu, folder) = (FolderUi::new(FolderKind::Note), RwSignal::new(String::new()));
     fu.refresh();
     // Recherche dans le texte entier et tri calculés par le cœur (`notes_query`), rechargés après chaque modification.
+    // Une requête par frappe : seule la réponse de la dernière s'affiche (une réponse lente ne remplace pas la suivante).
+    let seq = StoredValue::new(0u32);
     Effect::new(move |_| {
         ui.notes_epoch.track();
         let query = NoteQuery { text: text.get(), sort: sort.get() };
+        let me = seq.get_value().wrapping_add(1);
+        seq.set_value(me);
         spawn_local(async move {
             #[derive(Serialize)]
             struct Arg<'a> {
                 query: &'a NoteQuery,
             }
-            match call::<_, NoteList>("notes_query", &Arg { query: &query }).await {
+            let res = call::<_, NoteList>("notes_query", &Arg { query: &query }).await;
+            if seq.try_get_value() != Some(me) {
+                return;
+            }
+            match res {
                 Ok(l) => {
                     crate::print::remember_notes(&l);
                     shown.set(Some(l));
@@ -232,7 +240,7 @@ pub fn NoteDialog() -> impl IntoView {
                     <Show when=move || form().is_some_and(|f| f.id.is_none())>
                         <label class="field">
                             <span>"Dossier"</span>
-                            <FolderPicker f=fu value=Signal::derive(move || form().map(|f| f.folder_id).unwrap_or_default())
+                            <FolderPicker f=fu value=Signal::derive(move || ui.note_form.with(|f| f.as_ref().map(|f| f.folder_id.clone()).unwrap_or_default()))
                                 on_pick=move |v: String| set(&|f| f.folder_id = v.clone()) />
                         </label>
                     </Show>

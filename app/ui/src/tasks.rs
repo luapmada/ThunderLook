@@ -145,13 +145,21 @@ pub fn TasksPane() -> impl IntoView {
     let fu = FolderUi::new(FolderKind::Task);
     fu.refresh();
     // Vue, tri et recherche sont calculés par le cœur (`tasks_query`) ; rechargés aussi après chaque modification.
+    // Une requête par frappe : seule la réponse de la dernière s'affiche (une réponse lente ne remplace pas la suivante).
+    let seq = StoredValue::new(0u32);
     Effect::new(move |_| {
         ui.tasks_epoch.track();
         let (v, so, text) = (view_sel.get(), sort.get(), ui.task_filter.get());
         let (view, folder) = if v.starts_with('f') { ("folder".to_string(), v) } else { (v, String::new()) };
         let query = TaskQuery { view, folder, sort: so, text };
+        let me = seq.get_value().wrapping_add(1);
+        seq.set_value(me);
         spawn_local(async move {
-            match call::<_, TaskList>("tasks_query", &QueryArg { query: &query }).await {
+            let res = call::<_, TaskList>("tasks_query", &QueryArg { query: &query }).await;
+            if seq.try_get_value() != Some(me) {
+                return;
+            }
+            match res {
                 Ok(l) => {
                     crate::print::remember_tasks(&l);
                     shown.set(Some(l));
@@ -303,7 +311,16 @@ pub fn TaskDialog() -> impl IntoView {
                         <label class="field">
                             <span>"Début"</span>
                             <input type="date" aria-label="Date de début" prop:value=move || form().map(|f| f.start).unwrap_or_default()
-                                on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.start = v.clone()); } />
+                                on:input=move |ev| {
+                                    let v = event_target_value(&ev);
+                                    // Comme Outlook : l'échéance suit le début (même écart).
+                                    set(&|f| {
+                                        if let Some(due) = crate::appointment::shift_with(&f.start, &v, &f.due) {
+                                            f.due = due;
+                                        }
+                                        f.start = v.clone();
+                                    });
+                                } />
                         </label>
                         <label class="field">
                             <span>"Échéance"</span>
@@ -357,7 +374,10 @@ pub fn TaskDialog() -> impl IntoView {
                             <label class="field">
                                 <span>"Tous les"</span>
                                 <input type="number" min="1" max="999" aria-label="Intervalle" prop:value=move || form().map(|f| f.repeat_every.max(1)).unwrap_or(1)
-                                    on:input=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(1); set(&|f| f.repeat_every = v); } />
+                                    on:input=move |ev| {
+                                        // Champ vidé : la valeur précédente reste, sans « 1 » réécrit sous le curseur.
+                                        if let Ok(v) = event_target_value(&ev).trim().parse() { set(&|f| f.repeat_every = v); }
+                                    } />
                             </label>
                             <Show when=move || form().is_some_and(|f| !f.repeat.starts_with("regen_"))>
                             <label class="field">
@@ -370,7 +390,9 @@ pub fn TaskDialog() -> impl IntoView {
                                 <label class="field">
                                     <span>"Nombre de fois"</span>
                                     <input type="number" min="1" max="9999" aria-label="Nombre d'occurrences" prop:value=move || form().map(|f| f.repeat_count).unwrap_or(5)
-                                        on:input=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(1); set(&|f| f.repeat_count = v); } />
+                                        on:input=move |ev| {
+                                            if let Ok(v) = event_target_value(&ev).trim().parse() { set(&|f| f.repeat_count = v); }
+                                        } />
                                 </label>
                             </Show>
                             <Show when=move || form().is_some_and(|f| f.repeat_end == "until")>

@@ -82,6 +82,9 @@ pub fn DedupeDialog() -> impl IntoView {
     let busy = RwSignal::new(false);
     let recap = RwSignal::new(false);
     let note = RwSignal::new(None::<String>);
+    // Numéros de la dernière demande de détail et d'aperçu : un clic rapide sur un autre groupe, ou sur un autre bouton
+    // radio, ne doit pas être écrasé par la réponse plus lente de la demande précédente.
+    let (detail_seq, preview_seq) = (StoredValue::new(0u32), StoredValue::new(0u32));
 
     let folder = move || Some(ui.contact_folder.get_untracked()).filter(|f| !f.is_empty());
     let reload = move || {
@@ -111,8 +114,14 @@ pub fn DedupeDialog() -> impl IntoView {
         current.set(Some(i));
         detail.set(None);
         merged.set(None);
+        let me = detail_seq.get_value().wrapping_add(1);
+        detail_seq.set_value(me);
         spawn_local(async move {
-            match ipc::dedupe_detail(&g.ids).await {
+            let res = ipc::dedupe_detail(&g.ids).await;
+            if detail_seq.try_get_value() != Some(me) {
+                return;
+            }
+            match res {
                 Ok(d) => {
                     keep.set(d.keep.clone());
                     choices.set(d.rows.iter().filter(|r| !r.key.is_empty() && !r.chosen.is_empty()).map(|r| (r.key.clone(), r.chosen.clone())).collect());
@@ -125,9 +134,15 @@ pub fn DedupeDialog() -> impl IntoView {
     // Aperçu : recalculé à chaque changement de fiche conservée ou de valeur choisie.
     Effect::new(move |_| {
         let (k, c) = (keep.get(), choices.get());
+        let me = preview_seq.get_value().wrapping_add(1);
+        preview_seq.set_value(me);
         let Some(d) = detail.get() else { return };
         spawn_local(async move {
-            match ipc::dedupe_preview(&d.ids, &k, &c).await {
+            let res = ipc::dedupe_preview(&d.ids, &k, &c).await;
+            if preview_seq.try_get_value() != Some(me) {
+                return;
+            }
+            match res {
                 Ok(f) => merged.set(Some(f)),
                 Err(e) => note.set(Some(e)),
             }

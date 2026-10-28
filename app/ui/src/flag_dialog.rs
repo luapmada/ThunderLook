@@ -55,6 +55,11 @@ fn local_ms(date: &str, time: &str) -> Option<i64> {
     ms.is_finite().then_some(ms as i64)
 }
 
+/// La touche vient d'un bouton (qui garde son propre Entrée).
+pub(crate) fn on_button(ev: &web_sys::KeyboardEvent) -> bool {
+    ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).is_some_and(|t| t.tag_name() == "BUTTON")
+}
+
 fn several_selected(ui: Ui) -> bool {
     ui.sel_ranges.with_untracked(|r| r.iter().map(|(a, b)| b.saturating_sub(*a)).sum::<u32>() > 1)
 }
@@ -69,6 +74,8 @@ pub fn FlagDialog() -> impl IntoView {
     let remind_time = RwSignal::new(DEFAULT_TIME.to_string());
     let multi = RwSignal::new(false);
     let had_reminder = RwSignal::new(false);
+    // Ouverture en cours : la réponse de `mail_reminder_get` d'une ouverture précédente est ignorée.
+    let opening = StoredValue::new(0u32);
 
     // À chaque ouverture : aujourd'hui, rappel décoché, ou le rappel déjà posé sur le message.
     Effect::new(move |_| {
@@ -82,9 +89,15 @@ pub fn FlagDialog() -> impl IntoView {
         remind_time.set(DEFAULT_TIME.to_string());
         had_reminder.set(false);
         multi.set(several_selected(ui));
+        let me = opening.get_value().wrapping_add(1);
+        opening.set_value(me);
         if let Some(id) = ui.selected.get_untracked().filter(|_| !multi.get_untracked()) {
             spawn_local(async move {
-                if let Ok(Some(ms)) = ipc::call::<_, Option<i64>>("mail_reminder_get", &IdArg { message_id: &id }).await {
+                let got = ipc::call::<_, Option<i64>>("mail_reminder_get", &IdArg { message_id: &id }).await;
+                if opening.try_get_value() != Some(me) || !ui.flag_dialog.get_untracked() {
+                    return;
+                }
+                if let Ok(Some(ms)) = got {
                     remind.set(true);
                     had_reminder.set(true);
                     remind_date.set(date_value(ms as f64));
@@ -92,13 +105,16 @@ pub fn FlagDialog() -> impl IntoView {
                 }
             });
         }
-        if let Some(el) = root.get_untracked() {
-            if let Ok(Some(first)) = el.query_selector("input") {
-                if let Ok(first) = first.dyn_into::<web_sys::HtmlElement>() {
-                    let _ = first.focus();
+        // Après le rendu : à l'exécution de l'effet, la boîte (dans `Show`) n'est pas encore montée et rien ne prenait le focus.
+        request_animation_frame(move || {
+            if let Some(el) = root.get_untracked() {
+                if let Ok(Some(first)) = el.query_selector("input") {
+                    if let Ok(first) = first.dyn_into::<web_sys::HtmlElement>() {
+                        let _ = first.focus();
+                    }
                 }
             }
-        }
+        });
     });
 
     let close = move || ui.flag_dialog.set(false);
@@ -140,7 +156,8 @@ pub fn FlagDialog() -> impl IntoView {
             ev.prevent_default();
             close();
         }
-        "Enter" => {
+        // Entrée sur « Annuler » (ou « OK ») active ce bouton, elle ne valide pas la boîte.
+        "Enter" if !on_button(&ev) => {
             ev.prevent_default();
             submit();
         }
@@ -158,7 +175,7 @@ pub fn FlagDialog() -> impl IntoView {
                     <h2 id="flag-dialog-title">"Indicateur de suivi personnalisé"</h2>
                     <label>
                         "Échéance : "
-                        <input type="date" prop:value=move || due.get() on:input=move |ev| due.set(event_target_value(&ev)) />
+                        <input type="date" aria-label="Échéance" prop:value=move || due.get() on:input=move |ev| due.set(event_target_value(&ev)) />
                     </label>
                     <label>
                         <input

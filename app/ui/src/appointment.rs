@@ -175,6 +175,50 @@ pub fn delete(ui: Ui, id: String, series: bool) {
     });
 }
 
+/// Jours depuis le 1970-01-01 d'une date grégorienne (algorithme « days from civil » d'H. Hinnant).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
+}
+
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+/// Minutes depuis 1970 de `AAAA-MM-JJ` ou `AAAA-MM-JJTHH:MM` (heure absente : minuit) ; `None` si la valeur est incomplète.
+fn minutes(v: &str) -> Option<i64> {
+    let (date, time) = v.split_once('T').unwrap_or((v, "00:00"));
+    let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
+    let (y, m, day) = (d.next()??, d.next()??, d.next()??);
+    let mut t = time.split(':').map(|p| p.parse::<i64>().ok());
+    let (h, min) = (t.next()??, t.next()??);
+    if d.next().is_some() || !(1..=12).contains(&m) || !(1..=31).contains(&day) || !(0..24).contains(&h) || !(0..60).contains(&min) {
+        return None;
+    }
+    Some(days_from_civil(y, m, day) * 1_440 + h * 60 + min)
+}
+
+/// Comme Outlook : quand le début passe de `old` à `new`, `other` (fin du rendez-vous, échéance de la tâche) se décale
+/// d'autant, au même format (date seule ou date et heure). `None` si l'une des valeurs est incomplète ou vide.
+pub(crate) fn shift_with(old: &str, new: &str, other: &str) -> Option<String> {
+    let delta = minutes(new)? - minutes(old)?;
+    let m = minutes(other)? + delta;
+    let (y, mo, d) = civil_from_days(m.div_euclid(1_440));
+    let date = format!("{y:04}-{mo:02}-{d:02}");
+    Some(if other.contains('T') { format!("{date}T{:02}:{:02}", m.rem_euclid(1_440) / 60, m.rem_euclid(60)) } else { date })
+}
+
 #[component]
 pub fn AppointmentDialog() -> impl IntoView {
     let ui = use_ui();
@@ -194,9 +238,19 @@ pub fn AppointmentDialog() -> impl IntoView {
 
     // Seulement à l'ouverture : suivre `appointment` relancerait l'effet à chaque frappe (focus volé).
     let open = Memo::new(move |_| ui.appointment.with(Option::is_some));
+    // Blocs affichés selon le formulaire : des `Memo` booléens, pour que les champs qu'ils contiennent ne soient pas
+    // recréés (focus perdu, saisie coupée) à chaque frappe dans un autre champ ou dans eux-mêmes.
+    let flag = move |test: fn(&AppointmentForm) -> bool| Memo::new(move |_| ui.appointment.with(|f| f.as_ref().is_some_and(test)));
+    let series = flag(is_series);
+    let scope_shown = flag(|f| f.recurring && f.id.is_some());
+    let has_occurrence = flag(|f| !f.occurrence.is_empty());
+    let repeat_shown = flag(|f| f.id.is_none() || (f.recurring && f.scope != "occurrence"));
+    let repeating = flag(|f| !f.repeat.is_empty());
+    let end_count = flag(|f| f.repeat_end == "count");
+    let end_until = flag(|f| f.repeat_end == "until");
     // Participants déjà envoyés, à chaque ouverture de la boîte (pas à chaque frappe).
     Effect::new(move |was_open: Option<bool>| {
-        let open = ui.appointment.with(Option::is_some);
+        let open = open.get();
         if open && was_open != Some(true) {
             let Some(f) = ui.appointment.get_untracked() else { return open };
             people.set(String::new());
@@ -259,7 +313,16 @@ pub fn AppointmentDialog() -> impl IntoView {
         });
     };
     // Date et heure séparées (champs du navigateur), recomposées en `AAAA-MM-JJTHH:MM`.
+    // Début modifié : la fin suit (même durée), comme dans Outlook ; la fin modifiée seule ne bouge pas le début.
     let date_time = move |label: &'static str, get: fn(&AppointmentForm) -> String, put: fn(&mut AppointmentForm, String)| {
+        let put = move |f: &mut AppointmentForm, v: String| {
+            if label == "Début" {
+                if let Some(end) = shift_with(&f.start, &v, &f.end) {
+                    f.end = end;
+                }
+            }
+            put(f, v);
+        };
         // Série entière : les dates (premier jour) ne se modifient pas ; une occurrence se déplace librement.
         let disabled = move || form().is_some_and(|f| f.recurring && f.scope != "occurrence");
         let date_disabled = disabled;
@@ -321,7 +384,7 @@ pub fn AppointmentDialog() -> impl IntoView {
                         <input type="text" aria-label="Emplacement" prop:value=move || form().map(|f| f.location).unwrap_or_default()
                             on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.location = v.clone()); } />
                     </label>
-                    {move || (!form().is_some_and(|f| is_series(&f))).then(|| view! {
+                    {move || (!series.get()).then(|| view! {
                         <label class="field">
                             <span>"Participants (séparés par des points-virgules)"</span>
                             <input type="text" aria-label="Participants" placeholder="Nom <adresse>; adresse…"
@@ -329,7 +392,7 @@ pub fn AppointmentDialog() -> impl IntoView {
                                 on:input=move |ev| people.set(event_target_value(&ev)) />
                         </label>
                     })}
-                    {move || form().is_some_and(|f| is_series(&f)).then(|| view! {
+                    {move || series.get().then(|| view! {
                         <p class="dialog-note">"Invitations : pas encore pour un rendez-vous périodique."</p>
                     })}
                     {move || (!tracked.with(Vec::is_empty)).then(|| view! {
@@ -349,18 +412,18 @@ pub fn AppointmentDialog() -> impl IntoView {
                             on:change=move |ev| { let on = event_target_checked(&ev); set(&|f| f.all_day = on); } />
                         <span>"Journée entière"</span>
                     </label>
-                    {move || form().is_some_and(|f| f.recurring && f.id.is_some()).then(|| view! {
+                    {move || scope_shown.get().then(|| view! {
                         <label class="field">
                             <span>"Appliquer à"</span>
                             <select aria-label="Appliquer à" on:change=move |ev| { let v = event_target_value(&ev); set(&|f| f.scope = v.clone()); }>
-                                {move || form().is_some_and(|f| !f.occurrence.is_empty()).then(|| view! {
+                                {move || has_occurrence.get().then(|| view! {
                                     <option value="occurrence" selected=move || form().is_some_and(|f| f.scope == "occurrence")>"Cette occurrence seulement"</option>
                                 })}
                                 <option value="series" selected=move || form().is_some_and(|f| f.scope != "occurrence")>"Toute la série"</option>
                             </select>
                         </label>
                     })}
-                    {move || form().is_some_and(|f| f.id.is_none() || (f.recurring && f.scope != "occurrence")).then(|| view! {
+                    {move || repeat_shown.get().then(|| view! {
                         <div class="appt-row">
                             <label class="field">
                                 <span>"Répéter"</span>
@@ -372,11 +435,14 @@ pub fn AppointmentDialog() -> impl IntoView {
                                     <option value="yearly" selected=move || form().is_some_and(|f| f.repeat == "yearly")>"Tous les ans"</option>
                                 </select>
                             </label>
-                            {move || form().is_some_and(|f| !f.repeat.is_empty()).then(|| view! {
+                            {move || repeating.get().then(|| view! {
                                 <label class="field">
                                     <span>"Tous les"</span>
                                     <input type="number" min="1" max="99" aria-label="Intervalle de répétition" prop:value=move || form().map(|f| f.repeat_every).unwrap_or(1)
-                                        on:input=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(1); set(&|f| f.repeat_every = v); } />
+                                        on:input=move |ev| {
+                                            // Champ vidé ou incomplet : la valeur précédente est gardée, sans réécrire « 1 » sous le curseur.
+                                            if let Ok(v) = event_target_value(&ev).trim().parse() { set(&|f| f.repeat_every = v); }
+                                        } />
                                 </label>
                                 <label class="field">
                                     <span>"Fin"</span>
@@ -386,14 +452,16 @@ pub fn AppointmentDialog() -> impl IntoView {
                                         <option value="until" selected=move || form().is_some_and(|f| f.repeat_end == "until")>"Le…"</option>
                                     </select>
                                 </label>
-                                {move || form().is_some_and(|f| f.repeat_end == "count").then(|| view! {
+                                {move || end_count.get().then(|| view! {
                                     <label class="field">
                                         <span>"Occurrences"</span>
                                         <input type="number" min="1" max="999" aria-label="Nombre d'occurrences" prop:value=move || form().map(|f| f.repeat_count).unwrap_or(10)
-                                            on:input=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(1); set(&|f| f.repeat_count = v); } />
+                                            on:input=move |ev| {
+                                                if let Ok(v) = event_target_value(&ev).trim().parse() { set(&|f| f.repeat_count = v); }
+                                            } />
                                     </label>
                                 })}
-                                {move || form().is_some_and(|f| f.repeat_end == "until").then(|| view! {
+                                {move || end_until.get().then(|| view! {
                                     <label class="field">
                                         <span>"Dernier jour"</span>
                                         <input type="date" aria-label="Dernier jour de la répétition" prop:value=move || form().map(|f| f.repeat_until).unwrap_or_default()
@@ -460,12 +528,48 @@ pub fn AppointmentDialog() -> impl IntoView {
                     {move || note.get().map(|n| view! { <p class="dialog-note" role="status">{n}</p> })}
                     <div class="dialog-buttons">
                         <button class="btn primary" prop:disabled=move || busy_saving.get() on:click=move |_| save()>
-                            {move || if !people.with(|p| p.trim().is_empty()) && !form().is_some_and(|f| is_series(&f)) { "Enregistrer et envoyer" } else { "Enregistrer et fermer" }}
+                            {move || if !people.with(|p| p.trim().is_empty()) && !series.get() { "Enregistrer et envoyer" } else { "Enregistrer et fermer" }}
                         </button>
                         <button class="btn" on:click=move |_| close()>"Annuler"</button>
                     </div>
                 </div>
             </div>
         </Show>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn la_fin_suit_le_debut() {
+        // Même jour, une heure plus tard : la fin garde la durée.
+        assert_eq!(shift_with("2026-10-28T09:00", "2026-10-28T10:30", "2026-10-28T10:00").as_deref(), Some("2026-10-28T11:30"));
+        // Changement de date, y compris en passant un mois, une année et un 29 février.
+        assert_eq!(shift_with("2026-10-28T09:00", "2026-11-02T09:00", "2026-10-28T23:30").as_deref(), Some("2026-11-02T23:30"));
+        assert_eq!(shift_with("2027-12-31T22:00", "2028-02-28T22:00", "2028-01-01T01:00").as_deref(), Some("2028-02-29T01:00"));
+        // Date seule (tâche : début et échéance).
+        assert_eq!(shift_with("2026-10-28", "2026-10-30", "2026-11-04").as_deref(), Some("2026-11-06"));
+        assert_eq!(shift_with("2026-03-01", "2026-02-27", "2026-03-31").as_deref(), Some("2026-03-29"));
+    }
+
+    #[test]
+    fn valeur_incomplete_sans_decalage() {
+        assert_eq!(shift_with("T09:00", "2026-10-28T09:00", "2026-10-28T10:00"), None);
+        assert_eq!(shift_with("2026-10-28T09:00", "T09:00", "2026-10-28T10:00"), None);
+        assert_eq!(shift_with("2026-10-28T09:00", "2026-10-28T", "2026-10-28T10:00"), None);
+        assert_eq!(shift_with("", "2026-10-28", "2026-10-30"), None);
+        assert_eq!(shift_with("2026-10-28", "2026-10-29", ""), None);
+        assert_eq!(shift_with("2026-13-01", "2026-10-29", "2026-10-30"), None);
+    }
+
+    #[test]
+    fn jours_civils_aller_retour() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        for z in [-800_000, -1, 0, 1, 11_016, 20_754, 2_932_896] {
+            let (y, m, d) = civil_from_days(z);
+            assert_eq!(days_from_civil(y, m, d), z);
+        }
     }
 }

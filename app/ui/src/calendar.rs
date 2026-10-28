@@ -27,25 +27,33 @@ const MONTH_DRAG: &str = "application/x-thunderlook-event";
 pub fn watch(ui: Ui) {
     // Calendrier commun avec Outlook : relu à chaque ouverture du module ; « calendar-changed » recharge la vue.
     ipc::on_calendar_changed(move || ui.cal_epoch.update(|e| *e += 1));
+    // Type de vue seul : suivre tous les réglages relançait la lecture (et quittait le défilement du mois) à chaque
+    // réglage modifié ailleurs (largeur de colonne, densité…).
+    let view_kind = Memo::new(move |_| ui.settings.with(|s| s.calendar_view));
     // Toute autre navigation (jour, flèches, Aujourd'hui, type de vue) quitte le défilement de la vue Mois.
     Effect::new(move |_| {
         ui.cal_anchor.track();
-        ui.settings.with(|s| s.calendar_view);
+        view_kind.track();
         ui.cal_month_start.set(None);
     });
+    // Dernière lecture demandée : deux rechargements de mêmes paramètres (enregistrement, puis « calendar-changed »)
+    // peuvent répondre dans le désordre, et l'ancien ne doit pas remplacer le nouveau.
+    let seq = StoredValue::new(0u32);
     Effect::new(move |_| {
         if ui.module.get() != Module::Calendar || !ui.settings_loaded.get() {
             return;
         }
-        let kind = ui.settings.with(|s| s.calendar_view);
+        let kind = view_kind.get();
         let anchor = ui.cal_anchor.get();
         let start = ui.cal_month_start.get();
         ui.cal_epoch.track();
+        let me = seq.get_value().wrapping_add(1);
+        seq.set_value(me);
         spawn_local(async move {
             match ipc::calendar_view(&CalendarQuery { kind, anchor: anchor.clone(), start: start.clone() }).await {
                 Ok(v) => {
                     // Une réponse arrivée après un autre changement est ignorée.
-                    if ui.cal_anchor.get_untracked() == anchor && ui.cal_month_start.get_untracked() == start && ui.settings.with_untracked(|s| s.calendar_view) == kind {
+                    if seq.try_get_value() == Some(me) && ui.cal_anchor.get_untracked() == anchor && ui.cal_month_start.get_untracked() == start && ui.settings.with_untracked(|s| s.calendar_view) == kind {
                         if ui.cal_anchor.get_untracked().is_empty() {
                             ui.cal_anchor.set(v.anchor.clone());
                         }
@@ -257,8 +265,18 @@ fn shift_month(date: &str, delta: i32) -> String {
     format!("{:04}-{:02}-01", k.div_euclid(12), k.rem_euclid(12) + 1)
 }
 
+/// Une boîte modale est ouverte (rendez-vous, tâche, contact…) : elle garde ses touches.
+fn modal_open() -> bool {
+    document().query_selector("[aria-modal='true']").ok().flatten().is_some()
+}
+
 /// Raccourcis du module : Ctrl+Alt+1 à 4 (types de vue), Alt+Origine (aujourd'hui).
 pub fn key(ui: Ui, ev: &web_sys::KeyboardEvent) -> bool {
+    // Pendant la saisie dans une boîte, Ctrl+N remplaçait le rendez-vous en cours par un nouveau (saisie perdue) et
+    // Ctrl+P imprimait le calendrier caché derrière ; Ctrl+Alt (AltGr du pavé numérique) changeait de vue.
+    if modal_open() {
+        return false;
+    }
     let (ctrl, alt, shift) = (ev.ctrl_key(), ev.alt_key(), ev.shift_key());
     let kind = match (ctrl, alt, shift, ev.key().as_str()) {
         (true, true, false, "1") => Some(CalendarViewKind::Day),
@@ -772,6 +790,11 @@ pub fn CalendarPane() -> impl IntoView {
     let ui = use_ui();
     let kind = move || ui.settings.with(|s| s.calendar_view);
     let on_key = move |ev: leptos::ev::KeyboardEvent| {
+        // Pg.Préc/Pg.Suiv d'une liste (fuseaux horaires) ou d'une case : la touche reste au champ.
+        let in_field = ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).is_some_and(|t| matches!(t.tag_name().as_str(), "INPUT" | "SELECT" | "TEXTAREA"));
+        if in_field {
+            return;
+        }
         match ev.key().as_str() {
             "PageUp" => go(ui, false),
             "PageDown" => go(ui, true),
