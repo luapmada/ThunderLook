@@ -26,6 +26,7 @@ import * as exchange from './ui_cases/exchange.mjs';
 import * as globalSearch from './ui_cases/global_search.mjs';
 import * as reminders from './ui_cases/reminders.mjs';
 import * as calendarLayout from './ui_cases/calendar_layout.mjs';
+import * as saisie from './ui_cases/saisie.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const exe = process.argv[2] ?? path.join(root, 'target', 'release', 'thunderlook.exe');
@@ -614,7 +615,7 @@ CHECKS.push(['J10 : contacts (dossiers, liste triée, fiche, filtre)', async (lo
 }]);
 
 // Lot L : un cas par fichier de ui_cases/. Les cas qui écrivent se sautent sans THUNDERLOOK_DATA.
-for (const c of [contacts, appointments, tasks, notes, exchange, globalSearch, reminders, calendarLayout]) CHECKS.push([c.name, c.run]);
+for (const c of [contacts, appointments, tasks, notes, exchange, globalSearch, reminders, calendarLayout, saisie]) CHECKS.push([c.name, c.run]);
 
 // --- Exécution ------------------------------------------------------------------------------------
 const app = launch(exe);
