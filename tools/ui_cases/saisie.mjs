@@ -6,15 +6,24 @@ import { js, until, press, send, sleep, clickTab, closeDialogs } from './lib.mjs
 export const name = 'L-saisie : frappe dans tous les champs des boîtes (focus et valeur)';
 
 const q = JSON.stringify;
-// [module Ctrl+n, commande du ruban (Accueil), conteneur des champs]
+// [module Ctrl+n, onglet du ruban, commande, conteneur des champs]. Aucune de ces boîtes n'écrit pendant la frappe :
+// tout part à « Enregistrer » / « OK », jamais cliqués ici.
 const BOXES = [
-  [3, 'Nouveau contact', '.dialog'],
-  [3, 'Nouvelle liste', '.dialog'],
-  [2, 'Nouveau rendez-vous', '.dialog'],
-  [4, 'Nouvelle tâche', '.dialog'],
-  [5, 'Nouvelle note', '.dialog'],
-  [1, 'Nouveau message', '.compose'],
+  [3, 'Accueil', 'Nouveau contact', '.dialog'],
+  [3, 'Accueil', 'Nouvelle liste', '.dialog'],
+  [2, 'Accueil', 'Nouveau rendez-vous', '.dialog'],
+  [2, 'Accueil', 'Nouvelle réunion', '.dialog'],
+  [4, 'Accueil', 'Nouvelle tâche', '.dialog'],
+  [5, 'Accueil', 'Nouvelle note', '.dialog'],
+  [1, 'Accueil', 'Nouveau message', '.compose'],
+  [1, 'Accueil', "Carnet d'adresses", '.dialog'],
+  [1, 'Envoyer/Recevoir', 'Réponses automatiques', '.dialog'],
+  [1, 'Envoyer/Recevoir', 'Paramètres du compte', '.dialog'],
+  [1, 'Dossier', 'Nouveau dossier', '.dialog'],
+  [1, 'Dossier', 'Nouveau dossier virtuel', '.dialog'],
+  [1, 'Accueil', "Réglages de l'affichage", '.dialog'],
 ];
+const CLOSE = ['Annuler', 'Fermer', 'Close'];
 const TEXT = 'zq9';
 
 /** Champs saisissables visibles du conteneur, repérés par leur rang. */
@@ -27,11 +36,11 @@ const el = (scope, i) => `document.querySelectorAll(${q(scope)} + ' input, ' + $
 export async function run(log) {
   const faults = [];
   try {
-    for (const [module, command, scope] of BOXES) {
+    for (const [module, tab, command, scope] of BOXES) {
       await closeDialogs();
       await press(String(module), { ctrl: true });
       await sleep(2500);
-      await clickTab('Accueil');
+      await clickTab(tab);
       // Ruban d'abord, puis tout bouton de la page (« Nouvelle liste » est dans le volet des contacts).
       const opened = await js(`(() => { const b = [...document.querySelectorAll('.cmd'), ...document.querySelectorAll('button')].find(b => b.textContent.trim() === ${q(command)} && b.getAttribute('aria-disabled') !== 'true'); if (!b) return false; b.click(); return true; })()`);
       if (!opened) {
@@ -58,8 +67,10 @@ export async function run(log) {
         await js(`document.querySelector('.compose button[title="Fermer la rédaction"]')?.click()`);
         await until(`!document.querySelector('.compose')`, 'fermeture de la rédaction');
       } else {
-        await js(`[...document.querySelectorAll('.dialog button')].find(b => b.textContent.trim() === 'Annuler')?.click()`);
-        await until(`!document.querySelector('.dialog')`, `fermeture de « ${command} » par Annuler`);
+        // Bouton de fermeture SANS enregistrement ; s'il n'y en a pas, Échap.
+        const closed = await js(`(() => { const b = [...document.querySelectorAll('.dialog .dialog-buttons button, .dialog button')].find(b => ${q(CLOSE)}.includes(b.textContent.trim())); if (!b) return false; b.click(); return true; })()`);
+        if (!closed) await closeDialogs();
+        await until(`!document.querySelector('.dialog')`, `fermeture de « ${command} » sans enregistrer`);
       }
     }
   } finally {
