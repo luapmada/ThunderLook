@@ -281,7 +281,18 @@ pub fn ComposePane() -> impl IntoView {
             insert_link(ui, frame);
         }
     }));
-    let on_input = StoredValue::new_local(Closure::<dyn Fn(web_sys::Event)>::new(move |_| ui.compose_dirty.set(true)));
+    // Le corps est aussi recopié dans le brouillon en mémoire, sans notifier (l'éditeur n'est pas redessiné) : changer de
+    // module démonte la rédaction, et le texte tapé depuis le dernier enregistrement automatique était perdu.
+    let on_input = StoredValue::new_local(Closure::<dyn Fn(web_sys::Event)>::new(move |_| {
+        if let Some(h) = editor_html(frame) {
+            ui.compose.update_untracked(|d| {
+                if let Some(d) = d {
+                    d.html = h;
+                }
+            });
+        }
+        ui.compose_dirty.set(true);
+    }));
     let on_load = move |_| {
         let Some(doc) = frame_doc(frame) else { return };
         doc.set_design_mode("on");
