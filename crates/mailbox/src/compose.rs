@@ -21,7 +21,7 @@ use mail_builder::{
     mime::{BodyPart, MimePart},
 };
 use mail_parser::{Addr, Message, MessageParser};
-use thunderlook_model::{ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, LastVerb, Signature, format};
+use thunderlook_model::{ComposeKind, Draft, DraftAttachment, DraftAttachmentSource, Importance, LastVerb, Signature, format};
 use thunderlook_store::rusqlite::{OptionalExtension, params};
 
 use crate::{
@@ -552,6 +552,25 @@ fn display_line(list: &[MailAddress]) -> String {
     list.iter().map(|m| m.name.clone().unwrap_or_else(|| m.addr.clone())).collect::<Vec<_>>().join("; ")
 }
 
+/// Valeur de la colonne `importance` (`PidTagImportance`) : 0 faible, 1 normale, 2 haute.
+fn importance_code(i: Importance) -> i64 {
+    match i {
+        Importance::Low => 0,
+        Importance::Normal => 1,
+        Importance::High => 2,
+    }
+}
+
+/// Importance d'un brouillon rouvert, d'après `Importance` ou `X-Priority` (même lecture que la relève IMAP).
+fn header_importance(m: &Message) -> Importance {
+    let h = |name: &str| m.header_raw(name).map(|v| v.trim().to_ascii_lowercase());
+    match (h("Importance").as_deref(), h("X-Priority").as_deref().and_then(|p| p.chars().next())) {
+        (Some("high"), _) | (_, Some('1' | '2')) => Importance::High,
+        (Some("low"), _) | (_, Some('4' | '5')) => Importance::Low,
+        _ => Importance::Normal,
+    }
+}
+
 fn angle(id: &str) -> String {
     format!("<{}>", bare(id))
 }
@@ -840,6 +859,19 @@ impl Mailbox {
             .date(now / 1000)
             .message_id(message_id.clone())
             .header("X-Unsent", Raw::new("1"));
+        // Importance : les deux en-têtes qu'écrivent les clients courants (RFC 2156 et `X-Priority`).
+        builder = match d.importance {
+            Importance::High => builder.header("Importance", Raw::new("High")).header("X-Priority", Raw::new("1")),
+            Importance::Low => builder.header("Importance", Raw::new("Low")).header("X-Priority", Raw::new("5")),
+            Importance::Normal => builder,
+        };
+        // Confirmation de lecture : demandée à l'adresse d'envoi (RFC 8098) ; le destinataire reste libre d'y répondre.
+        if d.read_receipt && !from_addr.is_empty() {
+            builder = builder.header(
+                "Disposition-Notification-To",
+                Address::new_address((!from_name.is_empty()).then(|| from_name.clone()), from_addr.clone()),
+            );
+        }
         if !to.is_empty() {
             builder = builder.to(to_address(&to));
         }
@@ -865,8 +897,20 @@ impl Mailbox {
             Some(e) => {
                 tx.execute(
                     "UPDATE message SET subject = ?2, from_name = ?3, from_addr = ?4, to_line = ?5, cc_line = ?6, received_at = ?7,
-                        modified_at = ?7, size = ?8, attachment_count = ?9, preview = ?10, indexed = 0 WHERE id = ?1",
-                    params![e.id, d.subject, from_name, from_addr, display_line(&to), display_line(&cc), now, eml.len() as i64, attachment_count, preview],
+                        modified_at = ?7, size = ?8, attachment_count = ?9, preview = ?10, importance = ?11, indexed = 0 WHERE id = ?1",
+                    params![
+                        e.id,
+                        d.subject,
+                        from_name,
+                        from_addr,
+                        display_line(&to),
+                        display_line(&cc),
+                        now,
+                        eml.len() as i64,
+                        attachment_count,
+                        preview,
+                        importance_code(d.importance)
+                    ],
                 )
                 .map_err(err)?;
                 tx.execute("DELETE FROM attachment WHERE message_id = ?1", [e.id]).map_err(err)?;
@@ -879,7 +923,7 @@ impl Mailbox {
                         created_at, modified_at, message_flags, is_read, flag_status, importance, sensitivity, size, attachment_count,
                         body_kind, preview, internet_message_id, in_reply_to, conversation_topic, conversation_index, eml_path, props,
                         conversation_id)
-                     VALUES (?1, 0, 'IPM.Note', ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, ?8, 1, 0, 1, 0, ?9, ?10, 'html', ?11, ?12, ?13, ?14, ?15,
+                     VALUES (?1, 0, 'IPM.Note', ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, ?8, 1, 0, ?19, 0, ?9, ?10, 'html', ?11, ?12, ?13, ?14, ?15,
                         ?16, ?17, ?18)",
                     params![
                         folder,
@@ -899,7 +943,8 @@ impl Mailbox {
                         threading.index,
                         "",
                         Vec::<u8>::new(),
-                        threading.conversation_id
+                        threading.conversation_id,
+                        importance_code(d.importance)
                     ],
                 )
                 .map_err(err)?;
@@ -1000,6 +1045,8 @@ impl Mailbox {
                 .optional()
                 .map_err(err)?
                 .map(|()| format!("s{}", row.source)),
+            importance: header_importance(&parsed),
+            read_receipt: parsed.header_raw("Disposition-Notification-To").is_some_and(|v| !v.trim().is_empty()),
         })
     }
 

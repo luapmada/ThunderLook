@@ -397,3 +397,23 @@ Testé sur des fichiers **reconstitués d'après le relevé statistique** de MPE
 - **Champs ignorés à la lecture** (FAX, téléphone en trop, `X-ANNIVERSARY`…) : si le téléphone les modifie seuls, ThunderLook ne le voit pas (rien de perdu côté téléphone, ThunderLook n'y écrit pas).
 - **Sens ThunderLook → téléphone** : n'existe pas dans ce mode (aucune écriture dans le dossier de MPE) ; un rendez-vous créé dans ThunderLook ne va pas sur le téléphone par ce dossier.
 
+
+## À vérifier avec REA/Outlook — rédaction enrichie (lot AS, 26/10)
+
+Écrit et testé sous Linux (`crates/mailbox/tests/compose_rich.rs`) ; **l'interface n'a jamais été vue à l'écran**, rien
+envoyé à un vrai destinataire.
+
+- **En-têtes d'importance** : ThunderLook écrit `Importance: High|Low` + `X-Priority: 1|5` (ni `X-MSMail-Priority`, ni
+  normale explicite). Je ne sais pas exactement ce qu'écrit Outlook 2021 en SMTP ; à comparer avec un message envoyé par
+  Outlook en importance haute (en-têtes bruts), et vérifier que le destinataire Outlook affiche bien le « ! » rouge.
+- **Confirmation de lecture** : `Disposition-Notification-To` (RFC 8098) à l'adresse du compte d'envoi. Outlook peut en
+  plus écrire `Return-Receipt-To` [à vérifier]. **Accusé de réception (remise)** non fait : il demande une option DSN au
+  serveur SMTP (`crates/sync`, hors périmètre). Les demandes de confirmation **reçues** ne sont pas traitées.
+- **Police/taille/couleur** : `execCommand` produit des balises `<font face|size|color>` et, pour le surlignage, un
+  `style="background-color"` ; tailles 1–7 présentées comme 8/10/12/14/18/24/36 pt (équivalence navigateur, pas les pt
+  exacts d'Outlook). Rendu chez un destinataire Outlook non vérifié.
+- **Image dans le corps** : choisie par le sélecteur de fichiers de WebView2 (`<input type=file>`), PNG/JPEG/GIF/BMP/WebP,
+  10 Mo au plus, envoyée en pièce intégrée `cid:`. Non vérifié : que le sélecteur s'ouvre bien dans l'iframe/WebView2
+  de Paul et que l'image s'insère à la position du curseur (sinon, en tête du corps).
+- **Lien** : boîte `prompt()` du navigateur ; à vérifier que WebView2 l'affiche (sinon, il faudra une vraie boîte).
+- **Modèles `.oft`** : l'importance éventuelle du modèle (`PidTagImportance`) n'est pas reprise.
