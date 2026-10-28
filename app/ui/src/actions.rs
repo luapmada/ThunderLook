@@ -9,7 +9,7 @@ use thunderlook_model::{ComposeKind, FolderOp, MessageOp, OpResult, Selection};
 use crate::{
     ipc,
     list::PAGE,
-    state::{ConfirmAction, Dialog, Ui},
+    state::{ConfirmAction, Dialog, Module, Ui},
 };
 
 /// Plages de positions `[début, fin[`, triées et disjointes.
@@ -88,6 +88,42 @@ pub fn compose(ui: Ui, kind: ComposeKind) {
                 ui.compose_dirty.set(false);
                 ui.compose.set(Some(d));
                 ui.compose_epoch.update(|e| *e += 1);
+                ui.error.set(None);
+            }
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
+/// Destinataires choisis dans le carnet d'adresses du ruban : ajoutés au message en rédaction, sinon un nouveau message.
+pub fn compose_to(ui: Ui, to: Vec<String>, cc: Vec<String>, bcc: Vec<String>) {
+    if to.is_empty() && cc.is_empty() && bcc.is_empty() {
+        return;
+    }
+    let fill = move |d: &mut thunderlook_model::Draft| {
+        d.to = crate::address_book::append(&d.to, &to);
+        d.cc = crate::address_book::append(&d.cc, &cc);
+        d.bcc = crate::address_book::append(&d.bcc, &bcc);
+    };
+    if ui.compose.with_untracked(Option::is_some) {
+        ui.compose.update(|d| {
+            if let Some(d) = d {
+                fill(d);
+            }
+        });
+        ui.compose_dirty.set(true);
+        ui.module.set(Module::Mail);
+        return;
+    }
+    let folder = ui.folder.get_untracked();
+    spawn_local(async move {
+        match ipc::compose(ComposeKind::New, None, Some(folder.as_str())).await {
+            Ok(mut d) => {
+                fill(&mut d);
+                ui.compose_dirty.set(true);
+                ui.compose.set(Some(d));
+                ui.compose_epoch.update(|e| *e += 1);
+                ui.module.set(Module::Mail);
                 ui.error.set(None);
             }
             Err(e) => ui.error.set(Some(e)),

@@ -96,6 +96,10 @@ pub enum Action {
     Undo,
     /// Aide intégrée, à la rubrique donnée (vide : en haut).
     Help(&'static str),
+    /// Carnet d'adresses (Ctrl+Maj+B) : les destinataires choisis vont dans un message.
+    AddressBook,
+    /// « Nouveau dossier virtuel » : enregistre la recherche en cours comme dossier de recherche.
+    NewSearchFolder,
 }
 
 impl Action {
@@ -165,6 +169,18 @@ fn perform(ui: Ui, action: Action) {
             }
         }
         Action::SaveSearch => ui.dialog.set(Some(Dialog::SaveSearch)),
+        Action::AddressBook => ui.book_open.set(true),
+        Action::NewSearchFolder => {
+            if ui.search_text.with_untracked(|t| t.trim().is_empty()) {
+                // Un dossier virtuel est une recherche enregistrée : sans recherche, on amène à la zone « Rechercher ».
+                ui.status.set(Some("Tapez d'abord une recherche, puis « Nouveau dossier virtuel » l'enregistre comme dossier.".into()));
+                if let Some(s) = ui.refs.search.get_untracked() {
+                    let _ = s.focus();
+                }
+            } else {
+                ui.dialog.set(Some(Dialog::SaveSearch));
+            }
+        }
         Action::RunRules => ui.dialog.set(Some(Dialog::Rules { run: true })),
         Action::SyncNow => actions::sync_now(ui),
         Action::OfflineToggle => actions::toggle_offline(ui),
@@ -334,7 +350,7 @@ const MAIL_HOME: &[Group] = &[
     Group {
         label: "Rechercher",
         cmds: &[
-            cmd("Carnet d'adresses", BOOK_USER, Some("Ctrl+Maj+B"), false, true, false),
+            wired("Carnet d'adresses", BOOK_USER, Some("Ctrl+Maj+B"), true, false, Action::AddressBook),
             cmd("Filtrer le courrier", FUNNEL, None, true, true, false),
         ],
     },
@@ -387,7 +403,7 @@ const FOLDER: &[Group] = &[
         label: "Nouveau",
         cmds: &[
             wired("Nouveau dossier", FOLDER_PLUS, Some("Ctrl+Maj+E"), true, true, Action::NewFolder),
-            cmd("Nouveau dossier virtuel", FOLDER_SEARCH, None, false, true, true),
+            wired("Nouveau dossier virtuel", FOLDER_SEARCH, None, true, true, Action::NewSearchFolder),
         ],
     },
     Group {

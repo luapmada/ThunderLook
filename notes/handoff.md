@@ -24,7 +24,12 @@
   écriture : chaque boîte est annulée, la rédaction fermée sans enregistrer).
 - **Décision de Paul (28/10)** : la synchro téléphone se teste avec le **S20 FE** ; le **S23 reste synchronisé avec
   Outlook**. Les 1 090 conflits de la relecture auto de `mpe-s23` (26/10 23:43) ne sont ni à analyser ni à appliquer.
-  ThunderLook relit encore `mpe-s23` toutes les 60 min (`exchange.json`, `auto-sync.json`) : à couper si Paul le demande.
+  Relecture auto coupée le 28/10 (`auto-sync.json` : `enabled: false`, copie `auto-sync.json.avant-coupure-s23`) ;
+  dossier d'échange repointé sur `mpe-test` (S20 FE ; copie `exchange.json.avant-s20` dans le dossier de configuration).
+  **Attention** : `mpe-test` contient des données RÉELLES écrites par MPE le 25/10 (2 140 contacts, 367 rendez-vous,
+  MPE 2.3.0, vCard 2.1), pas les données de test de l'étape 5 du plan ; et `mpe-baseline.json` / `exchange-map.json` du
+  dossier de données ont été remplis par les fichiers du S23 : avant le premier essai S20, décider avec Paul (vider le
+  S20 et le peupler de données de test ? repartir d'une base de comparaison vide ?). Rien n'a été lu ni exporté.
 - « Nouvelle réunion » retirée du ruban : Paul n'utilise pas les réunions.
 
 # Passation — état au 2026-10-24 (nuit)

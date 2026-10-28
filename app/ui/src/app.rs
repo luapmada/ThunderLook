@@ -134,6 +134,12 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
         crate::help::open(ui, "");
         return;
     }
+    // Carnet d'adresses (Outlook : Ctrl+Maj+B), depuis tous les modules.
+    if ctrl && shift && !alt && key.eq_ignore_ascii_case("b") {
+        ev.prevent_default();
+        ui.book_open.set(true);
+        return;
+    }
     // Échange avec le téléphone (fichiers vCard, iCalendar, vNote).
     if ctrl && shift && !alt && key.eq_ignore_ascii_case("t") {
         ev.prevent_default();
@@ -525,6 +531,8 @@ pub fn App() -> impl IntoView {
 
     let keys = window_event_listener(leptos::ev::keydown, move |ev| global_key(ui, &ev));
     on_cleanup(move || keys.remove());
+    // Carnet d'adresses du ruban : les destinataires choisis vont dans un message (nouveau, ou celui en rédaction).
+    let book_apply = Callback::new(move |(to, cc, bcc): (Vec<String>, Vec<String>, Vec<String>)| actions::compose_to(ui, to, cc, bcc));
 
     view! {
         <div class="app">
@@ -537,6 +545,7 @@ pub fn App() -> impl IntoView {
             <RulesDialog />
             <CreateRuleDialog />
             <QuickStepsDialog />
+            <crate::address_book::AddressBook open=ui.book_open on_apply=book_apply />
             <AccountsDialog />
             <AutoReplyDialog />
             <AppointmentDialog />

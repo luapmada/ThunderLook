@@ -209,6 +209,8 @@ pub struct Ui {
     pub compose_dirty: RwSignal<bool>,
     /// Incrémenté à chaque ouverture de rédaction : le volet est alors recréé avec le nouveau message.
     pub compose_epoch: RwSignal<u64>,
+    /// Carnet d'adresses ouvert depuis le ruban ou Ctrl+Maj+B (celui de la rédaction a son propre signal).
+    pub book_open: RwSignal<bool>,
     /// Actions rapides (J6), dans l'ordre de la galerie.
     pub quick_steps: RwSignal<Vec<QuickStep>>,
     /// « Travailler hors connexion » (J7).
@@ -302,6 +304,7 @@ impl Ui {
             compose: RwSignal::new(None),
             compose_dirty: RwSignal::new(false),
             compose_epoch: RwSignal::new(0),
+            book_open: RwSignal::new(false),
             quick_steps: RwSignal::new(Vec::new()),
             offline: RwSignal::new(false),
             cal_view: RwSignal::new(None),
