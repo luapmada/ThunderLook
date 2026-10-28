@@ -12,6 +12,8 @@ pub enum CalendarViewKind {
     #[default]
     Week,
     Month,
+    /// Sept jours à partir de la date de référence (« 7 prochains jours », lot AZ) ; hors de `ALL`.
+    NextSevenDays,
 }
 
 impl CalendarViewKind {
@@ -23,6 +25,7 @@ impl CalendarViewKind {
             Self::WorkWeek => "Semaine de travail",
             Self::Week => "Semaine",
             Self::Month => "Mois",
+            Self::NextSevenDays => "7 prochains jours",
         }
     }
 
@@ -32,6 +35,7 @@ impl CalendarViewKind {
             Self::WorkWeek => "Ctrl+Alt+2",
             Self::Week => "Ctrl+Alt+3",
             Self::Month => "Ctrl+Alt+4",
+            Self::NextSevenDays => "",
         }
     }
 }
@@ -156,6 +160,17 @@ pub struct CalendarView {
     pub navigator: Vec<NavMonth>,
     /// Données lues à partir d'une copie de fichier de données : date de cette copie (option A du J9).
     pub source_note: Option<String>,
+    /// Second fuseau horaire montré à côté des heures (lot AZ).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second_zone: Option<SecondZone>,
+}
+
+/// Second fuseau : nom court et écart (minutes) à ajouter à l'heure affichée, au premier jour de la période.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecondZone {
+    pub label: String,
+    pub delta_min: i32,
 }
 
 pub const WEEKDAYS_SHORT: [&str; 7] = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."];

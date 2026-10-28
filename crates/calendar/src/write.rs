@@ -61,7 +61,7 @@ fn e(x: thunderlook_store::rusqlite::Error) -> String {
 
 fn utc_ms(local: &str) -> Result<i64> {
     let t = NaiveDateTime::parse_from_str(local, "%Y-%m-%dT%H:%M").map_err(|_| format!("date invalide : {local}"))?;
-    Ok(TimeZone::PARIS.to_utc(t).and_utc().timestamp_millis())
+    Ok(TimeZone::local().to_utc(t).and_utc().timestamp_millis())
 }
 
 fn now_ms() -> i64 {
@@ -374,7 +374,7 @@ pub fn update_series(conn: &mut Connection, data_dir: &Path, message_id: i64, ed
     let first_day = minutes_to_local(rec.start_date).date();
     let first = expand::dates(&rec, first_day, first_day + Duration::days(366 * 5)).first().copied().unwrap_or(first_day);
     let at = |offset: u32| first.and_hms_opt(0, 0, 0).unwrap_or_default() + Duration::minutes(i64::from(offset));
-    let (first_start, first_end) = (TimeZone::PARIS.to_utc(at(rec.start_offset)).and_utc().timestamp_millis(), TimeZone::PARIS.to_utc(at(rec.end_offset)).and_utc().timestamp_millis());
+    let (first_start, first_end) = (TimeZone::local().to_utc(at(rec.start_offset)).and_utc().timestamp_millis(), TimeZone::local().to_utc(at(rec.end_offset)).and_utc().timestamp_millis());
     let a = |lid| s.named.id(PSETID_APPOINTMENT, lid);
     let mut set = props_of(&s.named, edit, false)?;
     set.push((s.blob_id, Some(Value::Binary(rec.encode()))));
@@ -480,7 +480,7 @@ pub fn replace_series(conn: &mut Connection, data_dir: &Path, message_id: i64, e
     let first_day = minutes_to_local(rec.start_date).date();
     let first = expand::dates(rec, first_day, first_day + Duration::days(366 * 5)).first().copied().unwrap_or(first_day);
     let at = |offset: u32| first.and_hms_opt(0, 0, 0).unwrap_or_default() + Duration::minutes(i64::from(offset));
-    let (first_start, first_end) = (TimeZone::PARIS.to_utc(at(rec.start_offset)).and_utc().timestamp_millis(), TimeZone::PARIS.to_utc(at(rec.end_offset)).and_utc().timestamp_millis());
+    let (first_start, first_end) = (TimeZone::local().to_utc(at(rec.start_offset)).and_utc().timestamp_millis(), TimeZone::local().to_utc(at(rec.end_offset)).and_utc().timestamp_millis());
     let mut set = props_of(&named, &edit, false)?;
     set.push((blob_id, Some(Value::Binary(rec.encode()))));
     for (id, v) in [
@@ -610,7 +610,7 @@ mod tests {
     fn listing(conn: &Connection, id: i64) -> Vec<String> {
         let cal = crate::load(conn).unwrap();
         let a = cal.appointments.iter().find(|a| a.id == id).unwrap();
-        let tz = a.time_zone.unwrap_or(TimeZone::PARIS);
+        let tz = a.time_zone.unwrap_or(TimeZone::local());
         let local = |ms: i64| tz.to_local(chrono::DateTime::from_timestamp_millis(ms).unwrap().naive_utc()).format("%m-%d %H:%M").to_string();
         expand::occurrences(a, utc_ms("2026-01-01T00:00").unwrap(), utc_ms("2027-06-01T00:00").unwrap())
             .iter()

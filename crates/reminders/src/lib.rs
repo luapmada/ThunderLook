@@ -98,7 +98,7 @@ pub fn due(conn: &Connection, data_dir: &Path, now_ms: i64, window: Window) -> R
     for a in cal.appointments.iter() {
         let Some(minutes) = a.reminder_minutes.filter(|m| *m >= 0) else { continue };
         let lead = minutes * MINUTE_MS;
-        let tz = a.time_zone.unwrap_or(TimeZone::PARIS);
+        let tz = a.time_zone.unwrap_or(TimeZone::local());
         for o in expand::occurrences(a, reach + lead, to + lead + 1) {
             let when_ms = o.start_ms - lead;
             let day = o.original_date.unwrap_or_else(|| local_day(&tz, o.start_ms));
@@ -156,7 +156,7 @@ fn is_trash(name: &str) -> bool {
 }
 
 /// Rappels des tâches non terminées : `PidLidReminderTime` (0x8502) si `PidLidReminderSet` (0x8503), sinon rien ; sans
-/// heure, l'échéance (`PidLidTaskDueDate`, date flottante) à 8 h, heure de Paris.
+/// heure, l'échéance (`PidLidTaskDueDate`, date flottante) à 8 h, fuseau de l'utilisateur.
 fn task_reminders(conn: &Connection) -> Result<Vec<Reminder>> {
     let mut named: HashMap<i64, Named> = HashMap::new();
     {
@@ -192,7 +192,7 @@ fn task_reminders(conn: &Connection) -> Result<Vec<Reminder>> {
         let due_ms = task(0x8105).and_then(|i| bag.time_ms(i));
         let at_8 = due_ms.and_then(|d| {
             let day = chrono::DateTime::from_timestamp_millis(d)?.naive_utc().date();
-            Some(TimeZone::PARIS.to_utc(day.and_hms_opt(8, 0, 0)?).and_utc().timestamp_millis())
+            Some(TimeZone::local().to_utc(day.and_hms_opt(8, 0, 0)?).and_utc().timestamp_millis())
         });
         let Some(when_ms) = common(0x8502).and_then(|i| bag.time_ms(i)).or(at_8) else { continue };
         out.push(Reminder { id: format!("t{id}"), kind: Kind::Task, title: subject, when_ms, event_start_ms: at_8.unwrap_or(when_ms), location: None });

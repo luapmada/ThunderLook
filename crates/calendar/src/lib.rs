@@ -4,6 +4,7 @@
 pub mod bag;
 pub mod csv;
 pub mod expand;
+pub mod holidays;
 pub mod ics;
 pub mod ics_series;
 pub mod imported;
@@ -52,7 +53,7 @@ pub struct Appointment {
     pub all_day: bool,
     pub busy: Busy,
     pub recurrence: Option<Recurrence>,
-    /// Fuseau de la série (`PidLidTimeZoneStruct`) ; Europe/Paris s'il manque.
+    /// Fuseau de la série (`PidLidTimeZoneStruct`) ; fuseau de l'utilisateur (`TimeZone::local`) s'il manque.
     pub time_zone: Option<TimeZone>,
     pub time_zone_name: Option<String>,
     /// Rappel en minutes avant le début, s'il est actif.

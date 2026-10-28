@@ -1,5 +1,6 @@
 //! Module Calendrier (J9, option A : lecture seule). La vue est calculée par le cœur (`calendar_view`) ; ici, on
 //! l'affiche : navigateur de dates et calendriers dans le volet de gauche, période au centre, détail en bas.
+//! Lot AZ : « 7 prochains jours », jours fériés (identifiants `h<date>`, rien à ouvrir), fuseaux horaires.
 
 use leptos::{html, prelude::*, task::spawn_local};
 use serde::Serialize;
@@ -58,7 +59,120 @@ pub fn watch(ui: Ui) {
 }
 
 pub fn set_kind(ui: Ui, kind: CalendarViewKind) {
+    // « 7 prochains jours » part d'aujourd'hui, comme Outlook.
+    if kind == CalendarViewKind::NextSevenDays {
+        go_today(ui);
+    }
     ui.update_settings(|s| s.calendar_view = kind);
+}
+
+/// Jour férié ajouté par le cœur (`h<AAAA-MM-JJ>`) : ni ouverture, ni menu, ni suppression.
+fn is_holiday(id: &str) -> bool {
+    id.starts_with('h')
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ZoneItem {
+    id: String,
+    label: String,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ZoneSettings {
+    zones: Vec<ZoneItem>,
+    primary: String,
+    second: Option<String>,
+}
+
+#[derive(Serialize)]
+struct NoArgs {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ZonesArg {
+    primary: String,
+    second: Option<String>,
+}
+
+/// Bouton « Fuseaux horaires » de l'en-tête : fuseau de l'utilisateur et second fuseau affiché à côté des heures.
+#[component]
+fn ZonePicker() -> impl IntoView {
+    let ui = use_ui();
+    let open = RwSignal::new(false);
+    let data = RwSignal::new(None::<ZoneSettings>);
+    let load = move || {
+        spawn_local(async move {
+            match ipc::call::<_, ZoneSettings>("time_zones", &NoArgs {}).await {
+                Ok(z) => data.set(Some(z)),
+                Err(e) => ui.error.set(Some(e)),
+            }
+        });
+    };
+    let save = move |primary: String, second: Option<String>| {
+        spawn_local(async move {
+            match ipc::call::<_, ()>("set_time_zones", &ZonesArg { primary, second }).await {
+                Ok(()) => {
+                    ui.cal_epoch.update(|e| *e += 1);
+                    load();
+                }
+                Err(e) => ui.error.set(Some(e)),
+            }
+        });
+    };
+    view! {
+        <div style="position:relative">
+            <button
+                class="btn"
+                aria-expanded=move || open.get().to_string()
+                title="Fuseau horaire et second fuseau"
+                on:click=move |_| {
+                    if !open.get_untracked() {
+                        load();
+                    }
+                    open.update(|o| *o = !*o);
+                }
+            >
+                "Fuseaux horaires"
+            </button>
+            {move || open.get().then(|| data.get().map(|z| {
+                let options = |selected: Option<String>| {
+                    z.zones
+                        .iter()
+                        .map(|o| view! { <option value=o.id.clone() selected=selected.as_deref() == Some(o.id.as_str())>{o.label.clone()}</option> })
+                        .collect_view()
+                };
+                let (primary, second) = (z.primary.clone(), z.second.clone());
+                let (p2, s2) = (primary.clone(), second.clone());
+                view! {
+                    <div
+                        class="cal-details"
+                        role="dialog"
+                        aria-label="Fuseaux horaires"
+                        style="position:absolute;right:0;top:100%;z-index:20;min-width:22rem;display:grid;gap:0.5rem"
+                    >
+                        <label>
+                            "Fuseau horaire"
+                            <select on:change=move |e| save(event_target_value(&e), s2.clone())>{options(Some(primary.clone()))}</select>
+                        </label>
+                        <label>
+                            "Second fuseau (à côté des heures)"
+                            <select on:change=move |e| {
+                                let v = event_target_value(&e);
+                                save(p2.clone(), (!v.is_empty()).then_some(v));
+                            }>
+                                <option value="" selected=second.is_none()>"Aucun"</option>
+                                {options(second.clone())}
+                            </select>
+                        </label>
+                        <p class="cal-note">"Les fichiers échangés (.ics, téléphone, CSV) restent en heure de Paris."</p>
+                        <button class="btn" on:click=move |_| open.set(false)>"Fermer"</button>
+                    </div>
+                }
+            }))}
+        </div>
+    }
 }
 
 /// « Ouvrir un calendrier » (.ics, CSV d'Outlook) : ajouté aux calendriers importés, en lecture seule.
@@ -215,12 +329,15 @@ fn Chip(event: CalendarEvent, #[prop(default = false)] month: bool, #[prop(defau
                 e.prevent_default();
                 e.stop_propagation();
                 ui.cal_selected.set(Some(ctx_ev.clone()));
+                if is_holiday(&ctx_ev.id) {
+                    return;
+                }
                 ui.context_menu.set(Some(ContextMenuAt { x: f64::from(e.client_x()), y: f64::from(e.client_y()), target: ContextTarget::CalEvent(ctx_ev.id.clone()) }));
             }
             // Double clic : ouvrir le rendez-vous (calendrier commun avec Outlook).
             on:dblclick=move |e| {
                 e.stop_propagation();
-                if shared {
+                if shared && !is_holiday(&open_id) {
                     crate::appointment::open_edit(ui, open_id.clone());
                 }
             }
@@ -425,6 +542,7 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
     });
     let ui = use_ui();
     let now = view.now_min;
+    let second = view.second_zone.clone();
     let days = view.days.clone();
     let columns = n;
     let dates: Vec<String> = days.iter().map(|d| d.date.clone()).collect();
@@ -495,7 +613,9 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
     view! {
         <div class="cal-grid">
             <div class="cal-dayheads" style=cols.clone()>
-                <div></div>
+                <div class="cal-hour-zones" style="font-size:var(--fs-sm);text-align:right;padding-right:var(--u)">
+                    {second.as_ref().map(|z| view! { <span title=format!("Second fuseau : {}", z.label)>{z.label.clone()}</span> })}
+                </div>
                 {days
                     .iter()
                     .map(|d| view! { <div class="cal-dayhead" class:today=d.today>{d.label.clone()}</div> })
@@ -517,7 +637,16 @@ fn TimeGrid(view: CalendarView) -> impl IntoView {
             <div class="cal-scroll" node_ref=scroller>
                 <div class="cal-body" class:dragging=move || drag.with(|d| d.as_ref().is_some_and(|d| d.active)) node_ref=body style=format!("{cols};height:{}px", 24.0 * HOUR_PX) on:pointerdown=on_down>
                     <div class="cal-hours">
-                        {(0..24).map(|h| view! { <div class="cal-hour" style=format!("top:{}px", f64::from(h) * HOUR_PX)>{format!("{h:02}:00")}</div> }).collect_view()}
+                        {(0..24)
+                            .map(|h| {
+                                // Second fuseau : heure correspondante, en plus petit, sous l'heure locale.
+                                let other = second.as_ref().map(|z| {
+                                    let m = (h * 60 + z.delta_min).rem_euclid(1_440);
+                                    view! { <span style="display:block;opacity:0.7;font-size:0.85em">{format!("{:02}:{:02}", m / 60, m % 60)}</span> }
+                                });
+                                view! { <div class="cal-hour" style=format!("top:{}px", f64::from(h) * HOUR_PX)>{format!("{h:02}:00")}{other}</div> }
+                            })
+                            .collect_view()}
                     </div>
                     {days
                         .into_iter()
@@ -681,6 +810,7 @@ pub fn CalendarPane() -> impl IntoView {
                         })
                         .collect_view()}
                 </div>
+                <ZonePicker />
             </header>
             {move || ui.cal_view.with(|v| v.as_ref().and_then(|v| v.source_note.clone())).map(|n| view! { <p class="cal-note">{n}</p> })}
             <div class="cal-main" on:click=move |_| ui.cal_selected.set(None)>

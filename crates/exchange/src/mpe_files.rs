@@ -340,7 +340,7 @@ fn item_plural(kind: ItemKind) -> &'static str {
 
 fn local_start(ms: i64) -> String {
     let utc = chrono::DateTime::from_timestamp_millis(ms).map(|t| t.naive_utc()).unwrap_or_default();
-    thunderlook_calendar::tz::TimeZone::PARIS.to_local(utc).format("%Y-%m-%dT%H:%M").to_string()
+    thunderlook_calendar::tz::TimeZone::local().to_local(utc).format("%Y-%m-%dT%H:%M").to_string()
 }
 
 #[cfg(test)]

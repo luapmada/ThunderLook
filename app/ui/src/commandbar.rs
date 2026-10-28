@@ -490,7 +490,7 @@ const CALENDAR_HOME: &[Group] = &[
         label: "Atteindre",
         cmds: &[
             wired("Aujourd'hui", CALENDAR, None, true, true, Action::CalToday),
-            cmd("7 prochains jours", CALENDAR_DAYS, None, false, true, false),
+            wired("7 prochains jours", CALENDAR_DAYS, None, false, true, Action::CalView(CalendarViewKind::NextSevenDays)),
         ],
     },
     Group {

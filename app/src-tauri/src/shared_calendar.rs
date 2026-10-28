@@ -31,7 +31,7 @@ pub fn note(_app: &AppHandle) -> String {
 }
 
 fn local(ms: i64) -> chrono::NaiveDateTime {
-    TimeZone::PARIS.to_local(chrono::DateTime::from_timestamp_millis(ms).map(|t| t.naive_utc()).unwrap_or_default())
+    TimeZone::local().to_local(chrono::DateTime::from_timestamp_millis(ms).map(|t| t.naive_utc()).unwrap_or_default())
 }
 
 fn form_of(a: &Appointment, dir: &std::path::Path) -> AppointmentForm {

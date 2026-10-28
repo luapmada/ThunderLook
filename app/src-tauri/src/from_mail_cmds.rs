@@ -34,7 +34,7 @@ fn body_text(v: &MessageView) -> String {
 }
 
 fn paris_now() -> chrono::NaiveDateTime {
-    thunderlook_calendar::tz::TimeZone::PARIS.to_local(chrono::DateTime::from_timestamp_millis(now_ms()).map(|t| t.naive_utc()).unwrap_or_default())
+    thunderlook_calendar::tz::TimeZone::local().to_local(chrono::DateTime::from_timestamp_millis(now_ms()).map(|t| t.naive_utc()).unwrap_or_default())
 }
 
 /// Rendez-vous pré-rempli d'après le message `id` ; `calendar_id` (`c<dossier>`) est choisi par l'interface.

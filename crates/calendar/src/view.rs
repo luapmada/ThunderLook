@@ -1,18 +1,23 @@
 //! Étape 3 du J9 : vue d'une période (Jour, Semaine de travail, Semaine, Mois) et navigateur de dates, calculés ici
-//! en heure de Paris ; l'interface ne fait que les afficher.
+//! dans le fuseau de l'utilisateur (`TimeZone::local`, Paris par défaut) ; l'interface ne fait que les afficher.
+//! Lot AZ : « 7 prochains jours », jours fériés de France dans le bandeau « Journée », second fuseau horaire.
 
 use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
 use thunderlook_model::calendar::{
-    CalendarDay, CalendarEvent, CalendarInfo, CalendarQuery, CalendarView, CalendarViewKind, MONTHS, MONTHS_SHORT, NavDay, NavMonth, TimedEvent,
-    WEEKDAYS,
+    CalendarDay, CalendarEvent, CalendarInfo, CalendarQuery, CalendarView, CalendarViewKind, MONTHS, MONTHS_SHORT, NavDay, NavMonth, SecondZone,
+    TimedEvent, WEEKDAYS,
 };
 use thunderlook_store::rusqlite::Connection;
 
-use crate::{Appointment, Busy, Calendar, expand::{Occurrence, occurrences}, tz::TimeZone};
+use crate::{
+    Appointment, Busy, Calendar,
+    expand::{Occurrence, occurrences},
+    holidays,
+    tz::{self, TimeZone},
+};
 
-const TZ: TimeZone = TimeZone::PARIS;
 const DAY_MIN: i64 = 1_440;
 
 /// Calendriers de la base : dossiers de rendez-vous, avec leur fichier de données et leur nombre d'éléments.
@@ -52,11 +57,11 @@ fn iso(d: NaiveDate) -> String {
 }
 
 fn local(ms: i64) -> NaiveDateTime {
-    TZ.to_local(DateTime::from_timestamp_millis(ms).unwrap_or_default().naive_utc())
+    TimeZone::local().to_local(DateTime::from_timestamp_millis(ms).unwrap_or_default().naive_utc())
 }
 
 fn utc_ms(local: NaiveDateTime) -> i64 {
-    TZ.to_utc(local).and_utc().timestamp_millis()
+    TimeZone::local().to_utc(local).and_utc().timestamp_millis()
 }
 
 fn monday(d: NaiveDate) -> NaiveDate {
@@ -187,6 +192,7 @@ pub fn period(kind: CalendarViewKind, anchor: NaiveDate) -> (NaiveDate, NaiveDat
         CalendarViewKind::Day => (anchor, anchor),
         CalendarViewKind::WorkWeek => (monday(anchor), monday(anchor) + Duration::days(4)),
         CalendarViewKind::Week => (monday(anchor), monday(anchor) + Duration::days(6)),
+        CalendarViewKind::NextSevenDays => (anchor, anchor + Duration::days(6)),
         CalendarViewKind::Month => {
             let first = monday(anchor.with_day(1).unwrap());
             (first, first + Duration::days(41))
@@ -243,6 +249,14 @@ pub fn build(cal: &Calendar, calendars: Vec<CalendarInfo>, query: &CalendarQuery
         }
     }
 
+    // Jours fériés : un événement « journée entière » de plus, sauf si le calendrier en porte déjà un du même nom.
+    for (d, name) in holidays::between(first, last) {
+        let band = all_day.entry(d).or_default();
+        if !band.iter().any(|e| holidays::same_name(&e.subject, name)) {
+            band.push(holiday(d, name));
+        }
+    }
+
     let month = anchor.month();
     let days: Vec<CalendarDay> = (0..=(last - first).num_days())
         .map(|i| first + Duration::days(i))
@@ -267,12 +281,12 @@ pub fn build(cal: &Calendar, calendars: Vec<CalendarInfo>, query: &CalendarQuery
 
     let (prev, next) = match kind {
         CalendarViewKind::Day => (anchor - Duration::days(1), anchor + Duration::days(1)),
-        CalendarViewKind::WorkWeek | CalendarViewKind::Week => (anchor - Duration::days(7), anchor + Duration::days(7)),
+        CalendarViewKind::WorkWeek | CalendarViewKind::Week | CalendarViewKind::NextSevenDays => (anchor - Duration::days(7), anchor + Duration::days(7)),
         CalendarViewKind::Month => (add_months(anchor, -1), add_months(anchor, 1)),
     };
     let title = match kind {
         CalendarViewKind::Day => long_date(anchor),
-        CalendarViewKind::WorkWeek | CalendarViewKind::Week => range_title(first, last),
+        CalendarViewKind::WorkWeek | CalendarViewKind::Week | CalendarViewKind::NextSevenDays => range_title(first, last),
         CalendarViewKind::Month => format!("{} {}", MONTHS[anchor.month0() as usize], anchor.year()),
     };
 
@@ -326,7 +340,41 @@ pub fn build(cal: &Calendar, calendars: Vec<CalendarInfo>, query: &CalendarQuery
         calendars,
         navigator,
         source_note: None,
+        second_zone: second_zone(first),
     }
+}
+
+/// Préfixe des identifiants de jours fériés (`h<AAAA-MM-JJ>`) : rien à ouvrir ni à modifier.
+pub const HOLIDAY_PREFIX: char = 'h';
+
+fn holiday(d: NaiveDate, name: &str) -> CalendarEvent {
+    CalendarEvent {
+        id: format!("{HOLIDAY_PREFIX}{}", iso(d)),
+        calendar_id: String::new(),
+        color: 0,
+        subject: name.to_string(),
+        location: None,
+        when: "Toute la journée — jour férié".into(),
+        start_label: String::new(),
+        recurring: false,
+        exception: false,
+        private: false,
+        busy: "free".into(),
+        categories: vec![],
+        reminder_minutes: None,
+        organizer: String::new(),
+        attendees: String::new(),
+        is_meeting: false,
+        continued: false,
+    }
+}
+
+/// Second fuseau choisi (s'il diffère du fuseau de l'utilisateur), avec l'écart en vigueur à midi le premier jour.
+fn second_zone(first: NaiveDate) -> Option<SecondZone> {
+    let z = tz::second_zone().filter(|z| z.id != tz::primary_zone().id)?;
+    let noon = first.and_hms_opt(12, 0, 0)?;
+    let label = z.id.rsplit('/').next().unwrap_or(z.id).replace('_', " ");
+    Some(SecondZone { label, delta_min: tz::delta_minutes(&TimeZone::local(), &z.tz, noon) })
 }
 
 /// Option A du J9 : rappel que les calendriers affichés sont lus dans une copie du fichier de données, et de quand.
@@ -357,7 +405,7 @@ pub fn source_note(conn: &Connection, calendars: &[CalendarInfo]) -> crate::Resu
     Ok((!parts.is_empty()).then(|| format!("Lecture seule — Outlook fait foi. Source : {}.", parts.join(" ; "))))
 }
 
-/// Heure locale (Paris) d'un instant Unix en millisecondes, pour l'appelant.
+/// Heure locale (fuseau de l'utilisateur) d'un instant Unix en millisecondes, pour l'appelant.
 pub fn local_now(now_ms: i64) -> NaiveDateTime {
     local(now_ms)
 }
@@ -404,5 +452,23 @@ mod tests {
         assert_eq!(range_title(NaiveDate::from_ymd_opt(2025, 12, 29).unwrap(), NaiveDate::from_ymd_opt(2026, 1, 4).unwrap()), "29 décembre 2025 – 4 janvier 2026");
         assert_eq!(add_months(NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(), 1), NaiveDate::from_ymd_opt(2026, 2, 28).unwrap());
         assert_eq!(long_date(d), "mercredi 21 octobre 2026");
+        assert_eq!(period(CalendarViewKind::NextSevenDays, d), (d, NaiveDate::from_ymd_opt(2026, 10, 27).unwrap()));
+    }
+
+    #[test]
+    fn next_seven_days_with_holidays() {
+        let cal = Calendar { appointments: vec![], issues: vec![] };
+        let query = CalendarQuery { kind: CalendarViewKind::NextSevenDays, anchor: "2026-10-29".into(), start: None };
+        let now = NaiveDate::from_ymd_opt(2026, 10, 26).unwrap().and_hms_opt(9, 0, 0).unwrap();
+        let v = build(&cal, vec![], &query, now);
+        assert_eq!(v.days.len(), 7);
+        assert_eq!((v.days[0].date.as_str(), v.days[6].date.as_str()), ("2026-10-29", "2026-11-04"));
+        assert_eq!(v.title, "29 octobre – 4 novembre 2026");
+        assert_eq!((v.prev.as_str(), v.next.as_str()), ("2026-10-22", "2026-11-05"));
+        assert_eq!(v.days[0].label, "jeudi 29");
+        // Toussaint (dimanche 1er novembre) dans le bandeau, et seulement elle.
+        let feries: Vec<(&str, &str)> = v.days.iter().flat_map(|d| d.all_day.iter().map(move |e| (d.date.as_str(), e.subject.as_str()))).collect();
+        assert_eq!(feries, [("2026-11-01", "Toussaint")]);
+        assert_eq!(v.days[3].all_day[0].id, "h2026-11-01");
     }
 }
