@@ -153,6 +153,8 @@ pub fn Dialogs() -> impl IntoView {
     let on_key = move |ev: leptos::ev::KeyboardEvent| {
         match ev.key().as_str() {
             "Escape" => close(),
+            // Entrée sur un bouton : son propre clic (« Annuler » validait la boîte, et confirmait une suppression).
+            "Enter" if ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).is_some_and(|t| t.tag_name() == "BUTTON") => return,
             "Enter" => submit(),
             "ArrowDown" | "ArrowUp" if matches!(ui.dialog.get_untracked(), Some(Dialog::PickFolder { .. })) => {
                 let n = candidates().len();

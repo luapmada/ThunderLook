@@ -752,6 +752,9 @@ pub fn CommandBar() -> impl IntoView {
         }
     };
 
+    // Recherche en cours ou non : les onglets ne sont pas redessinés à chaque frappe dans la zone de recherche.
+    let searching = Memo::new(move |_| !ui.search_text.with(String::is_empty));
+
     let bar_entries = Signal::derive(move || {
         let current = ui.settings.get().bar_mode;
         [(BarMode::Compact, "Barre compacte"), (BarMode::Full, "Barre complète"), (BarMode::TabsOnly, "Onglets seuls")]
@@ -797,10 +800,9 @@ pub fn CommandBar() -> impl IntoView {
                 />
                 <div role="tablist" aria-label="Barre de commandes" class="tablist" node_ref=ui.refs.tabs on:keydown=on_tabs_key>
                     {move || {
-                        let searching = !ui.search_text.get().is_empty();
                         Tab::ALL
                         .into_iter()
-                        .chain(searching.then_some(Tab::Search))
+                        .chain(searching.get().then_some(Tab::Search))
                         .map(|tab| {
                             let selected = move || ui.tab.get() == tab;
                             view! {
