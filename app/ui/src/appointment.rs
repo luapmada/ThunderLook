@@ -1,7 +1,11 @@
 //! Boîte « Rendez-vous » du calendrier commun avec Outlook (J9, étape 4) : créer, modifier ; suppression depuis le
 //! détail. Tout passe par Outlook (le cœur écrit par son modèle objet, puis relit le calendrier).
+//!
+//! Lot AW : participants. Ils sont gardés par ThunderLook (`invite_cmds`), pas dans Outlook ; « Enregistrer et
+//! envoyer » enregistre le rendez-vous puis envoie l'invitation (ou sa mise à jour) par courrier.
 
 use leptos::{html, prelude::*, task::spawn_local};
+use serde::{Deserialize, Serialize};
 use thunderlook_model::calendar::AppointmentForm;
 use wasm_bindgen::JsCast;
 
@@ -21,6 +25,10 @@ const REMINDERS: [(i32, &str); 11] = [
     (1_440, "1 jour"),
     (10_080, "1 semaine"),
 ];
+
+/// Liste des réponses (styles locaux : la feuille commune n'est pas de ce lot).
+const ATTENDEES_CSS: &str = ".appt-attendees { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 8px; padding: 0; list-style: none; font-size: var(--fs-sm); color: var(--text-2); } \
+.appt-attendees .att-accepted { color: var(--success, #107c10); } .appt-attendees .att-declined { color: var(--danger, #c50f1f); text-decoration: line-through; }";
 
 const BUSY: [(i32, &str); 5] = [(0, "Disponible"), (4, "Travail ailleurs"), (1, "Provisoire"), (2, "Occupé(e)"), (3, "Absent(e) du bureau")];
 
@@ -85,6 +93,65 @@ pub fn update(ui: Ui, id: String, change: impl FnOnce(&mut AppointmentForm) + 's
     });
 }
 
+/// Rendez-vous pré-rempli d'après une invitation reçue (« Ajouter au calendrier » du volet de lecture) ;
+/// l'utilisateur l'enregistre lui-même. `busy` : 2 occupé(e), 1 provisoire.
+pub fn open_from_invite(ui: Ui, subject: String, location: String, start: String, end: String, all_day: bool, body: String, busy: i32) {
+    let Some(calendar) = target_calendar(ui) else {
+        ui.error.set(Some("Aucun calendrier commun avec Outlook : ouvrez Outlook, puis le calendrier de ThunderLook.".into()));
+        return;
+    };
+    spawn_local(async move {
+        match ipc::appointment_form(None, Some(&calendar), Some(&start)).await {
+            Ok(mut f) => {
+                f.subject = subject;
+                f.location = location;
+                f.start = start;
+                f.end = end;
+                f.all_day = all_day;
+                f.body = body;
+                f.busy = busy;
+                ui.appointment.set(Some(f));
+            }
+            Err(e) => ui.error.set(Some(e)),
+        }
+    });
+}
+
+/// Participant suivi d'une réunion envoyée (voir `invite_cmds::AttendeeView`).
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct Attendee {
+    pub email: String,
+    pub name: String,
+    pub status: String,
+    pub status_label: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttendeesArg<'a> {
+    id: Option<&'a str>,
+    subject: &'a str,
+    start: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InviteSendArg<'a> {
+    form: &'a AppointmentForm,
+    attendees: &'a str,
+    orig_subject: &'a str,
+    orig_start: &'a str,
+}
+
+/// Une série ne s'envoie pas encore en invitation (le cœur iTIP garde la `RRULE` brute, la boîte n'en fabrique pas).
+fn is_series(f: &AppointmentForm) -> bool {
+    f.recurring || !f.repeat.is_empty()
+}
+
+fn attendee_line(a: &Attendee) -> String {
+    if a.name.trim().is_empty() { a.email.clone() } else { format!("{} <{}>", a.name, a.email) }
+}
+
 /// Ouvre un rendez-vous existant (double clic, « Modifier »).
 pub fn open_edit(ui: Ui, id: String) {
     spawn_local(async move {
@@ -114,6 +181,10 @@ pub fn AppointmentDialog() -> impl IntoView {
     let root: NodeRef<html::Div> = NodeRef::new();
     let busy_saving = RwSignal::new(false);
     let note = RwSignal::new(None::<String>);
+    // Participants saisis (« Nom <adresse>; … »), réponses suivies, et clé (objet, début) à l'ouverture.
+    let people = RwSignal::new(String::new());
+    let tracked = RwSignal::new(Vec::<Attendee>::new());
+    let opened_key = RwSignal::new((String::new(), String::new()));
     let form = move || ui.appointment.get();
     let set = move |f: &dyn Fn(&mut AppointmentForm)| ui.appointment.update(|a| {
         if let Some(a) = a {
@@ -123,6 +194,25 @@ pub fn AppointmentDialog() -> impl IntoView {
 
     // Seulement à l'ouverture : suivre `appointment` relancerait l'effet à chaque frappe (focus volé).
     let open = Memo::new(move |_| ui.appointment.with(Option::is_some));
+    // Participants déjà envoyés, à chaque ouverture de la boîte (pas à chaque frappe).
+    Effect::new(move |was_open: Option<bool>| {
+        let open = ui.appointment.with(Option::is_some);
+        if open && was_open != Some(true) {
+            let Some(f) = ui.appointment.get_untracked() else { return open };
+            people.set(String::new());
+            tracked.set(Vec::new());
+            opened_key.set((f.subject.clone(), f.start.clone()));
+            spawn_local(async move {
+                let arg = AttendeesArg { id: f.id.as_deref(), subject: &f.subject, start: &f.start };
+                if let Ok(list) = ipc::call::<_, Vec<Attendee>>("invite_attendees", &arg).await {
+                    people.set(list.iter().map(attendee_line).collect::<Vec<_>>().join("; "));
+                    tracked.set(list);
+                }
+            });
+        }
+        open
+    });
+
     Effect::new(move |_| {
         if open.get() {
             note.set(None);
@@ -143,11 +233,24 @@ pub fn AppointmentDialog() -> impl IntoView {
         let Some(f) = ui.appointment.get_untracked() else { return };
         busy_saving.set(true);
         note.set(Some("Enregistrement dans Outlook…".into()));
+        let attendees = people.get_untracked();
+        let invite = !attendees.trim().is_empty() && !is_series(&f);
+        let (orig_subject, orig_start) = opened_key.get_untracked();
         spawn_local(async move {
             match ipc::appointment_save(&f).await {
                 Ok(m) => {
-                    ui.status.set(Some(m));
                     ui.cal_selected.set(None);
+                    if invite {
+                        note.set(Some("Envoi de l'invitation…".into()));
+                        let arg = InviteSendArg { form: &f, attendees: &attendees, orig_subject: &orig_subject, orig_start: &orig_start };
+                        match ipc::call::<_, String>("invite_send", &arg).await {
+                            Ok(sent) => ui.status.set(Some(format!("{m} {sent}"))),
+                            // Le rendez-vous est enregistré : l'échec de l'envoi est signalé, la boîte se ferme quand même.
+                            Err(e) => ui.error.set(Some(format!("{m} Invitation non envoyée : {e}"))),
+                        }
+                    } else {
+                        ui.status.set(Some(m));
+                    }
                     close();
                 }
                 Err(e) => note.set(Some(e)),
@@ -218,6 +321,26 @@ pub fn AppointmentDialog() -> impl IntoView {
                         <input type="text" aria-label="Emplacement" prop:value=move || form().map(|f| f.location).unwrap_or_default()
                             on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.location = v.clone()); } />
                     </label>
+                    {move || (!form().is_some_and(|f| is_series(&f))).then(|| view! {
+                        <label class="field">
+                            <span>"Participants (séparés par des points-virgules)"</span>
+                            <input type="text" aria-label="Participants" placeholder="Nom <adresse>; adresse…"
+                                prop:value=move || people.get()
+                                on:input=move |ev| people.set(event_target_value(&ev)) />
+                        </label>
+                    })}
+                    {move || form().is_some_and(|f| is_series(&f)).then(|| view! {
+                        <p class="dialog-note">"Invitations : pas encore pour un rendez-vous périodique."</p>
+                    })}
+                    {move || (!tracked.with(Vec::is_empty)).then(|| view! {
+                        <style>{ATTENDEES_CSS}</style>
+                        <ul class="appt-attendees" aria-label="Réponses des participants">
+                            {tracked.get().into_iter().map(|a| {
+                                let who = if a.name.trim().is_empty() { a.email.clone() } else { a.name.clone() };
+                                view! { <li class=format!("att-{}", a.status) title=a.email.clone()>{who}" — "{a.status_label.clone()}</li> }
+                            }).collect_view()}
+                        </ul>
+                    })}
                     {date_time("Début", |f| f.start.clone(), |f, v| f.start = v)}
                     {date_time("Fin", |f| f.end.clone(), |f, v| f.end = v)}
                     <label class="check">
@@ -336,7 +459,9 @@ pub fn AppointmentDialog() -> impl IntoView {
                     </label>
                     {move || note.get().map(|n| view! { <p class="dialog-note" role="status">{n}</p> })}
                     <div class="dialog-buttons">
-                        <button class="btn primary" prop:disabled=move || busy_saving.get() on:click=move |_| save()>"Enregistrer et fermer"</button>
+                        <button class="btn primary" prop:disabled=move || busy_saving.get() on:click=move |_| save()>
+                            {move || if !people.with(|p| p.trim().is_empty()) && !form().is_some_and(|f| is_series(&f)) { "Enregistrer et envoyer" } else { "Enregistrer et fermer" }}
+                        </button>
                         <button class="btn" on:click=move |_| close()>"Annuler"</button>
                     </div>
                 </div>

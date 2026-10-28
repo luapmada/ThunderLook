@@ -417,3 +417,14 @@ envoyé à un vrai destinataire.
   de Paul et que l'image s'insère à la position du curseur (sinon, en tête du corps).
 - **Lien** : boîte `prompt()` du navigateur ; à vérifier que WebView2 l'affiche (sinon, il faudra une vraie boîte).
 - **Modèles `.oft`** : l'importance éventuelle du modèle (`PidTagImportance`) n'est pas reprise.
+
+## À vérifier avec REA/Outlook — interface des invitations (lot AW, `app/src-tauri/src/invite_cmds.rs`, 26/10)
+- Le REPLY / REQUEST part en **pièce jointe `.ics`** (type `application/octet-stream`, le circuit d'envoi ne fabrique pas
+  la partie `text/calendar; method=…` d'Outlook). Outlook / Gmail traitent-ils cette pièce jointe comme une réponse
+  (mise à jour automatique du suivi chez l'organisateur) ? Sinon : ajouter la partie `text/calendar` dans `crates/mailbox/src/compose.rs` (hors lot).
+- Préfixes d'objet « Accepté : », « Provisoire : », « Refusé : » : libellés exacts d'un Outlook FR [à vérifier].
+- Accepter n'écrit rien dans le calendrier : « Ajouter au calendrier » ouvre un rendez-vous pré-rempli que l'utilisateur enregistre.
+- Annulation reçue : simple avis, le rendez-vous n'est pas retrouvé ni supprimé (pas d'UID côté calendrier Outlook).
+- Participants de l'organisateur gardés dans `invitations.json` (dossier de données), pas dans Outlook ; un rendez-vous
+  neuf est retrouvé par objet + début tant qu'il n'a pas été renvoyé avec son id. Séries : pas d'invitation.
+- La partie `text/calendar` apparaît aussi dans la liste des pièces jointes (« pièce jointe N »), Outlook la masque.
