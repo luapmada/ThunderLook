@@ -3,7 +3,9 @@
 //  - Rendez-vous : « Intervalle de répétition » vidé puis 3 → « 3 » (et non « 13 ») ;
 //  - Rendez-vous : avancer le début d'un jour déplace la fin d'autant ;
 //  - Rendez-vous : Ctrl+N dans la boîte ne remplace pas le rendez-vous en cours de saisie ;
-//  - Contact : Ctrl+2 dans la boîte ne change pas de module derrière elle.
+//  - Contact : Ctrl+2 dans la boîte ne change pas de module derrière elle ;
+//  - Contact : un clic à côté de la boîte ne la ferme pas ;
+//  - Rédaction : le corps tapé survit à Ctrl+2 puis Ctrl+1 (la rédaction est fermée ensuite, sans enregistrer).
 import { js, until, press, send, sleep, clickTab, closeDialogs, setValue } from './lib.mjs';
 
 export const name = 'L-saisie-pièges : intervalle, début → fin, Ctrl+N et Ctrl+2 dans une boîte';
@@ -79,7 +81,41 @@ export async function run(log) {
     const still = await js(`({ boite: !!document.querySelector('.dialog'), nom: ${input('Nom')}?.value ?? null, calendrier: !!document.querySelector('.cal-grid, .calendar, .cal-month') })`);
     if (!still.boite || still.nom !== 'zq9') faults.push(`Ctrl+2 dans la boîte Contact : boîte ${still.boite ? 'restée' : 'fermée'}, Nom « ${still.nom} »`);
     log(`Ctrl+2 dans la boîte Contact : boîte ${still.boite ? 'restée ouverte' : 'FERMÉE'}, Nom « ${still.nom} »`);
-    if (still.boite) await cancel();
+
+    // 5. Clic à côté de la boîte : elle reste ouverte (avant : fermée sans rien demander, saisie perdue).
+    if (still.boite) {
+      await js(`(() => { const b = document.querySelector('.modal-backdrop'); const r = b.getBoundingClientRect(); const o = { bubbles: true, clientX: r.left + 5, clientY: r.top + 5 }; b.dispatchEvent(new PointerEvent('pointerdown', o)); b.dispatchEvent(new MouseEvent('click', o)); })()`);
+      await sleep(500);
+      const kept = await js(`!!document.querySelector('.dialog') && ${input('Nom')}?.value === 'zq9'`);
+      if (!kept) faults.push('clic à côté de la boîte Contact : boîte fermée, saisie perdue');
+      log(`clic à côté de la boîte Contact : ${kept ? 'boîte restée ouverte' : 'FERMÉE'}`);
+      if (kept) await cancel();
+    }
+
+    // 6. Rédaction : le corps tapé survit à un changement de module (Ctrl+2 puis Ctrl+1). Fermée sans enregistrer.
+    await closeDialogs();
+    await press('1', { ctrl: true });
+    await sleep(1500);
+    await clickTab('Accueil');
+    await js(`[...document.querySelectorAll('.cmd')].find(b => b.textContent.trim() === 'Nouveau message')?.click()`);
+    await until(`!!document.querySelector('.compose iframe')?.contentDocument?.body`, 'rédaction', 8000);
+    await sleep(1500);
+    await js(`(() => { const f = document.querySelector('.compose iframe'); f.contentWindow.focus(); f.contentDocument.body.focus(); })()`);
+    for (const ch of 'zq9 corps') {
+      await send('Input.insertText', { text: ch });
+      await sleep(30);
+    }
+    await sleep(400);
+    await press('2', { ctrl: true });
+    await sleep(2000);
+    await press('1', { ctrl: true });
+    await until(`!!document.querySelector('.compose iframe')?.contentDocument?.body`, 'rédaction rouverte', 8000);
+    await sleep(1500);
+    const body = await js(`document.querySelector('.compose iframe').contentDocument.body.innerText`);
+    if (!body.includes('zq9 corps')) faults.push('rédaction : corps perdu après Ctrl+2 puis Ctrl+1');
+    log(`rédaction, Ctrl+2 puis Ctrl+1 : corps ${body.includes('zq9 corps') ? 'conservé' : 'PERDU'}`);
+    await js(`document.querySelector('.compose button[title="Fermer la rédaction"]')?.click()`);
+    await sleep(500);
   } finally {
     await closeDialogs();
   }

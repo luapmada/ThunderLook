@@ -1,3 +1,29 @@
+# Passation — état au 2026-10-28 (soir)
+
+## État du 28/10 (lire d'abord)
+- Paul a trouvé ThunderLook inutilisable : impossible de saisir un contact (le focus repartait sur le champ photo à chaque
+  caractère), aucun courrier du jour visible. Causes et corrections :
+  - Focus volé : l'effet d'ouverture des boîtes Contact, Rendez-vous, Tâche, Note suivait tout le formulaire
+    (`ui.X.with(Option::is_some)`) et refaisait `focus()` à chaque frappe. Correctif : `Memo` « ouvert » (9e1947f).
+    **Règle** : un effet d'ouverture ne suit jamais le signal que la frappe modifie.
+  - Courrier « absent » : sans favoris enregistrés, les favoris par défaut venaient de la première source (le PST importé,
+    figé au 15/10) et l'application s'ouvrait dessus. Défaut = premier compte de messagerie (`favorite_ids`, test ajouté).
+  - Lots AS, AW, AX, AY, AZ poussés le 26/10 mais jamais fusionnés dans `main` : fusionnés (eb0f17b). Vérifier à chaque
+    session : `git fetch origin '+refs/heads/*:refs/remotes/gh/*'` puis `git branch -r --no-merged main` (le fetch
+    ordinaire ne rapatrie pas toutes les branches des sessions cloud).
+- Audit de saisie de toute l'interface par 3 sessions cloud (`notes/cloud/saisie-{courrier,agenda,reglages}.md`), fusionné
+  sur `fix/demarrage-et-saisie` : Entrée sur « Annuler » validait (dont la boîte « Confirmer » : suppression), Ctrl+N
+  dans la boîte Rendez-vous remplaçait la saisie, « Intervalle » vidé redevenait 1 (3 → 13), le début ne déplaçait pas la
+  fin, réponses asynchrones périmées (recherche, tâches, notes, doublons), cycles Tab bloqués, raccourcis globaux actifs
+  derrière les boîtes modales. Ensuite, ici : Ctrl+1…5 par touche physique (AZERTY), corps de rédaction conservé au
+  changement de module, clic à côté d'une boîte modale ignoré.
+- Attention : les sessions cloud ne peuvent pas lancer l'application ; un défaut « trouvé à la lecture » peut ne pas
+  exister à l'écran (Leptos 0.8 met à jour sur place les vues de même type : l'éditeur d'actions rapides ne perdait pas
+  le focus). Toujours vérifier par CDP.
+- Vérification de saisie : `UI_ONLY=L-saisie node tools/ui_check.mjs` (cas `saisie.mjs` et `saisie_pieges.mjs`, aucune
+  écriture : chaque boîte est annulée, la rédaction fermée sans enregistrer).
+- Reste ouvert : 1 090 conflits mis de côté par la synchro auto du téléphone (26/10 23:43), non examinés.
+
 # Passation — état au 2026-10-24 (nuit)
 
 ## État du 24/10 (lire d'abord)
