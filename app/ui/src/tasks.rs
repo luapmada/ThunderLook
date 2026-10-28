@@ -3,7 +3,7 @@
 
 use leptos::{html, prelude::*, task::spawn_local};
 use serde::{Serialize, de::DeserializeOwned};
-use thunderlook_model::items::{TaskForm, TaskList, TaskQuery};
+use thunderlook_model::items::{TaskForm, TaskList, TaskQuery, task_set_percent, task_set_status, task_status_label};
 use wasm_bindgen::{JsCast, prelude::*};
 
 use crate::{
@@ -46,7 +46,7 @@ const REPEATS: [(&str, &str); 9] = [
 ];
 const REPEAT_ENDS: [(&str, &str); 3] = [("never", "Sans fin"), ("count", "Après N fois"), ("until", "Jusqu'au")];
 
-const STATUSES: [(i32, &str); 5] = [(0, "Pas commencée"), (1, "En cours"), (2, "Terminée"), (3, "En attente de quelqu'un d'autre"), (4, "Reportée")];
+const STATUSES: [i32; 5] = [0, 1, 2, 3, 4];
 const IMPORTANCES: [(i32, &str); 3] = [(0, "Basse"), (1, "Normale"), (2, "Haute")];
 
 /// Recharge la liste à chaque ouverture du module et après chaque modification.
@@ -209,6 +209,11 @@ pub fn TasksPane() -> impl IntoView {
                                         {r.recurring.then(|| view! { <span class="task-flag" title="Tâche périodique">"↻"</span> })}
                                         {(r.importance == 2).then(|| view! { <span class="task-flag" title="Importance haute">"!"</span> })}
                                         {(!r.categories.is_empty()).then(|| view! { <span class="task-cats">{r.categories.join(", ")}</span> })}
+                                        {(!done && (r.status != 0 || r.percent > 0)).then(|| {
+                                            let label = task_status_label(r.status);
+                                            let text = if r.percent > 0 { format!("{label} · {} %", r.percent) } else { label.to_string() };
+                                            view! { <span class="task-cats" title="État et % achevé">{text}</span> }
+                                        })}
                                         {(!r.due.is_empty()).then(|| view! { <span class="task-due" class:overdue=overdue>{fr_date(&r.due)}</span> })}
                                     </div>
                                 }
@@ -307,9 +312,14 @@ pub fn TaskDialog() -> impl IntoView {
                         </label>
                         <label class="field">
                             <span>"État"</span>
-                            <select aria-label="État" on:change=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(0); set(&|f| f.status = v); }>
-                                {STATUSES.iter().map(|&(v, l)| view! { <option value=v.to_string() selected=move || form().is_some_and(|f| f.status == v)>{l}</option> }).collect_view()}
+                            <select aria-label="État" on:change=move |ev| { let v = event_target_value(&ev).parse().unwrap_or(0); set(&|f| task_set_status(f, v)); }>
+                                {STATUSES.iter().map(|&v| view! { <option value=v.to_string() selected=move || form().is_some_and(|f| f.status == v)>{task_status_label(v)}</option> }).collect_view()}
                             </select>
+                        </label>
+                        <label class="field">
+                            <span>"% achevé"</span>
+                            <input type="number" min="0" max="100" step="25" aria-label="Pourcentage achevé" prop:value=move || form().map(|f| f.percent).unwrap_or(0)
+                                on:change=move |ev| { let v = event_target_value(&ev).trim().parse().unwrap_or(0); set(&|f| task_set_percent(f, v)); } />
                         </label>
                         <label class="field">
                             <span>"Importance"</span>

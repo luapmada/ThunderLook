@@ -34,6 +34,9 @@ pub struct TaskRow {
     /// Tâche périodique.
     #[serde(default)]
     pub recurring: bool,
+    /// % d'avancement (0..=100).
+    #[serde(default)]
+    pub percent: i32,
 }
 
 /// Vue et tri demandés à la liste des tâches.
@@ -70,6 +73,8 @@ pub struct TaskForm {
     pub start: String,
     pub due: String,
     pub status: i32,
+    /// % d'avancement (0..=100) ; rendu cohérent avec `status` par [`task_progress`] à l'enregistrement.
+    pub percent: i32,
     pub importance: i32,
     pub body: String,
     /// Catégories séparées par des virgules.
@@ -86,6 +91,48 @@ pub struct TaskForm {
     pub repeat_count: u32,
     /// Dernier jour `AAAA-MM-JJ`.
     pub repeat_until: String,
+}
+
+/// Statut et % d'avancement cohérents (`status` 0..=4, `percent` 0..=100) : terminée ⇔ 100 % ; « pas commencée » avec
+/// un avancement passe « en cours ». Choix de ThunderLook calqué sur la boîte Tâche d'Outlook [à vérifier].
+pub fn task_progress(status: i32, percent: i32) -> (i32, i32) {
+    let (status, percent) = (status.clamp(0, 4), percent.clamp(0, 100));
+    match (status, percent) {
+        (2, _) | (_, 100) => (2, 100),
+        (0, 1..) => (1, percent),
+        _ => (status, percent),
+    }
+}
+
+/// Changement du statut dans la boîte Tâche : terminée → 100 %, pas commencée → 0 %, sortie de « terminée » → 0 %.
+pub fn task_set_status(f: &mut TaskForm, status: i32) {
+    let status = status.clamp(0, 4);
+    if status == 0 || (status != 2 && f.percent >= 100) {
+        f.percent = 0;
+    }
+    (f.status, f.percent) = task_progress(status, f.percent);
+}
+
+/// Changement du % dans la boîte Tâche : 100 % → terminée ; moins de 100 % sur une terminée → en cours (pas commencée à 0 %).
+pub fn task_set_percent(f: &mut TaskForm, percent: i32) {
+    let percent = percent.clamp(0, 100);
+    let status = match (f.status, percent) {
+        (2, 0) => 0,
+        (2, _) => 1,
+        (s, _) => s,
+    };
+    (f.status, f.percent) = task_progress(status, percent);
+}
+
+/// Libellé d'un statut ([MS-OXOTASK] `PidLidTaskStatus`).
+pub fn task_status_label(status: i32) -> &'static str {
+    match status {
+        1 => "En cours",
+        2 => "Terminée",
+        3 => "En attente de quelqu'un d'autre",
+        4 => "Reportée",
+        _ => "Pas commencée",
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,4 +173,35 @@ pub struct NoteQuery {
     pub text: String,
     /// "recent" (défaut) ou "alpha".
     pub sort: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progression_coherente() {
+        assert_eq!(task_progress(2, 30), (2, 100));
+        assert_eq!(task_progress(1, 100), (2, 100));
+        assert_eq!(task_progress(0, 40), (1, 40));
+        assert_eq!(task_progress(3, 40), (3, 40));
+        assert_eq!(task_progress(9, -5), (4, 0));
+        let mut f = TaskForm::default();
+        task_set_percent(&mut f, 50);
+        assert_eq!((f.status, f.percent), (1, 50));
+        task_set_status(&mut f, 4);
+        assert_eq!((f.status, f.percent), (4, 50));
+        task_set_percent(&mut f, 100);
+        assert_eq!((f.status, f.percent), (2, 100));
+        task_set_percent(&mut f, 75);
+        assert_eq!((f.status, f.percent), (1, 75));
+        task_set_status(&mut f, 2);
+        task_set_status(&mut f, 3);
+        assert_eq!((f.status, f.percent), (3, 0));
+        task_set_status(&mut f, 1);
+        task_set_percent(&mut f, 20);
+        task_set_status(&mut f, 0);
+        assert_eq!((f.status, f.percent), (0, 0));
+        assert_eq!(task_status_label(3), "En attente de quelqu'un d'autre");
+    }
 }

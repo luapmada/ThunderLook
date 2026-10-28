@@ -97,7 +97,7 @@ Fichiers fréquemment touchés par tous les lots (points de conflit de fusion, �
 | Rappel (heure par défaut) | **fait** | `settings.rs` (`default_task_reminder`), `crates/reminders` |
 | Tâches périodiques | **fait** (format **non confirmé** sur une tâche réelle) | `crates/items/src/trecur.rs`, `REA-LIMITES.md` § tâches |
 | Affichages (Toutes, Aujourd'hui, En retard, Cette semaine, Terminées), tri (échéance, importance, titre) | **fait** | `tasks.rs:34-35` |
-| % d'avancement, travail total/réel, propriétaire [à vérifier] | **absent** (`TaskForm` : statut et importance seulement) | `items.rs:63` |
+| % d'avancement, travail total/réel, propriétaire [à vérifier] | **partiel** (lot AY) : % achevé lu/écrit (`PidLidPercentComplete`, VTODO `PERCENT-COMPLETE`), 5 statuts affichés dans la liste ; travail total/réel et propriétaire **absents** | `crates/model/src/items.rs` (`task_progress`), `crates/items/src/{lib,vtodo}.rs`, `tasks.rs` |
 | Affecter une tâche (demande de tâche) [à vérifier] | **absent** | — |
 | `.ics` (VTODO) import/export | **fait** | `crates/items/src/vtodo.rs` |
 | Liste « À FAIRE » du calendrier [à vérifier] | **absent** | `calendar.rs` |

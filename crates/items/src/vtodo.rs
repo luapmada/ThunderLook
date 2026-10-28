@@ -162,7 +162,7 @@ pub fn export(forms: &[TaskForm]) -> String {
                 push(format!("{name};VALUE=DATE:{d}"));
             }
         }
-        let status = f.status.clamp(0, 4);
+        let (status, percent) = thunderlook_model::items::task_progress(f.status, f.percent);
         push(format!(
             "STATUS:{}",
             match status {
@@ -175,7 +175,7 @@ pub fn export(forms: &[TaskForm]) -> String {
             push(format!("X-THUNDERLOOK-STATUS:{status}"));
         }
         push_repeat(f, &mut push);
-        push(format!("PERCENT-COMPLETE:{}", if status == 2 { 100 } else { 0 }));
+        push(format!("PERCENT-COMPLETE:{percent}"));
         push(format!("PRIORITY:{}", match f.importance.clamp(0, 2) { 2 => 1, 0 => 9, _ => 5 }));
         if !f.body.is_empty() {
             push(format!("DESCRIPTION:{}", textfmt::escape(&f.body, true, true)));
@@ -341,6 +341,10 @@ fn record(n: usize, props: Vec<Prop>, alarms: Vec<Vec<Prop>>, truncated: bool) -
     if status == Some(2) && percent.is_some_and(|p| p < 100) {
         w.push("STATUS:COMPLETED avec PERCENT-COMPLETE < 100 : terminée".into());
     }
+    if percent.is_some_and(|p| !(0..=100).contains(&p)) {
+        w.push("PERCENT-COMPLETE hors de 0..100 : borné".into());
+    }
+    (f.status, f.percent) = thunderlook_model::items::task_progress(f.status, percent.unwrap_or(0));
     // Un VALARM absent laisse `reminder` à `None` : l'appelant ne doit pas y lire un effacement (le format ne dit pas si
     // l'application du téléphone sait écrire des rappels de tâche).
     let raw = |name: &str| props.iter().find(|p| p.name == name).map(|p| textfmt::decode_value(p, &mut Vec::new()));
@@ -392,6 +396,7 @@ mod tests {
                     start: "2026-10-01".into(),
                     due: "2026-10-31".into(),
                     status,
+                    percent: match status { 0 => 0, 2 => 100, s => s * 15 },
                     importance,
                     body: "Ligne 1\nLigne 2 avec \\ et é, ;\nCe texte est assez long pour être replié sur plusieurs lignes de 75 octets au moins, oui.".into(),
                     categories: "Pro, Perso".into(),
@@ -486,6 +491,21 @@ mod tests {
     }
 
     #[test]
+    fn avancement_et_statut() {
+        let read = |extra: &str| parse(&format!("BEGIN:VTODO\nSUMMARY:x\n{extra}\nEND:VTODO")).unwrap().remove(0);
+        let sp = |p: &Parsed| (p.form.status, p.form.percent);
+        assert_eq!(sp(&read("STATUS:NEEDS-ACTION\nPERCENT-COMPLETE:30")), (1, 30));
+        assert_eq!(sp(&read("STATUS:IN-PROCESS\nPERCENT-COMPLETE:100")), (2, 100));
+        assert_eq!(sp(&read("STATUS:COMPLETED")), (2, 100));
+        assert_eq!(sp(&read("STATUS:IN-PROCESS\nX-THUNDERLOOK-STATUS:3\nPERCENT-COMPLETE:60")), (3, 60));
+        let p = read("PERCENT-COMPLETE:250");
+        assert_eq!(sp(&p), (2, 100));
+        assert!(p.warnings.iter().any(|w| w.contains("borné")));
+        let out = export(&[TaskForm { status: 0, percent: 45, ..task("x") }, TaskForm { status: 2, percent: 10, ..task("y") }]);
+        assert!(out.contains("STATUS:IN-PROCESS\r\nPERCENT-COMPLETE:45") && out.contains("STATUS:COMPLETED") && out.contains("PERCENT-COMPLETE:100"));
+    }
+
+    #[test]
     fn uid_est_l_identifiant() {
         let mut f = task("x");
         f.id = Some("t12".into());
@@ -501,7 +521,7 @@ mod tests {
         assert_eq!(p.len(), 1);
         let f = &p[0].form;
         assert_eq!((f.subject.as_str(), f.start.as_str(), f.due.as_str()), ("AppelerPaul", "2026-10-01", "2026-10-15"));
-        assert_eq!((f.status, f.importance, f.categories.as_str()), (1, 2, "A,B, C"));
+        assert_eq!((f.status, f.percent, f.importance, f.categories.as_str()), (1, 40, 2, "A,B, C"));
         assert!(p[0].warnings.iter().any(|w| w.contains("heure")));
     }
 
