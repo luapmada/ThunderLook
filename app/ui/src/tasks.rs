@@ -236,8 +236,10 @@ pub fn TaskDialog() -> impl IntoView {
             }
         })
     };
+    // Seulement à l'ouverture : suivre `task_form` relancerait l'effet à chaque frappe (focus volé).
+    let open = Memo::new(move |_| ui.task_form.with(Option::is_some));
     Effect::new(move |_| {
-        if ui.task_form.with(Option::is_some) {
+        if open.get() {
             note.set(None);
             request_animation_frame(move || {
                 if let Some(r) = root.get_untracked() {

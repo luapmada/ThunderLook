@@ -176,8 +176,10 @@ pub fn NoteDialog() -> impl IntoView {
             }
         })
     };
+    // Seulement à l'ouverture : suivre `note_form` relancerait l'effet à chaque frappe.
+    let open = Memo::new(move |_| ui.note_form.with(Option::is_some));
     Effect::new(move |_| {
-        if ui.note_form.with(Option::is_some) {
+        if open.get() {
             note.set(None);
             fu.refresh();
             request_animation_frame(move || {

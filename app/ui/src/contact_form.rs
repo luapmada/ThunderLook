@@ -92,12 +92,14 @@ pub fn ContactDialog() -> impl IntoView {
             }
         })
     };
+    // Seulement à l'ouverture : suivre `contact_form` relancerait l'effet à chaque frappe (focus volé).
+    let open = Memo::new(move |_| ui.contact_form.with(Option::is_some));
     Effect::new(move |_| {
-        if ui.contact_form.with(Option::is_some) {
+        if open.get() {
             note.set(None);
             request_animation_frame(move || {
                 if let Some(r) = root.get_untracked() {
-                    if let Ok(Some(el)) = r.query_selector("input") {
+                    if let Ok(Some(el)) = r.query_selector("input[type=text]") {
                         if let Ok(el) = el.dyn_into::<web_sys::HtmlElement>() {
                             let _ = el.focus();
                         }
