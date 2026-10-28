@@ -137,6 +137,14 @@ pub fn run(ui: Ui, index: usize) {
     });
 }
 
+/// Forme de la suite d'actions : rang de chaque action dans `QuickAction::kinds()`. Les lignes de l'éditeur ne
+/// sont recréées que quand elle change (ajout, retrait, autre sorte d'action), jamais pendant la saisie d'un
+/// paramètre.
+fn shape(actions: &[QuickAction]) -> Vec<usize> {
+    let kinds = QuickAction::kinds();
+    actions.iter().map(|a| kinds.iter().position(|x| x.same_kind(a)).unwrap_or(0)).collect()
+}
+
 /// Contrôle du paramètre d'une action, ou rien.
 fn parameter(ui: Ui, i: usize, action: QuickAction, list: RwSignal<Vec<QuickAction>>) -> AnyView {
     let set = move |a: QuickAction| list.update(|v| v[i] = a);
@@ -313,13 +321,19 @@ pub fn QuickStepsDialog() -> impl IntoView {
             }
             "Tab" => {
                 if let Some(r) = root.get_untracked() {
-                    let Ok(found) = r.query_selector_all("input, select, button, [tabindex='0']") else { return };
+                    // Contrôles grisés exclus : `focus()` y échoue et Tab restait bloqué.
+                    let Ok(found) = r.query_selector_all("input:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex='0']") else { return };
                     let els: Vec<web_sys::HtmlElement> = (0..found.length()).filter_map(|i| found.item(i)?.dyn_into().ok()).collect();
                     let active = document().active_element();
                     let pos = els.iter().position(|e| active.as_ref().is_some_and(|a| a == e.unchecked_ref::<web_sys::Element>()));
                     let n = els.len() as i32;
                     if n > 0 {
-                        let next = (pos.map_or(0, |p| p as i32) + if ev.shift_key() { -1 } else { 1 }).rem_euclid(n);
+                        // Focus hors de la liste (après un retrait de ligne) : premier ou dernier contrôle, sans en sauter un.
+                        let next = match pos {
+                            Some(p) => (p as i32 + if ev.shift_key() { -1 } else { 1 }).rem_euclid(n),
+                            None if ev.shift_key() => n - 1,
+                            None => 0,
+                        };
                         let _ = els[next as usize].focus();
                     }
                 }
@@ -376,6 +390,9 @@ pub fn QuickStepsDialog() -> impl IntoView {
         }
     };
 
+    // Avant : les lignes suivaient `list`, que chaque frappe dans « Catégorie » ou « À » modifie ; le champ était
+    // recréé et perdait le focus après chaque caractère.
+    let rows = Memo::new(move |_| list.with(|v| shape(v)));
     let editor = move || {
         view! {
             <Show when=move || first_use.get()>
@@ -387,14 +404,24 @@ pub fn QuickStepsDialog() -> impl IntoView {
             </label>
             <p class="dialog-note">"Actions :"</p>
             <div class="qs-actions">
-                {move || list.get().into_iter().enumerate().map(|(i, a)| {
+                {move || rows.get().into_iter().enumerate().map(|(i, k)| {
                     let kinds = QuickAction::kinds();
-                    let k = kinds.iter().position(|x| x.same_kind(&a)).unwrap_or(0);
+                    let a = list.with_untracked(|v| v[i].clone());
                     view! {
                         <div class="qs-row">
                             <select aria-label=format!("Action {}", i + 1) on:change=move |ev| {
                                 let j: usize = event_target_value(&ev).parse().unwrap_or(0);
                                 list.update(|v| v[i] = QuickAction::kinds()[j].clone());
+                                // La ligne est recréée (autre paramètre) : le focus revient sur sa liste.
+                                request_animation_frame(move || {
+                                    if let Some(r) = root.get_untracked() {
+                                        if let Ok(Some(el)) = r.query_selector(&format!("select[aria-label='Action {}']", i + 1)) {
+                                            if let Ok(el) = el.dyn_into::<web_sys::HtmlElement>() {
+                                                let _ = el.focus();
+                                            }
+                                        }
+                                    }
+                                });
                             }>
                                 {kinds.iter().enumerate().map(|(j, x)| view! { <option value=j.to_string() selected=j == k>{x.label()}</option> }).collect_view()}
                             </select>
@@ -438,5 +465,20 @@ pub fn QuickStepsDialog() -> impl IntoView {
                 </div>
             </div>
         </Show>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forme_inchangee_pendant_la_saisie() {
+        let before = [QuickAction::Category { name: "Cl".into() }, QuickAction::Forward { to: String::new() }];
+        let after = [QuickAction::Category { name: "Client".into() }, QuickAction::Forward { to: "a@b.fr".into() }];
+        assert_eq!(shape(&before), shape(&after));
+        // Autre sorte d'action : la ligne est recréée.
+        assert_ne!(shape(&before), shape(&[QuickAction::Category { name: "Cl".into() }, QuickAction::Reply]));
+        assert_eq!(shape(&[QuickAction::MoveTo { folder_id: None }, QuickAction::NewMessage { to: String::new() }]), vec![0, 12]);
     }
 }
