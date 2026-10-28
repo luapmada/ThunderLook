@@ -80,14 +80,14 @@ Fichiers fréquemment touchés par tous les lots (points de conflit de fusion, �
 | Champs : prénom, nom, société, fonction, service, 3 courriels, mobile/bureau/domicile, adresses bureau et domicile, page web, anniversaire, notes, photo (JPEG), catégories | **fait** | `crates/model/src/contacts.rs:119-153` |
 | Champs : titre, second prénom, suffixe, surnom, fax, téléphones supplémentaires, adresse « autre », messagerie instantanée, conjoint [à vérifier] | **absent** : `ContactForm` ne les porte pas ; en vCard, FAX/PAGER/CAR… sont ignorés avec un avertissement | `crates/model/src/contacts.rs:119` ; `crates/contacts/src/vcard.rs:241,471` ; `REA-LIMITES.md` (doublons) |
 | Photo | **partiel** : JPEG seulement | `REA-LIMITES.md` § contacts |
-| Listes de distribution | **partiel** : lecture seule | `crates/contacts/src/distlist.rs` (`REA-LIMITES.md`) |
+| Listes de distribution | **fait (lot AX, non vu à l'écran)** : création, modification (membres nom + adresse, one-off), suppression annulable ; refus de réécrire une liste à membres non résolus | `crates/contacts/src/distlist.rs` (`save`), `app/src-tauri/src/distlist_cmds.rs`, `contacts.rs` (`ListDialog`) ; `REA-LIMITES.md` |
 | Doublons | **fait** (fusion, annulable) | `crates/contacts/src/dedupe.rs`, `dedupe.rs` (UI) |
 | `.vcf` import/export | **fait** (2.1/3.0/4.0 lus) | `crates/contacts/src/vcard.rs` |
 | Impression fiche et liste | **fait** | `print.rs` |
-| Vues Cartes / Liste / Téléphone, tri et regroupement par nom/société [à vérifier] | **absent** : un seul affichage, filtre texte | `contacts.rs` |
-| Boutons « Communiquer » (nouveau message au contact), « Catégories », « Suivi » | **absent** (désactivés) | `commandbar.rs` (CONTACTS_HOME) |
+| Vues Cartes / Liste / Téléphone, tri et regroupement par nom/société [à vérifier] | **partiel (lot AX)** : vues Personnes, Cartes, Liste (Nom, Société, Courrier, Téléphone ; tri par Nom ou Société) ; ni vue Téléphone ni regroupement | `contacts.rs` (`cards`, `table`) |
+| Boutons « Communiquer » (nouveau message au contact), « Catégories », « Suivi » | **partiel** : « Nouveau message » branché (lot AX : contact sélectionné, ou tous les membres d'une liste) ; « Catégories », « Suivi » désactivés | `commandbar.rs` (CONTACTS_HOME), `contacts.rs` (`message_selected`) |
 | Dossiers de contacts multiples | **partiel** (dossier affiché ; doublons entre dossiers non traités) | `REA-LIMITES.md` (doublons) |
-| Envoyer à une liste/un groupe [à vérifier] | **absent** (pas d'autocomplétion, listes en lecture seule) | — |
+| Envoyer à une liste/un groupe [à vérifier] | **fait** : autocomplétion (lot AM) et « Nouveau message » sur une liste (lot AX) ; les membres sont développés dans « À » | `crates/contacts/src/suggest.rs`, `contacts.rs` |
 
 ## 4. Tâches
 

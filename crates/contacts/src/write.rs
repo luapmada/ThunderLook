@@ -328,7 +328,7 @@ pub fn update(conn: &mut Connection, data_dir: &Path, message_id: i64, f: &Conta
     Ok(())
 }
 
-/// Suppression d'un contact.
+/// Suppression d'un contact ou d'une liste de distribution (annulable : copie dans la corbeille interne).
 pub fn delete(conn: &mut Connection, message_id: i64) -> Result<()> {
     thunderlook_safety::snapshot_conn(conn, message_id)?;
     conn.execute("DELETE FROM message_fts WHERE rowid = ?1", [message_id]).map_err(e)?;

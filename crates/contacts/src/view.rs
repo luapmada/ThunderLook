@@ -64,7 +64,19 @@ fn row(c: &Contact) -> ContactRow {
         search.push(v.chars().filter(char::is_ascii_digit).collect());
     }
     let search = search.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n").to_lowercase();
-    ContactRow { id: format!("p{}", c.id), title, subtitle, initials: initials(c), letter, search, ..Default::default() }
+    let phone = ["Mobile", "Bureau", "Domicile"].iter().find_map(|l| c.phones.iter().find(|(x, v)| x == l && !v.is_empty())).or(c.phones.first()).map(|(_, v)| v.clone()).unwrap_or_default();
+    ContactRow {
+        id: format!("p{}", c.id),
+        title,
+        subtitle,
+        initials: initials(c),
+        letter,
+        search,
+        company: c.company.clone(),
+        email: c.emails.first().map(|e| e.address.clone()).unwrap_or_default(),
+        phone,
+        ..Default::default()
+    }
 }
 
 /// Listes de distribution d'un dossier, en lignes `d<message>` (membres dans `members`), triées par nom.

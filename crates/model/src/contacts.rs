@@ -36,6 +36,13 @@ pub struct ContactRow {
     /// Membres d'une liste de distribution (vide pour un contact).
     #[serde(default)]
     pub members: Vec<DistMember>,
+    /// Société, première adresse électronique et premier téléphone (mobile, bureau, domicile) : vues Cartes et Liste.
+    #[serde(default)]
+    pub company: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub phone: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,7 +50,7 @@ pub struct ContactRow {
 pub enum ContactRowKind {
     #[default]
     Contact,
-    /// `IPM.DistList` : `id` = `d<message>`, lecture seule.
+    /// `IPM.DistList` : `id` = `d<message>`.
     DistList,
 }
 
@@ -55,7 +62,7 @@ pub struct DistMember {
     pub email: String,
 }
 
-/// Liste de distribution (`IPM.DistList`), en lecture seule.
+/// Liste de distribution (`IPM.DistList`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DistList {

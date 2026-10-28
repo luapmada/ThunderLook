@@ -221,6 +221,17 @@ Non vérifié sur un blob réel (pas de fixture avec objet ou lieu d'exception) 
   - si 0x8054 liste bien **tous** les membres (contacts compris) comme je le lis : non confirmé ;
   - si l'import PST conserve les propriétés `PtypMultipleBinary` dans `message.props` (sinon la liste s'affiche vide) ;
   - `PidLidDistributionListStream` (0x8064, ordre et noms de repli) non lu.
+- **Listes de distribution, écriture (lot AX, `distlist::save`)** : chaque membre est écrit en EntryID one-off Unicode
+  (« SMTP »), le même tableau dans 0x8054 et 0x8055 ; nom dans 0x8053, 0x3001 et l'objet ; classe `IPM.DistList`.
+  Testé sur bases fabriquées seulement. Incertain :
+  - **somme de contrôle** `PidLidDistributionListChecksum` (0x804C) : non recalculée (algorithme exact non vérifié),
+    retirée à l'écriture ; je ne sais pas si Outlook la recalcule ou signale la liste ;
+  - Outlook met-il dans 0x8055 des EntryID « enveloppés » (renvoi vers le contact) plutôt que des one-off ? Ici :
+    one-off partout (le membre n'est plus lié à la fiche du contact) ;
+  - 0x8064 (`…Stream`) n'est ni écrit ni retiré : sur une liste modifiée venant d'Outlook, il peut décrire les anciens
+    membres ;
+  - une liste qui a des membres **non résolus** n'est pas réécrite (refus explicite, rien n'est perdu) ;
+  - écriture refusée si la table de noms de la source ne connaît pas 0x8053/0x8054/0x8055 (cas d'une base sans liste).
 ## À vérifier avec REA/Outlook — doublons de contacts (`crates/contacts/src/dedupe.rs`, lot S)
 
 Écrit et testé sous Linux sur des bases de test (`cargo test -p thunderlook-contacts dedupe`) ; **aucune écriture dans Outlook, jamais lancé sur la vraie base**.
