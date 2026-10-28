@@ -73,6 +73,25 @@ pub fn entry_body(entry: &MenuEntry) -> impl IntoView + use<> {
     }
 }
 
+/// Ce qu'un menu affiche (libellés, coches, pastilles, état, séparateurs, sous-menus). Un menu ouvert n'est reconstruit
+/// que quand cela change : sinon un rafraîchissement de l'état (synchro IDLE, arborescence relue) recréait ses boutons
+/// et le focus clavier tombait sur la page.
+pub fn shape(entries: &[MenuEntry]) -> String {
+    let mut out = String::new();
+    for e in entries {
+        out.push_str(&format!(
+            "{}|{:?}|{}|{}|{:?}[{}]\u{1e}",
+            e.label,
+            e.checked,
+            e.is_enabled(),
+            e.separator,
+            e.swatch,
+            shape(&e.children)
+        ));
+    }
+    out
+}
+
 pub fn items(menu: &web_sys::HtmlDivElement) -> Vec<web_sys::HtmlElement> {
     let Ok(list) = menu.query_selector_all("[role^=menuitem]:not([aria-disabled=true])") else { return vec![] };
     (0..list.length()).filter_map(|i| list.item(i)?.dyn_into::<web_sys::HtmlElement>().ok()).collect()
@@ -109,6 +128,7 @@ pub fn MenuButton(
     let wrap: NodeRef<html::Div> = NodeRef::new();
     let button: NodeRef<html::Button> = NodeRef::new();
     let menu: NodeRef<html::Div> = NodeRef::new();
+    let drawn = Memo::new(move |_| entries.with(|e| shape(e)));
 
     // Fermeture au clic hors du menu.
     let outside = window_event_listener(leptos::ev::pointerdown, move |ev| {
@@ -201,8 +221,9 @@ pub fn MenuButton(
             <Show when=move || open.get()>
                 <div class="menu" role="menu" aria-label=label node_ref=menu on:keydown=on_menu_key>
                     {move || {
+                        drawn.track();
                         entries
-                            .get()
+                            .get_untracked()
                             .into_iter()
                             .map(|entry| {
                                 let disabled = entry.on_select.is_none();
@@ -232,5 +253,21 @@ pub fn MenuButton(
                 </div>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forme_du_menu() {
+        let a = vec![MenuEntry::pending("Trier"), MenuEntry::submenu("Déplacer", vec![MenuEntry::pending("Boîte de réception")]).separated()];
+        let b = vec![MenuEntry::pending("Trier"), MenuEntry::submenu("Déplacer", vec![MenuEntry::pending("Boîte de réception")]).separated()];
+        // Mêmes entrées recalculées : pas de reconstruction.
+        assert_eq!(shape(&a), shape(&b));
+        let c = vec![MenuEntry::pending("Trier"), MenuEntry::submenu("Déplacer", vec![MenuEntry::pending("Archives")]).separated()];
+        assert_ne!(shape(&a), shape(&c));
+        assert_ne!(shape(&a), shape(&a[..1]));
     }
 }

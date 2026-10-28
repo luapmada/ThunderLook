@@ -322,6 +322,9 @@ pub fn ContextMenu() -> impl IntoView {
             None => top,
         }
     };
+    // Le menu ouvert n'est redessiné que si son contenu visible change (voir `menu::shape`) : la synchro IDLE relit
+    // l'arborescence et les lignes, ce qui recréait les boutons et faisait perdre le focus clavier.
+    let drawn = Memo::new(move |_| crate::menu::shape(&entries()));
 
     let close = move || {
         sub.set(None);
@@ -395,7 +398,9 @@ pub fn ContextMenu() -> impl IntoView {
         <Show when=move || root.get().is_some()>
             <div class="menu context-menu" role="menu" aria-label="Menu contextuel" style=style node_ref=menu on:keydown=on_key>
                 {move || {
-                    let back = sub.get().map(|label| {
+                    root.track();
+                    drawn.track();
+                    let back = sub.get_untracked().map(|label| {
                         view! {
                             <button role="menuitem" tabindex="-1" class="menu-back" on:click=move |_| sub.set(None)>
                                 <span class="check"></span>
@@ -404,7 +409,7 @@ pub fn ContextMenu() -> impl IntoView {
                             <div class="menu-sep" role="separator"></div>
                         }
                     });
-                    let list = entries()
+                    let list = untrack(entries)
                         .into_iter()
                         .map(|entry| {
                             let disabled = !entry.is_enabled();

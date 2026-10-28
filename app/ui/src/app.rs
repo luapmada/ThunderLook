@@ -36,9 +36,12 @@ use crate::{
 
 /// Raccourcis réservés à l'application : on empêche WebView2 de les traiter
 /// (rechargement, recherche dans la page, impression…). Ils seront câblés aux jalons suivants.
-fn reserved(ev: &web_sys::KeyboardEvent) -> bool {
-    let key = ev.key().to_lowercase();
-    let ctrl = ev.ctrl_key();
+/// Dans un champ, Ctrl+Y (rétablir) reste au texte.
+fn reserved(key: &str, ctrl: bool, editing: bool) -> bool {
+    let key = key.to_lowercase();
+    if editing && ctrl && key == "y" {
+        return false;
+    }
     matches!(key.as_str(), "f5" | "f9" | "f7" | "f3" | "f1" | "f12")
         || (ctrl && matches!(key.as_str(), "r" | "f" | "n" | "p" | "u" | "q" | "s" | "m" | "g" | "j" | "h" | "o" | "t" | "k" | "e" | "y" | "d" | "l" | "b" | "+" | "-" | "=" | "0"))
 }
@@ -82,9 +85,30 @@ fn cycle_focus(ui: Ui, backward: bool) {
     let _ = targets[next as usize].focus();
 }
 
+/// Élément qui reçoit la frappe : champ, liste, zone `contenteditable`, ou iframe en `designMode` (rédaction, signatures).
+fn edits_text(tag: &str, content_editable: bool, design_mode: bool) -> bool {
+    matches!(tag, "INPUT" | "TEXTAREA" | "SELECT") || content_editable || (tag == "IFRAME" && design_mode)
+}
+
 /// Le focus est dans un champ de saisie (les raccourcis d'édition lui reviennent).
+/// Avant, seuls INPUT, TEXTAREA et SELECT comptaient : une zone `contenteditable` ou l'iframe d'un éditeur laissait
+/// passer Ctrl+Q, Ctrl+U, Inser, Suppr, Ctrl+Z… vers les messages.
 fn typing() -> bool {
-    document().active_element().is_some_and(|a| matches!(a.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT"))
+    let Some(a) = document().active_element() else { return false };
+    let editable = a.dyn_ref::<web_sys::HtmlElement>().is_some_and(|e| e.is_content_editable());
+    // Pas de `dyn_into` : document d'une autre fenêtre (voir `compose.rs`) ; `None` pour une iframe isolée.
+    let design = a
+        .dyn_ref::<web_sys::HtmlIFrameElement>()
+        .and_then(|f| f.content_document())
+        .is_some_and(|d| d.unchecked_into::<web_sys::HtmlDocument>().design_mode().eq_ignore_ascii_case("on"));
+    edits_text(&a.tag_name(), editable, design)
+}
+
+/// Une boîte modale est affichée (toutes portent `aria-modal`, et ne sont dans le document qu'ouvertes). Les signaux
+/// testés plus bas n'en couvraient qu'une partie : Ctrl+2 changeait de module derrière la fiche contact, et Ctrl+N du
+/// calendrier remplaçait le rendez-vous en cours de saisie.
+fn modal_open() -> bool {
+    document().query_selector("[aria-modal='true']").ok().flatten().is_some()
 }
 
 /// Raccourcis valables partout, y compris dans le corps d'un message (relayés depuis l'iframe).
@@ -92,7 +116,7 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
     let key = ev.key();
     let (ctrl, alt, shift) = (ev.ctrl_key(), ev.alt_key(), ev.shift_key());
     // Une boîte de dialogue ou un menu contextuel garde ses touches.
-    if ui.dialog.get_untracked().is_some() || ui.context_menu.get_untracked().is_some() || ui.phone_exchange.get_untracked() || ui.backups.get_untracked() || ui.help.with_untracked(Option::is_some) {
+    if ui.dialog.get_untracked().is_some() || ui.context_menu.get_untracked().is_some() || ui.phone_exchange.get_untracked() || ui.backups.get_untracked() || ui.help.with_untracked(Option::is_some) || modal_open() {
         return;
     }
     if key == "F1" && !ctrl && !alt && !shift {
@@ -214,7 +238,7 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
         ui.bar_popup.set(false);
         return;
     }
-    if reserved(ev) {
+    if reserved(&key, ctrl, typing()) {
         ev.prevent_default();
     }
 }
@@ -393,11 +417,13 @@ pub fn App() -> impl IntoView {
         f
     });
 
-    // Onglet contextuel « Rechercher » pendant une recherche.
+    // Onglet contextuel « Rechercher » pendant une recherche (posé une fois : le reposer à chaque frappe redessinait la barre).
     Effect::new(move |_| {
         let active = !ui.search_text.get().is_empty();
         if active {
-            ui.tab.set(Tab::Search);
+            if ui.tab.get_untracked() != Tab::Search {
+                ui.tab.set(Tab::Search);
+            }
         } else if ui.tab.get_untracked() == Tab::Search {
             ui.tab.set(Tab::Home);
         }
@@ -530,6 +556,10 @@ fn Main() -> impl IntoView {
     let set_folder_w = Callback::new(move |w| ui.update_settings(|s| s.folder_pane_width = w));
     let set_list_w = Callback::new(move |w| ui.update_settings(|s| s.list_width = w));
     let set_list_h = Callback::new(move |h| ui.update_settings(|s| s.list_height = h));
+    // Seul l'emplacement du volet de lecture décide des volets montés. Suivre tous les réglages recréait la liste, son
+    // séparateur et la rédaction à chaque pas du séparateur : focus perdu au clavier, glisser interrompu, corps du
+    // brouillon non enregistré perdu.
+    let pane = Memo::new(move |_| ui.settings.with(|s| s.reading_pane));
 
     let columns = move || {
         let st = s();
@@ -555,7 +585,7 @@ fn Main() -> impl IntoView {
                     on_change=set_folder_w
                 />
             </Show>
-            {move || match (ui.module.get(), s().reading_pane) {
+            {move || match (ui.module.get(), pane.get()) {
                 (Module::Mail, ReadingPane::Right) => view! {
                     <MessageList />
                     <Splitter
@@ -600,5 +630,38 @@ fn Main() -> impl IntoView {
                 .into_any(),
             }}
         </main>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saisie_reconnue() {
+        assert!(edits_text("INPUT", false, false));
+        assert!(edits_text("TEXTAREA", false, false));
+        assert!(edits_text("SELECT", false, false));
+        assert!(edits_text("DIV", true, false));
+        // Rédaction et signatures : iframe en `designMode`.
+        assert!(edits_text("IFRAME", false, true));
+        // Corps d'un message lu : iframe non modifiable, les raccourcis (Suppr…) y restent actifs.
+        assert!(!edits_text("IFRAME", false, false));
+        assert!(!edits_text("DIV", false, false));
+        assert!(!edits_text("BUTTON", false, false));
+    }
+
+    #[test]
+    fn raccourcis_reserves() {
+        assert!(reserved("F5", false, false));
+        assert!(reserved("r", true, true));
+        assert!(reserved("y", true, false));
+        // Ctrl+Y : rétablir, dans un champ.
+        assert!(!reserved("y", true, true));
+        assert!(!reserved("Y", true, true));
+        // Ctrl+Z et Ctrl+A ne sont jamais retenus.
+        assert!(!reserved("z", true, false));
+        assert!(!reserved("a", true, true));
+        assert!(!reserved("r", false, false));
     }
 }

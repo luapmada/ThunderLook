@@ -84,6 +84,8 @@ pub fn MpeImport() -> impl IntoView {
     let warnings = RwSignal::new(Vec::<String>::new());
     let can_undo = RwSignal::new(false);
     let busy = RwSignal::new(false);
+    // Cocher une case ne reconstruit pas la liste des changements (voir `exchange::row_keys`).
+    let keys = Memo::new(move |_| rows.with(|r| crate::exchange::row_keys(r)));
 
     let reset = move || {
         rows.set(Vec::new());
@@ -335,7 +337,8 @@ pub fn MpeImport() -> impl IntoView {
                             <h3>{move || format!("Changements ({})", rows.with(Vec::len))}</h3>
                             <ul class="exchange-changes">
                                 {move || {
-                                    rows.get()
+                                    keys.track();
+                                    rows.get_untracked()
                                         .into_iter()
                                         .enumerate()
                                         .map(|(i, c)| {
@@ -343,7 +346,7 @@ pub fn MpeImport() -> impl IntoView {
                                             view! {
                                                 <li>
                                                     <label class="check">
-                                                        <input type="checkbox" prop:checked=c.selected
+                                                        <input type="checkbox" prop:checked=move || rows.with(|r| r.get(i).is_some_and(|c| c.selected))
                                                             on:change=move |ev| {
                                                                 let on = event_target_checked(&ev);
                                                                 rows.update(|r| {

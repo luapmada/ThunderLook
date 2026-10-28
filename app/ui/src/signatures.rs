@@ -74,6 +74,10 @@ pub fn SignaturesDialog() -> impl IntoView {
         }
     };
     let select = move |i: usize| {
+        // Signature déjà affichée : ne pas recréer l'éditeur (focus et curseur perdus).
+        if sel.get_untracked() == Some(i) {
+            return;
+        }
         commit();
         sel.set(Some(i));
     };

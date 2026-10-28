@@ -140,6 +140,7 @@ pub fn ExchangeDialog() -> impl IntoView {
     let warnings = RwSignal::new(Vec::<String>::new());
     // Fichiers modifiés par le téléphone qu'un export écraserait : l'export est alors proposé « quand même ».
     let blocked = RwSignal::new(Option::<String>::None);
+    let keys = Memo::new(move |_| rows.with(|r| row_keys(r)));
     let busy = RwSignal::new(false);
 
     Effect::new(move |_| {
@@ -429,7 +430,8 @@ pub fn ExchangeDialog() -> impl IntoView {
                                                 <h3>{move || format!("{title} ({})", count())}</h3>
                                                 <ul class="exchange-changes">
                                                     {move || {
-                                                        rows.get()
+                                                        keys.track();
+                                                        rows.get_untracked()
                                                             .into_iter()
                                                             .enumerate()
                                                             .filter(|(_, c)| c.item == module)
@@ -438,7 +440,7 @@ pub fn ExchangeDialog() -> impl IntoView {
                                                                 view! {
                                                                     <li>
                                                                         <label class="check">
-                                                                            <input type="checkbox" prop:checked=c.selected
+                                                                            <input type="checkbox" prop:checked=move || rows.with(|r| r.get(i).is_some_and(|c| c.selected))
                                                                                 on:change=move |ev| {
                                                                                     let on = event_target_checked(&ev);
                                                                                     rows.update(|r| {
@@ -674,9 +676,19 @@ fn outcome_text(p: &AutoPass) -> String {
 fn fetch_auto(view: RwSignal<AutoView>) {
     spawn_local(async move {
         if let Ok(v) = auto_call::<AutoView>("auto_sync_state", &NoArgs {}).await {
-            view.set(v);
+            // État inchangé : rien n'est redessiné (le relevé toutes les 20 s recréait le bouton « Appliquer malgré le
+            // seuil… » sous le focus et réécrivait le champ des minutes en cours de saisie).
+            if view.with_untracked(|cur| *cur != v) {
+                view.set(v);
+            }
         }
     });
+}
+
+/// Lignes d'un examen telles qu'affichées, sans leur coche : cocher une case ne reconstruit pas la liste (le focus
+/// clavier restait sinon sur une case détruite) ; un nouvel examen, lui, la redessine.
+pub(crate) fn row_keys(rows: &[DetailRow]) -> Vec<DetailRow> {
+    rows.iter().map(|c| DetailRow { selected: false, ..c.clone() }).collect()
 }
 
 /// Rafraîchit `view` toutes les 20 s tant que le composant vit.
@@ -786,6 +798,7 @@ pub fn AutoSyncZone() -> impl IntoView {
     };
 
     let s = move || st.with(|v| v.settings.clone());
+    let minutes = Memo::new(move |_| st.with(|v| v.settings.minutes));
     view! {
         <section class="auto-sync" aria-label="Synchronisation automatique">
             <h3>"Synchronisation automatique"</h3>
@@ -800,7 +813,7 @@ pub fn AutoSyncZone() -> impl IntoView {
                 <span>"Toutes les (minutes, 5 à 120)"</span>
                 <input type="number" min="5" max="120" aria-label="Minutes entre deux relectures automatiques"
                     prop:disabled=move || !s().enabled
-                    prop:value=move || s().minutes.to_string()
+                    prop:value=move || minutes.get().to_string()
                     on:change=move |ev| {
                         if let Ok(m) = event_target_value(&ev).trim().parse::<u32>() {
                             let s = s();
@@ -866,5 +879,23 @@ pub fn AutoSyncZone() -> impl IntoView {
                 </ul>
             </details>
         </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(key: &str, selected: bool) -> DetailRow {
+        DetailRow { key: key.into(), kind: "modified".into(), item: "contact".into(), summary: "Dupont".into(), selected, conflict: None, fields: Vec::new() }
+    }
+
+    #[test]
+    fn cocher_ne_redessine_pas() {
+        assert_eq!(row_keys(&[row("a", true), row("b", false)]), row_keys(&[row("a", false), row("b", true)]));
+        assert_ne!(row_keys(&[row("a", true)]), row_keys(&[row("a", true), row("b", false)]));
+        let mut autre = row("a", true);
+        autre.summary = "Durand".into();
+        assert_ne!(row_keys(&[row("a", true)]), row_keys(&[autre]));
     }
 }
