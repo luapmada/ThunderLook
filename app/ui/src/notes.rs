@@ -219,11 +219,7 @@ pub fn NoteDialog() -> impl IntoView {
     };
     view! {
         <Show when=move || ui.note_form.with(Option::is_some)>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog appt" role="dialog" aria-modal="true" aria-labelledby="note-title" node_ref=root
                     on:keydown=move |ev| match ev.key().as_str() {
                         "Escape" => {

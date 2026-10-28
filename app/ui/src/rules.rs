@@ -322,11 +322,7 @@ pub fn RulesDialog() -> impl IntoView {
 
     view! {
         <Show when=move || matches!(ui.dialog.get(), Some(Dialog::Rules { .. }))>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="rules-title" node_ref=root on:keydown=on_key>
                     <h2 id="rules-title">{move || if run_mode.get() { "Exécuter les règles maintenant" } else { "Règles et alertes" }}</h2>
                     <Show when=move || !run_mode.get()>

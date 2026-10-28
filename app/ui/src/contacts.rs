@@ -655,11 +655,7 @@ fn ListDialog(editing: RwSignal<Option<ListDraft>>) -> impl IntoView {
     let known = move || ui.contact_list.with(|l| l.as_ref().map(|l| l.rows.iter().filter(|r| r.email.contains('@')).map(|r| (r.email.clone(), r.title.clone())).collect::<Vec<_>>()).unwrap_or_default());
     view! {
         <Show when=move || editing.with(Option::is_some)>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="dl-title"
                     on:keydown=move |ev| match ev.key().as_str() {
                         "Escape" => {

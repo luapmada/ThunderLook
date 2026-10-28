@@ -316,11 +316,7 @@ pub fn AccountsDialog() -> impl IntoView {
 
     view! {
         <Show when=move || ui.dialog.get() == Some(Dialog::Accounts)>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="acc-title" node_ref=root on:keydown=on_key>
                     <h2 id="acc-title">{move || if adding.get() { "Ajouter un compte" } else { "Paramètres du compte" }}</h2>
                     {move || if adding.get() {

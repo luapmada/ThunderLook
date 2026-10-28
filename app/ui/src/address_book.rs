@@ -342,11 +342,7 @@ pub fn AddressBook(open: RwSignal<bool>, on_apply: Callback<(Vec<String>, Vec<St
     view! {
         <style>{CSS}</style>
         <Show when=move || open.get()>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div
                     class="dialog wide addr-book"
                     role="dialog"

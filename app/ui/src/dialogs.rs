@@ -203,11 +203,7 @@ pub fn Dialogs() -> impl IntoView {
     view! {
         // « Règles et alertes », « Créer une règle » et les actions rapides ont leur propre boîte (`rules.rs`, `quicksteps.rs`).
         <Show when=move || ui.dialog.get().is_some_and(|d| !matches!(d, Dialog::Rules { .. } | Dialog::QuickSteps { .. } | Dialog::Accounts | Dialog::AutoReply | Dialog::JunkOptions | Dialog::CreateRule | Dialog::Options))>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" node_ref=root on:keydown=on_key>
                     <h2 id="dialog-title">{title}</h2>
                     {move || match ui.dialog.get() {

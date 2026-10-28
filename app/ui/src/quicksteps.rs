@@ -440,11 +440,7 @@ pub fn QuickStepsDialog() -> impl IntoView {
 
     view! {
         <Show when=move || matches!(ui.dialog.get(), Some(Dialog::QuickSteps { .. }))>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="qs-title" node_ref=root on:keydown=on_key>
                     <h2 id="qs-title">{move || match editing.get() {
                         None => "Gérer les actions rapides".to_string(),

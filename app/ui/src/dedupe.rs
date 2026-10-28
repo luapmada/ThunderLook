@@ -271,11 +271,7 @@ pub fn DedupeDialog() -> impl IntoView {
 
     view! {
         <Show when=move || ui.dedupe_open.get()>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="dedupe-title" style="max-width:min(1200px,95vw)"
                     on:keydown=move |ev| {
                         if ev.key() == "Escape" {

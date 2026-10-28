@@ -406,11 +406,7 @@ pub fn OptionsDialog() -> impl IntoView {
 
     view! {
         <Show when=move || ui.dialog.get() == Some(Dialog::Options)>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="opt-title" node_ref=root
                     on:keydown=move |ev| {
                         if ev.key() == "Escape" {

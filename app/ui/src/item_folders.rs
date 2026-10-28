@@ -386,11 +386,7 @@ fn NameDialog(f: FolderUi, on_change: Callback<()>) -> impl IntoView {
     };
     view! {
         <Show when=move || dlg.with(Option::is_some)>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="folder-name-title"
                     on:keydown=move |ev| match ev.key().as_str() {
                         "Escape" => {
@@ -479,11 +475,7 @@ fn DeleteDialog(f: FolderUi, on_change: Callback<()>) -> impl IntoView {
     };
     view! {
         <Show when=move || dlg.with(Option::is_some)>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="folder-del-title"
                     on:keydown=move |ev| {
                         if ev.key() == "Escape" {

@@ -327,11 +327,7 @@ pub fn ExchangeDialog() -> impl IntoView {
 
     view! {
         <Show when=move || ui.phone_exchange.get()>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="px-title" node_ref=root
                     on:keydown=move |ev| {
                         if ev.key() == "Escape" {

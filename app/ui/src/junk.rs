@@ -94,11 +94,7 @@ pub fn JunkOptionsDialog() -> impl IntoView {
 
     view! {
         <Show when=move || ui.dialog.get() == Some(Dialog::JunkOptions)>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="junk-title" node_ref=root
                     on:keydown=move |ev| {
                         if ev.key() == "Escape" {

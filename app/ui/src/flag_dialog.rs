@@ -166,11 +166,7 @@ pub fn FlagDialog() -> impl IntoView {
 
     view! {
         <Show when=move || ui.flag_dialog.get()>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="flag-dialog-title" node_ref=root on:keydown=on_key>
                     <h2 id="flag-dialog-title">"Indicateur de suivi personnalisé"</h2>
                     <label>

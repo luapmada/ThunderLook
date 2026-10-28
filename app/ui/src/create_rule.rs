@@ -278,11 +278,7 @@ pub fn CreateRuleDialog() -> impl IntoView {
 
     view! {
         <Show when=move || ui.dialog.get() == Some(Dialog::CreateRule)>
-            <div class="modal-backdrop" on:pointerdown=move |ev| {
-                if ev.target() == ev.current_target() {
-                    close();
-                }
-            }>
+            <div class="modal-backdrop">
                 <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="create-rule-title" node_ref=root on:keydown=on_key>
                     <h2 id="create-rule-title">"Créer une règle"</h2>
                     {body}
