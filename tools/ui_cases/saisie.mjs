@@ -73,6 +73,41 @@ export async function run(log) {
         await until(`!document.querySelector('.dialog')`, `fermeture de « ${command} » sans enregistrer`);
       }
     }
+    // Éditeur d'actions rapides : les paramètres d'une action (« Catégorie », « À ») n'existent qu'une fois la sorte choisie ;
+    // ces lignes étaient recréées à chaque frappe (focus perdu). « Annuler » : rien n'est enregistré.
+    for (const kind of [/^Classer le message$/, /^Transférer$/, /^Nouveau message$/]) {
+      await closeDialogs();
+      await press('1', { ctrl: true });
+      await sleep(1500);
+      await clickTab('Accueil');
+      await js(`[...document.querySelectorAll('.cmd')].find(b => b.textContent.trim() === 'Actions rapides')?.click()`);
+      await sleep(400);
+      const menu = await js(`(() => { const m = [...document.querySelectorAll('[role=menuitem], .menu-item, .menu button, .menu li')].find(e => e.textContent.trim().startsWith('Créer une action rapide')); if (!m) return false; m.click(); return true; })()`);
+      if (!menu) {
+        log('actions rapides : entrée « Créer une action rapide… » introuvable (sautée)');
+        break;
+      }
+      await until(`!!document.querySelector('.dialog select[aria-label="Action 1"]')`, 'éditeur d\'action rapide', 8000);
+      const chosen = await js(`(() => { const s = document.querySelector('.dialog select[aria-label="Action 1"]'); const o = [...s.options].find(o => ${kind}.test(o.textContent.trim())); if (!o) return null; s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true })); return o.textContent.trim(); })()`);
+      await sleep(700);
+      const fields = await fieldsOf('.dialog');
+      let ok = 0;
+      for (const f of fields) {
+        await js(`(() => { const e = ${el('.dialog', f.i)}; e.focus(); e.select?.(); })()`);
+        for (const ch of TEXT) {
+          await send('Input.insertText', { text: ch });
+          await sleep(60);
+        }
+        await sleep(250);
+        const r = await js(`(() => { const e = ${el('.dialog', f.i)}; return { focus: document.activeElement === e, active: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName, value: e?.value ?? null }; })()`);
+        if (!r.focus || !String(r.value).includes(TEXT)) faults.push(`action rapide « ${chosen} » › « ${f.label} » : focus ${r.focus ? 'gardé' : 'parti vers « ' + r.active + ' »'}, valeur « ${r.value} »`);
+        else ok++;
+      }
+      log(`action rapide « ${chosen ?? kind} » : ${ok}/${fields.length} champs corrects`);
+      await js(`[...document.querySelectorAll('.dialog button')].find(b => b.textContent.trim() === 'Annuler')?.click()`);
+      await sleep(500);
+      await closeDialogs();
+    }
   } finally {
     await closeDialogs();
     await js(`document.querySelector('.compose button[title="Fermer la rédaction"]')?.click()`).catch(() => {});
