@@ -278,11 +278,12 @@ pub fn key(ui: Ui, ev: &web_sys::KeyboardEvent) -> bool {
         return false;
     }
     let (ctrl, alt, shift) = (ev.ctrl_key(), ev.alt_key(), ev.shift_key());
-    let kind = match (ctrl, alt, shift, ev.key().as_str()) {
-        (true, true, false, "1") => Some(CalendarViewKind::Day),
-        (true, true, false, "2") => Some(CalendarViewKind::WorkWeek),
-        (true, true, false, "3") => Some(CalendarViewKind::Week),
-        (true, true, false, "4") => Some(CalendarViewKind::Month),
+    // Touche physique (`code`) : sur AZERTY, Ctrl+Alt+& ne donne pas « 1 » (voir `app::shortcut_digit`).
+    let kind = match (ctrl, alt, shift, crate::app::shortcut_digit(&ev.code(), &ev.key())) {
+        (true, true, false, Some(1)) => Some(CalendarViewKind::Day),
+        (true, true, false, Some(2)) => Some(CalendarViewKind::WorkWeek),
+        (true, true, false, Some(3)) => Some(CalendarViewKind::Week),
+        (true, true, false, Some(4)) => Some(CalendarViewKind::Month),
         _ => None,
     };
     if let Some(k) = kind {

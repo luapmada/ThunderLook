@@ -107,6 +107,16 @@ fn typing() -> bool {
 /// Une boîte modale est affichée (toutes portent `aria-modal`, et ne sont dans le document qu'ouvertes). Les signaux
 /// testés plus bas n'en couvraient qu'une partie : Ctrl+2 changeait de module derrière la fiche contact, et Ctrl+N du
 /// calendrier remplaçait le rendez-vous en cours de saisie.
+/// Chiffre d'un raccourci Ctrl+1…9 d'après la touche physique (`code` : `Digit1`, `Numpad1`), sinon le caractère.
+/// Sur un clavier AZERTY, Ctrl+& donne `key` = « & » : lire `key` seul rendait Ctrl+1…5 inutilisables sans Maj.
+pub fn shortcut_digit(code: &str, key: &str) -> Option<u8> {
+    let d = code.strip_prefix("Digit").or_else(|| code.strip_prefix("Numpad")).unwrap_or(key);
+    match d.as_bytes() {
+        [c @ b'1'..=b'9'] => Some(c - b'0'),
+        _ => None,
+    }
+}
+
 fn modal_open() -> bool {
     document().query_selector("[aria-modal='true']").ok().flatten().is_some()
 }
@@ -194,12 +204,12 @@ pub fn global_key(ui: Ui, ev: &web_sys::KeyboardEvent) {
         ev.prevent_default();
         return;
     }
-    let module = match (ctrl, alt, key.as_str()) {
-        (true, false, "1") => Some(Module::Mail),
-        (true, false, "2") => Some(Module::Calendar),
-        (true, false, "3") => Some(Module::Contacts),
-        (true, false, "4") => Some(Module::Tasks),
-        (true, false, "5") => Some(Module::Notes),
+    let module = match (ctrl, alt, shortcut_digit(&ev.code(), &key)) {
+        (true, false, Some(1)) => Some(Module::Mail),
+        (true, false, Some(2)) => Some(Module::Calendar),
+        (true, false, Some(3)) => Some(Module::Contacts),
+        (true, false, Some(4)) => Some(Module::Tasks),
+        (true, false, Some(5)) => Some(Module::Notes),
         _ => None,
     };
     if let Some(m) = module {
@@ -636,6 +646,19 @@ fn Main() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chiffre_de_raccourci_azerty() {
+        // AZERTY : Ctrl+& (touche du 1) ; QWERTY : Ctrl+1 ; pavé numérique ; repli sur le caractère sans `code`.
+        assert_eq!(shortcut_digit("Digit1", "&"), Some(1));
+        assert_eq!(shortcut_digit("Digit2", "é"), Some(2));
+        assert_eq!(shortcut_digit("Digit5", "("), Some(5));
+        assert_eq!(shortcut_digit("Digit3", "3"), Some(3));
+        assert_eq!(shortcut_digit("Numpad4", "4"), Some(4));
+        assert_eq!(shortcut_digit("", "2"), Some(2));
+        assert_eq!(shortcut_digit("KeyA", "a"), None);
+        assert_eq!(shortcut_digit("Digit0", "à"), None);
+    }
 
     #[test]
     fn saisie_reconnue() {
