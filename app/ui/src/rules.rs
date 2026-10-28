@@ -162,13 +162,19 @@ pub fn RulesDialog() -> impl IntoView {
             "Escape" => close(),
             "Tab" => {
                 if let Some(r) = root.get_untracked() {
-                    let Ok(list) = r.query_selector_all("input, select, button, summary, [tabindex='0']") else { return };
+                    // Ni les cases des règles (`tabindex=-1`, la liste se parcourt aux flèches), ni les boutons grisés : Tab passait par chaque case, ou restait bloqué sur « Aperçu » grisé.
+                    let Ok(list) = r.query_selector_all("input:not([disabled]):not([tabindex='-1']), select:not([disabled]), button:not([disabled]), summary, [tabindex='0']") else { return };
                     let els: Vec<web_sys::HtmlElement> = (0..list.length()).filter_map(|i| list.item(i)?.dyn_into().ok()).collect();
                     let active = document().active_element();
                     let pos = els.iter().position(|e| active.as_ref().is_some_and(|a| a == e.unchecked_ref::<web_sys::Element>()));
                     let n = els.len() as i32;
                     if n > 0 {
-                        let next = (pos.map_or(0, |p| p as i32) + if ev.shift_key() { -1 } else { 1 }).rem_euclid(n);
+                        // Focus hors de la liste (après un retrait de ligne) : premier ou dernier contrôle, sans en sauter un.
+                        let next = match pos {
+                            Some(p) => (p as i32 + if ev.shift_key() { -1 } else { 1 }).rem_euclid(n),
+                            None if ev.shift_key() => n - 1,
+                            None => 0,
+                        };
                         let _ = els[next as usize].focus();
                     }
                 }
@@ -374,15 +380,16 @@ pub fn RulesDialog() -> impl IntoView {
                     <Show when=move || run_mode.get()>
                         <label class="field">
                             <span>"Exécuter dans le dossier"</span>
+                            // Les options ne suivent que l'arborescence : avant, elles suivaient aussi `folder` et
+                            // toutes étaient recréées à chaque choix (flèches du clavier comprises).
                             <select on:change=move |ev| folder.set(event_target_value(&ev))>
                                 {move || {
-                                    let current_folder = folder.get();
                                     flat_folders(ui)
                                         .into_iter()
                                         .map(|(id, name, depth, section)| {
                                             let label = format!("{}{name}  ({section})", "\u{a0}\u{a0}".repeat(depth));
-                                            let selected = id == current_folder;
-                                            view! { <option value=id selected=selected>{label}</option> }
+                                            let value = id.clone();
+                                            view! { <option value=value selected=move || folder.get() == id>{label}</option> }
                                         })
                                         .collect_view()
                                 }}

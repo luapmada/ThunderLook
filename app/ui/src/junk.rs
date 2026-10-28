@@ -20,6 +20,8 @@ pub fn JunkOptionsDialog() -> impl IntoView {
         if ui.dialog.get() != Some(Dialog::JunkOptions) {
             return;
         }
+        // Une adresse tapée puis abandonnée (Annuler) ne reparaît pas à l'ouverture suivante.
+        entry.set(String::new());
         spawn_local(async move {
             match ipc::junk_lists().await {
                 Ok(l) => lists.set(l),

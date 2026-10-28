@@ -463,6 +463,10 @@ pub fn ComposePane() -> impl IntoView {
         ui.compose_dirty.set(true);
     };
 
+    // Pièces jointes seules : avant, la liste suivait tout le brouillon et ses pastilles étaient recréées à chaque
+    // frappe dans « À », « Cc » ou « Objet ».
+    let attachments = Memo::new(move |_| ui.compose.with(|d| d.as_ref().map(|d| d.attachments.clone()).unwrap_or_default()));
+
     let title = match kind {
         ComposeKind::New => "Nouveau message",
         ComposeKind::Reply => "Répondre",
@@ -627,11 +631,11 @@ pub fn ComposePane() -> impl IntoView {
                     <span>"Objet"</span>
                     <input type="text" autocomplete="off" prop:value=subject on:input=set_subject />
                 </label>
-                <Show when=move || ui.compose.with(|d| d.as_ref().is_some_and(|d| !d.attachments.is_empty()))>
+                <Show when=move || attachments.with(|a| !a.is_empty())>
                     <div class="compose-attachments" role="list" aria-label="Pièces jointes">
                         {move || {
-                            ui.compose
-                                .with(|d| d.as_ref().map(|d| d.attachments.clone()).unwrap_or_default())
+                            attachments
+                                .get()
                                 .into_iter()
                                 .enumerate()
                                 .map(|(i, a)| {

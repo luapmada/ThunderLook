@@ -1,6 +1,8 @@
 //! Recherche globale : menu de portée de la barre de recherche, et panneau des résultats groupés par type.
 //! Le courrier passe par l'index plein texte existant (`ipc::search`) ; le reste par `thunderlook-search`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use leptos::{prelude::*, task::spawn_local};
 use serde::Deserialize;
 use thunderlook_model::{MessageSummary, SearchQuery, SearchScope, SortField};
@@ -67,7 +69,22 @@ pub enum Pending {
     Contact { id: String, tried: Vec<String> },
 }
 
+/// Numéro de la dernière recherche lancée : une réponse d'une recherche plus ancienne est ignorée.
+static LAST_RUN: AtomicU64 = AtomicU64::new(0);
+
+/// Nouvelle recherche : son numéro.
+fn next_run() -> u64 {
+    LAST_RUN.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+/// La recherche `n` est toujours la dernière lancée.
+fn is_current(n: u64) -> bool {
+    LAST_RUN.load(Ordering::Relaxed) == n
+}
+
 pub fn close(ui: Ui) {
+    // Une réponse encore en route ne rouvre pas le panneau.
+    next_run();
     ui.global.set(None);
 }
 
@@ -78,11 +95,13 @@ pub fn run(ui: Ui, text: String) {
         return;
     }
     ui.global.set(Some(Results { text: text.clone(), loading: true, ..Results::default() }));
-    let current = move |text: &str| ui.global.with_untracked(|g| g.as_ref().is_some_and(|g| g.text == text));
+    // Avant : réponse comparée au seul texte ; « ab », « abc », « ab » tapés vite laissaient la première réponse
+    // à « ab » (dossier et données d'alors) remplir le panneau de la troisième.
+    let n = next_run();
     let t = text.clone();
     spawn_local(async move {
         let hits = ipc::global_search(&t).await;
-        if !current(&t) {
+        if !is_current(n) {
             return;
         }
         ui.global.update(|g| {
@@ -106,7 +125,7 @@ pub fn run(ui: Ui, text: String) {
                 Err(e) => Err(e),
             }
         };
-        if !current(&text) {
+        if !is_current(n) {
             return;
         }
         ui.global.update(|g| {
@@ -349,5 +368,18 @@ pub fn GlobalSearchPanel() -> impl IntoView {
                 {body}
             </div>
         </Show>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reponse_perimee_ignoree() {
+        let a = next_run();
+        let b = next_run();
+        assert!(!is_current(a));
+        assert!(is_current(b));
     }
 }

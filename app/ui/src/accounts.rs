@@ -215,7 +215,14 @@ pub fn AccountsDialog() -> impl IntoView {
                     close();
                 }
             }
-            "Enter" if adding.get_untracked() => save(),
+            // Entrée enregistre, sauf sur un bouton ou une liste déroulante : avant, Entrée sur « Annuler » ou
+            // « Détecter les serveurs » lançait l'enregistrement.
+            "Enter"
+                if adding.get_untracked()
+                    && ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).is_none_or(|t| !matches!(t.tag_name().as_str(), "SELECT" | "BUTTON")) =>
+            {
+                save()
+            }
             "ArrowDown" | "ArrowUp" if !adding.get_untracked() => {
                 let n = list.with_untracked(Vec::len);
                 if n > 0 {
@@ -225,13 +232,19 @@ pub fn AccountsDialog() -> impl IntoView {
             }
             "Tab" => {
                 if let Some(r) = root.get_untracked() {
-                    let Ok(found) = r.query_selector_all("input, select, button, [tabindex='0']") else { return };
+                    // Contrôles grisés exclus (Enregistrer pendant la vérification) : `focus()` y échoue et Tab restait bloqué.
+                    let Ok(found) = r.query_selector_all("input:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex='0']") else { return };
                     let els: Vec<web_sys::HtmlElement> = (0..found.length()).filter_map(|i| found.item(i)?.dyn_into().ok()).collect();
                     let active = document().active_element();
                     let pos = els.iter().position(|e| active.as_ref().is_some_and(|a| a == e.unchecked_ref::<web_sys::Element>()));
                     let n = els.len() as i32;
                     if n > 0 {
-                        let next = (pos.map_or(0, |p| p as i32) + if ev.shift_key() { -1 } else { 1 }).rem_euclid(n);
+                        // Focus hors de la liste (après un retrait de ligne) : premier ou dernier contrôle, sans en sauter un.
+                        let next = match pos {
+                            Some(p) => (p as i32 + if ev.shift_key() { -1 } else { 1 }).rem_euclid(n),
+                            None if ev.shift_key() => n - 1,
+                            None => 0,
+                        };
                         let _ = els[next as usize].focus();
                     }
                 }

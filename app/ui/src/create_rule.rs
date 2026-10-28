@@ -67,7 +67,13 @@ pub fn CreateRuleDialog() -> impl IntoView {
             return;
         };
         spawn_local(async move {
-            match ipc::rule_draft(&id).await {
+            let result = ipc::rule_draft(&id).await;
+            // Boîte fermée, ou rouverte sur un autre message, pendant la lecture : la réponse est périmée (elle
+            // aurait rempli la boîte avec l'ancien message).
+            if ui.dialog.get_untracked() != Some(Dialog::CreateRule) || ui.selected.get_untracked().as_deref() != Some(id.as_str()) {
+                return;
+            }
+            match result {
                 Ok(d) => {
                     let default_name = [&d.from_name, &d.from_addr, &d.subject].into_iter().find(|s| !s.trim().is_empty()).cloned().unwrap_or_default();
                     name.set(default_name);
@@ -171,13 +177,19 @@ pub fn CreateRuleDialog() -> impl IntoView {
             "Tab" => {
                 // Le focus reste dans la boîte.
                 if let Some(r) = root.get_untracked() {
-                    let Ok(list) = r.query_selector_all("input:not([disabled]), select:not([disabled]), button") else { return };
+                    // OK grisé (chargement, enregistrement) exclu : `focus()` y échoue et Tab restait bloqué.
+                    let Ok(list) = r.query_selector_all("input:not([disabled]), select:not([disabled]), button:not([disabled])") else { return };
                     let els: Vec<web_sys::HtmlElement> = (0..list.length()).filter_map(|i| list.item(i)?.dyn_into().ok()).collect();
                     let active = document().active_element();
                     let pos = els.iter().position(|e| active.as_ref().is_some_and(|a| a == e.unchecked_ref::<web_sys::Element>()));
                     let n = els.len() as i32;
                     if n > 0 {
-                        let next = (pos.map_or(0, |p| p as i32) + if ev.shift_key() { -1 } else { 1 }).rem_euclid(n);
+                        // Focus hors de la liste (après un retrait de ligne) : premier ou dernier contrôle, sans en sauter un.
+                        let next = match pos {
+                            Some(p) => (p as i32 + if ev.shift_key() { -1 } else { 1 }).rem_euclid(n),
+                            None if ev.shift_key() => n - 1,
+                            None => 0,
+                        };
                         let _ = els[next as usize].focus();
                     }
                 }
