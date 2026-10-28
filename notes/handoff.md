@@ -22,7 +22,10 @@
   le focus). Toujours vérifier par CDP.
 - Vérification de saisie : `UI_ONLY=L-saisie node tools/ui_check.mjs` (cas `saisie.mjs` et `saisie_pieges.mjs`, aucune
   écriture : chaque boîte est annulée, la rédaction fermée sans enregistrer).
-- Reste ouvert : 1 090 conflits mis de côté par la synchro auto du téléphone (26/10 23:43), non examinés.
+- **Décision de Paul (28/10)** : la synchro téléphone se teste avec le **S20 FE** ; le **S23 reste synchronisé avec
+  Outlook**. Les 1 090 conflits de la relecture auto de `mpe-s23` (26/10 23:43) ne sont ni à analyser ni à appliquer.
+  ThunderLook relit encore `mpe-s23` toutes les 60 min (`exchange.json`, `auto-sync.json`) : à couper si Paul le demande.
+- « Nouvelle réunion » retirée du ruban : Paul n'utilise pas les réunions.
 
 # Passation — état au 2026-10-24 (nuit)
 

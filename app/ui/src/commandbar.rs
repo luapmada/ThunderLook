@@ -483,7 +483,6 @@ const CALENDAR_HOME: &[Group] = &[
         label: "Nouveau",
         cmds: &[
             wired("Nouveau rendez-vous", CALENDAR_PLUS, Some("Ctrl+N"), true, true, Action::CalNew),
-            cmd("Nouvelle réunion", USERS, Some("Ctrl+Maj+Q"), true, true, true),
         ],
     },
     Group {

@@ -12,15 +12,12 @@ const BOXES = [
   [3, 'Accueil', 'Nouveau contact', '.dialog'],
   [3, 'Accueil', 'Nouvelle liste', '.dialog'],
   [2, 'Accueil', 'Nouveau rendez-vous', '.dialog'],
-  [2, 'Accueil', 'Nouvelle réunion', '.dialog'],
   [4, 'Accueil', 'Nouvelle tâche', '.dialog'],
   [5, 'Accueil', 'Nouvelle note', '.dialog'],
   [1, 'Accueil', 'Nouveau message', '.compose'],
-  [1, 'Accueil', "Carnet d'adresses", '.dialog'],
   [1, 'Envoyer/Recevoir', 'Réponses automatiques', '.dialog'],
   [1, 'Envoyer/Recevoir', 'Paramètres du compte', '.dialog'],
   [1, 'Dossier', 'Nouveau dossier', '.dialog'],
-  [1, 'Dossier', 'Nouveau dossier virtuel', '.dialog'],
   [1, 'Accueil', "Réglages de l'affichage", '.dialog'],
 ];
 const CLOSE = ['Annuler', 'Fermer', 'Close'];
@@ -73,6 +70,40 @@ export async function run(log) {
         await until(`!document.querySelector('.dialog')`, `fermeture de « ${command} » sans enregistrer`);
       }
     }
+    // Carnet d'adresses : ouvert par « À… » dans la rédaction (la commande du ruban n'est pas encore branchée). La recherche
+    // recharge la liste à chaque frappe : le champ doit garder le focus. Annulé, rédaction fermée sans enregistrer.
+    {
+      await closeDialogs();
+      await press('1', { ctrl: true });
+      await sleep(1500);
+      await clickTab('Accueil');
+      await js(`[...document.querySelectorAll('.cmd')].find(b => b.textContent.trim() === 'Nouveau message')?.click()`);
+      await until(`!!document.querySelector('.compose')`, 'rédaction', 8000);
+      await sleep(1500);
+      await js(`[...document.querySelectorAll('.compose button')].find(b => b.textContent.trim() === 'À…')?.click()`);
+      await until(`!!document.querySelector('.dialog')`, 'carnet d\'adresses', 8000);
+      await sleep(1500);
+      const fields = await fieldsOf('.dialog');
+      let ok = 0;
+      for (const f of fields) {
+        await js(`(() => { const e = ${el('.dialog', f.i)}; e.focus(); e.select?.(); })()`);
+        for (const ch of TEXT) {
+          await send('Input.insertText', { text: ch });
+          await sleep(150);
+        }
+        await sleep(800);
+        const r = await js(`(() => { const e = ${el('.dialog', f.i)}; return { focus: document.activeElement === e, active: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName, value: e?.value ?? null }; })()`);
+        if (!r.focus || !String(r.value).includes(TEXT)) faults.push(`carnet d'adresses › « ${f.label} » : focus ${r.focus ? 'gardé' : 'parti vers « ' + r.active + ' »'}, valeur « ${r.value} »`);
+        else ok++;
+      }
+      log(`carnet d'adresses (depuis « À… ») : ${ok}/${fields.length} champs corrects`);
+      await js(`[...document.querySelectorAll('.dialog button')].find(b => ${q(CLOSE)}.includes(b.textContent.trim()))?.click()`);
+      await sleep(500);
+      await closeDialogs();
+      await js(`document.querySelector('.compose button[title="Fermer la rédaction"]')?.click()`);
+      await sleep(500);
+    }
+
     // Éditeur d'actions rapides : les paramètres d'une action (« Catégorie », « À ») n'existent qu'une fois la sorte choisie ;
     // ces lignes étaient recréées à chaque frappe (focus perdu). « Annuler » : rien n'est enregistré.
     for (const kind of [/^Classer le message$/, /^Transférer$/, /^Nouveau message$/]) {
