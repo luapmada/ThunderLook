@@ -397,7 +397,8 @@ fn NameDialog(f: FolderUi, on_change: Callback<()>) -> impl IntoView {
                             ev.prevent_default();
                             close();
                         }
-                        "Enter" => {
+                        // Entrée sur « Annuler » active ce bouton, elle ne valide pas la boîte.
+                        "Enter" if !crate::flag_dialog::on_button(&ev) => {
                             ev.prevent_default();
                             submit();
                         }
@@ -411,7 +412,7 @@ fn NameDialog(f: FolderUi, on_change: Callback<()>) -> impl IntoView {
                     </h2>
                     <label class="field">
                         <span>"Nom"</span>
-                        <input type="text" node_ref=input maxlength="255" prop:value=move || name.get() on:input=move |ev| name.set(event_target_value(&ev)) />
+                        <input type="text" node_ref=input maxlength="255" aria-label="Nom du dossier" prop:value=move || name.get() on:input=move |ev| name.set(event_target_value(&ev)) />
                     </label>
                     {move || error.get().map(|e| view! { <p class="dialog-note" role="alert">{e}</p> })}
                     <div class="dialog-buttons">

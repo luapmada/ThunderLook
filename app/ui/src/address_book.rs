@@ -285,9 +285,12 @@ pub fn AddressBook(open: RwSignal<bool>, on_apply: Callback<(Vec<String>, Vec<St
             }
             checked.set(Vec::new());
             load(String::new(), 0);
-            if let Some(i) = search.get() {
-                let _ = i.focus();
-            }
+            // `search.get()` suivi relançait l'effet au montage du champ (tout remis à zéro et carnet relu deux fois).
+            request_animation_frame(move || {
+                if let Some(i) = search.get_untracked() {
+                    let _ = i.focus();
+                }
+            });
         }
     });
     let close = move || open.set(false);

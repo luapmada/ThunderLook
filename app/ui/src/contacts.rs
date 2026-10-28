@@ -613,9 +613,12 @@ fn ListDialog(editing: RwSignal<Option<ListDraft>>) -> impl IntoView {
     let busy = RwSignal::new(false);
     let note = RwSignal::new(None::<String>);
     let (new_name, new_addr) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
+    // Le membre à moitié saisi ne doit pas réapparaître à l'ouverture suivante.
     let close = move || {
         editing.set(None);
         note.set(None);
+        new_name.set(String::new());
+        new_addr.set(String::new());
     };
     let set = move |f: &dyn Fn(&mut ListDraft)| editing.update(|d| if let Some(d) = d { f(d) });
     let add = move || {

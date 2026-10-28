@@ -84,7 +84,6 @@ pub fn ContactDialog() -> impl IntoView {
     let root: NodeRef<html::Div> = NodeRef::new();
     let busy = RwSignal::new(false);
     let note = RwSignal::new(None::<String>);
-    let form = move || ui.contact_form.get();
     let set = move |f: &dyn Fn(&mut ContactForm)| {
         ui.contact_form.update(|c| {
             if let Some(c) = c {
@@ -124,12 +123,15 @@ pub fn ContactDialog() -> impl IntoView {
             busy.set(false);
         });
     };
+    // Valeur d'un champ lue sans copier le formulaire : un `get()` du formulaire cloné par chacun des quelque 40 champs, photo comprise,
+    // à chaque frappe, ralentissait la saisie.
+    let read = move |get: fn(&ContactForm) -> String| ui.contact_form.with(|f| f.as_ref().map(get).unwrap_or_default());
     // Champ texte lié à une propriété du formulaire.
     let field = move |label: &'static str, get: fn(&ContactForm) -> String, put: fn(&mut ContactForm, String)| {
         view! {
             <label class="field">
                 <span>{label}</span>
-                <input type="text" aria-label=label prop:value=move || form().map(|f| get(&f)).unwrap_or_default()
+                <input type="text" aria-label=label prop:value=move || read(get)
                     on:input=move |ev| { let v = event_target_value(&ev); set(&|f| put(f, v.clone())); } />
             </label>
         }
@@ -147,7 +149,9 @@ pub fn ContactDialog() -> impl IntoView {
             }
         });
     };
-    let has_photo = move || form().is_some_and(|f| f.photo.as_deref().is_some_and(|p| !p.is_empty()));
+    // Photo dans un `Memo` : l'image n'est recréée (et redécodée) qu'au changement de photo, pas à chaque frappe.
+    let photo = Memo::new(move |_| ui.contact_form.with(|f| f.as_ref().and_then(|f| f.photo.clone()).filter(|p| !p.is_empty())));
+    let has_photo = move || photo.with(Option::is_some);
     view! {
         <Show when=move || ui.contact_form.with(Option::is_some)>
             <div class="modal-backdrop" on:pointerdown=move |ev| {
@@ -167,9 +171,9 @@ pub fn ContactDialog() -> impl IntoView {
                         }
                         _ => {}
                     }>
-                    <h2 id="contact-title">{move || if form().is_some_and(|f| f.id.is_some()) { "Contact" } else { "Nouveau contact" }}</h2>
+                    <h2 id="contact-title">{move || if ui.contact_form.with(|f| f.as_ref().is_some_and(|f| f.id.is_some())) { "Contact" } else { "Nouveau contact" }}</h2>
                     <div class="appt-row">
-                        {move || match form().and_then(|f| f.photo).filter(|p| !p.is_empty()) {
+                        {move || match photo.get() {
                             Some(src) => view! { <img class="avatar large" src=src alt="Photo du contact" /> }.into_any(),
                             None => view! { <span class="avatar large" aria-hidden="true">"?"</span> }.into_any(),
                         }}
@@ -239,14 +243,14 @@ pub fn ContactDialog() -> impl IntoView {
                         {field("Page web", |f| f.web_page.clone(), |f, v| f.web_page = v)}
                         <label class="field">
                             <span>"Anniversaire"</span>
-                            <input type="date" aria-label="Anniversaire" prop:value=move || form().map(|f| f.birthday).unwrap_or_default()
+                            <input type="date" aria-label="Anniversaire" prop:value=move || read(|f| f.birthday.clone())
                                 on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.birthday = v.clone()); } />
                         </label>
                     </div>
                     {field("Catégories (séparées par des virgules)", |f| f.categories.clone(), |f, v| f.categories = v)}
                     <label class="field">
                         <span>"Notes"</span>
-                        <textarea class="ar-text" aria-label="Notes" rows="5" prop:value=move || form().map(|f| f.notes).unwrap_or_default()
+                        <textarea class="ar-text" aria-label="Notes" rows="5" prop:value=move || read(|f| f.notes.clone())
                             on:input=move |ev| { let v = event_target_value(&ev); set(&|f| f.notes = v.clone()); }></textarea>
                     </label>
                     {move || note.get().map(|n| view! { <p class="dialog-note" role="alert">{n}</p> })}
