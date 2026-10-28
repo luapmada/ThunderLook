@@ -667,7 +667,14 @@ impl Mailbox {
         if !saved.is_empty() {
             return Ok(saved);
         }
-        let first: Option<i64> = self.conn.query_row("SELECT MIN(id) FROM source", [], |r| r.get(0)).map_err(err)?;
+        // Défaut : le premier compte de messagerie (il reçoit le courrier), sinon la première source (un PST importé
+        // ne reçoit plus rien : ouvrir sa boîte de réception au démarrage cacherait le courrier du jour).
+        let account: Option<i64> =
+            self.conn.query_row("SELECT source_id FROM account ORDER BY id LIMIT 1", [], |r| r.get(0)).optional().map_err(err)?;
+        let first = match account {
+            Some(s) => Some(s),
+            None => self.conn.query_row("SELECT MIN(id) FROM source", [], |r| r.get(0)).map_err(err)?,
+        };
         let Some(source) = first else { return Ok(Vec::new()) };
         let mut out = Vec::new();
         for role in ["inbox", "sent"] {

@@ -206,3 +206,40 @@ fn walk(dir: &PathBuf) -> usize {
         })
         .unwrap_or(0)
 }
+
+#[test]
+fn favorites_default_to_the_first_account() {
+    // Un PST importé (source 1) et un compte IMAP (source 2) : sans favoris enregistrés, ceux du compte, qui reçoit le courrier.
+    let (fx, _mb, [pst_inbox, ..]) = setup();
+    let c = thunderlook_store::open(&fx.dir).unwrap();
+    c.execute(
+        "INSERT INTO source (id, kind, origin_path, work_path, display_name, size, imported_at) VALUES (2, 'imap', '', '', 'a@example.org', 0, 0)",
+        [],
+    )
+    .unwrap();
+    let add = |parent: Option<i64>, name: &str, role: &str, pos: i64| -> i64 {
+        c.execute(
+            "INSERT INTO folder (source_id, parent_id, nid, name, role, container_class, hidden, position) VALUES (2, ?1, 0, ?2, ?3, NULL, 0, ?4)",
+            params![parent, name, role, pos],
+        )
+        .unwrap();
+        c.last_insert_rowid()
+    };
+    let root = add(None, "", "root", 0);
+    let ipm = add(Some(root), "IPM", "ipm", 0);
+    let inbox = add(Some(ipm), "Boîte de réception", "inbox", 0);
+    let sent = add(Some(ipm), "Éléments envoyés", "sent", 1);
+    c.execute(
+        "INSERT INTO account (id, source_id, name, email, username, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, save_sent, created_at)
+         VALUES (1, 2, '', 'a@example.org', 'a', 'h', 993, 'tls', 'h', 465, 'tls', 1, 0)",
+        [],
+    )
+    .unwrap();
+    drop(c);
+    let mb = Mailbox::open(&fx.dir).unwrap();
+    let tree = mb.folder_tree().unwrap();
+    let fav: Vec<String> = tree.sections[0].folders.iter().map(|f| f.id.clone()).collect();
+    assert_eq!(fav, [format!("fav-f{inbox}"), format!("fav-f{sent}")]);
+    assert_eq!(tree.default_folder().unwrap().id, format!("fav-f{inbox}"), "ouverture sur la réception du compte");
+    assert_ne!(tree.default_folder().unwrap().id, format!("fav-f{pst_inbox}"));
+}
