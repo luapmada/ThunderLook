@@ -31,6 +31,16 @@
   dossier de données ont été remplis par les fichiers du S23 : avant le premier essai S20, décider avec Paul (vider le
   S20 et le peupler de données de test ? repartir d'une base de comparaison vide ?). Rien n'a été lu ni exporté.
 - « Nouvelle réunion » retirée du ruban : Paul n'utilise pas les réunions.
+- **29/10 — synchro S20 dans les deux sens (branche `feat/synchro-s20-deux-sens`)** : module `crates/exchange/src/writeback.rs`
+  (ThunderLook → fichiers de MPE, fiche par fiche) et comparaison sans faux écarts (`import.rs`). Mesure à blanc sur les
+  fichiers du S20 : 2 289 identiques, 223 compléments appliqués, 2 nouveaux, 42 vrais conflits. Aller-retour validé sur
+  copie (`A:\AI_related\Claude_Code_Work\tl-essai-s20`, exemple `roundtrip_files`). Réglages externes posés :
+  `data/store/mpe-baseline.json` et `exchange-map.json` (S23) RETIRÉS, copies `*.avant-s20-2026-10-29` (retour : les
+  remettre). `auto-sync.json` NON modifié (activation refusée par le garde-fou, en attente de l'accord de Paul ;
+  copie `auto-sync.json.avant-s20-2026-10-29`). Fichiers du S20 du 29/10 : `mpe-backup/2026-10-29-s20/`.
+  Reste : accord de Paul pour activer la lecture auto (5 min, envoi vers le téléphone) et faire la première lecture
+  (`cargo run --release -p thunderlook-exchange --example pass_now -- <data/store> <mpe-test>`), puis une synchro MPE
+  du S20 par Paul pour constater que MPE reprend les fiches modifiées par ThunderLook (non vérifié).
 - **29/10 — S23 hors d'Outlook depuis le 26/10 13:09** : `mpe_s23_file.py` (25/10) avait passé le profil MPE du S23
   sur la cible fichier (`mpe-s23`) ; la décision du 28/10 n'a coupé que la relecture ThunderLook, pas cette cible.
   Retour arrière FAIT le 29/10 par `target/tl-scripts/mpe_s23_outlook.py` (cible Outlook, profil `pop-original` ;
