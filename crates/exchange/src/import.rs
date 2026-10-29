@@ -759,13 +759,16 @@ pub struct ApplyReport {
     /// Clés des changements réglés (appliqués, ou conflits tranchés en gardant ThunderLook) : à donner à [`crate::settle`].
     #[serde(default)]
     pub done: Vec<String>,
+    /// (clé du changement, identifiant local) des éléments créés.
+    #[serde(default)]
+    pub created: Vec<(String, String)>,
 }
 
 fn num(id: &str, prefix: char) -> Result<i64> {
     id.strip_prefix(prefix).and_then(|n| n.parse().ok()).ok_or_else(|| format!("identifiant inconnu : {id}"))
 }
 
-fn prefix(item: ItemKind) -> char {
+pub(crate) fn prefix(item: ItemKind) -> char {
     match item {
         ItemKind::Contact => 'p',
         ItemKind::Task => 't',
@@ -798,7 +801,7 @@ pub fn subject_category(conn: &Connection, subject: &str) -> Option<String> {
     names.into_iter().find(|n| n.trim().to_lowercase() == first)
 }
 
-fn edit_of(e: &EventData) -> thunderlook_calendar::write::Edit {
+pub(crate) fn edit_of(e: &EventData) -> thunderlook_calendar::write::Edit {
     thunderlook_calendar::write::Edit {
         subject: e.subject.clone(),
         location: e.location.clone(),
@@ -820,7 +823,7 @@ fn recurrence_of(ics: &str) -> Result<thunderlook_calendar::recur::Recurrence> {
 }
 
 /// État actuel d'un élément, pour pouvoir le rétablir.
-fn snapshot(conn: &Connection, dir: &Path, item: ItemKind, id: &str) -> Result<Payload> {
+pub(crate) fn snapshot(conn: &Connection, dir: &Path, item: ItemKind, id: &str) -> Result<Payload> {
     Ok(match item {
         ItemKind::Contact => Payload::Contact(thunderlook_contacts::write::form_of(conn, dir, num(id, 'p')?)?),
         ItemKind::Task => Payload::Task(thunderlook_items::task_form(conn, dir, num(id, 't')?)?),
@@ -944,6 +947,7 @@ pub fn apply(conn: &mut Connection, data_dir: &Path, changes: &[Change]) -> Resu
         let result = match c.kind {
             ChangeKind::New => create(conn, data_dir, &c.payload).map(|id| {
                 rec.created.push(Created { item: c.item, id: id.clone() });
+                report.created.push((c.key.clone(), id.clone()));
                 Some(id)
             }),
             ChangeKind::Modified => update(conn, data_dir, &c.id, &c.payload).map(|()| Some(c.id.clone())),

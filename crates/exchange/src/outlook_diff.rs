@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::Value;
 use thunderlook_store::rusqlite::{Connection, params};
 
-use crate::{ItemKind, Result, conflict, import};
+use crate::{Change, ChangeKind, ItemKind, Payload, Result, conflict, import};
 
 /// Un état : connexion, dossier de données, source PST à lire.
 pub struct Side<'a> {
@@ -229,13 +229,100 @@ pub fn compare<'a>(base: &dyn Fn(ItemKind) -> &'a Snapshot, outlook: &Snapshot, 
             }
         }
         for (key, o) in outlook.iter().filter(|(key, _)| key.0 == k && !b.contains_key(key)) {
-            note(k, "créé dans Outlook", o, key.2, [vec![], vec![]], String::new(), &mut d);
+            // Déjà reporté ici (même NID) : identique, ou conflit si le contenu diffère.
+            let (what, fields) = match here.get(key) {
+                None => ("créé dans Outlook", vec![]),
+                Some(h) if h.print == o.print => ("modifié des deux côtés à l'identique", vec![]),
+                Some(h) => ("conflit : créé des deux côtés", changed(&o.value, &h.value)),
+            };
+            note(k, what, o, key.2, [vec![], fields], String::new(), &mut d);
         }
         for (key, h) in here.iter().filter(|(key, _)| key.0 == k && key.2 >= LOCAL_NID && !b.contains_key(key)) {
             note(k, "créé ici", h, key.2, [vec![], vec![]], String::new(), &mut d);
         }
     }
     d
+}
+
+/// Reporte ici les changements faits dans Outlook seul : modifiés, créés, supprimés (avec le fichier d'annulation de
+/// [`import::apply`]). Conflits, éléments modifiés ici et éléments créés dans la corbeille d'Outlook ne sont pas
+/// touchés. Un élément créé reprend le NID d'Outlook, pour être retrouvé à la comparaison suivante.
+pub fn align<'a>(
+    conn: &mut Connection,
+    dir: &Path,
+    source: i64,
+    from: &Side,
+    base: &dyn Fn(ItemKind) -> &'a Snapshot,
+    outlook: &Snapshot,
+    here: &Snapshot,
+) -> Result<import::ApplyReport> {
+    let sql = |e: thunderlook_store::rusqlite::Error| e.to_string();
+    let folders: BTreeMap<i64, (i64, String)> = conn
+        .prepare("SELECT nid, id, role FROM folder WHERE source_id = ?1")
+        .map_err(sql)?
+        .query_map(params![source], |r| Ok((r.get::<_, i64>(0)?, (r.get::<_, i64>(1)?, r.get::<_, Option<String>>(2)?.unwrap_or_default()))))
+        .map_err(sql)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(sql)?;
+    let mut changes = Vec::new();
+    for kind in [ItemKind::Contact, ItemKind::Task, ItemKind::Note, ItemKind::Event] {
+        let (b, k, p) = (base(kind), kind_name(kind), import::prefix(kind));
+        let change = |key: &Key, what: ChangeKind, id: i64, title: &str, payload: Payload| Change {
+            key: format!("{}:{}:{}", key.0, key.1, key.2),
+            kind: what,
+            item: kind,
+            id: format!("{p}{id}"),
+            summary: format!("{k} « {title} »"),
+            ext_uid: None,
+            payload,
+            conflict: None,
+            resolution: None,
+        };
+        // Contenu d'Outlook, rangé dans le dossier de même NID d'ici.
+        let payload = |o: &Entry, folder: i64| -> Result<Payload> {
+            let mut payload = import::snapshot(from.conn, from.dir, kind, &format!("{p}{}", o.id))?;
+            match &mut payload {
+                Payload::Contact(f) => f.folder_id = format!("k{folder}"),
+                Payload::Task(f) => f.folder_id = format!("f{folder}"),
+                Payload::Note(f) => f.folder_id = format!("f{folder}"),
+                Payload::Event(e) => e.calendar_id = format!("c{folder}"),
+                Payload::None => {}
+            }
+            Ok(payload)
+        };
+        for (key, be) in b.iter().filter(|(key, _)| key.0 == k) {
+            match (outlook.get(key), here.get(key)) {
+                (Some(o), Some(h)) if o.print != be.print && h.print == be.print => {
+                    changes.push(change(key, ChangeKind::Modified, h.id, &h.title, payload(o, folders.get(&key.1).map_or(0, |f| f.0))?));
+                }
+                (None, Some(h)) if h.print == be.print => changes.push(change(key, ChangeKind::Deleted, h.id, &h.title, Payload::None)),
+                _ => {}
+            }
+        }
+        for (key, o) in outlook.iter().filter(|(key, _)| key.0 == k && !b.contains_key(key) && !here.contains_key(key)) {
+            let Some((folder, role)) = folders.get(&key.1) else { continue };
+            if role == "deleted" {
+                continue;
+            }
+            changes.push(change(key, ChangeKind::New, o.id, &o.title, payload(o, *folder)?));
+        }
+    }
+    let report = import::apply(conn, dir, &changes)?;
+    for (key, local) in &report.created {
+        let nid: Option<i64> = key.rsplit(':').next().and_then(|n| n.parse().ok());
+        let Some(id) = local.get(1..).and_then(|n| n.parse::<i64>().ok()) else { continue };
+        if let Some(nid) = nid {
+            conn.execute("UPDATE message SET nid = ?1 WHERE id = ?2", params![nid, id]).map_err(sql)?;
+        }
+        // La création prête au rendez-vous sans catégorie celle que nomme son objet (règle du téléphone) : celui
+        // d'Outlook n'en a pas.
+        if let Some(Change { payload: Payload::Event(e), .. }) = changes.iter().find(|c| &c.key == key) {
+            if e.series.is_none() && e.categories.trim().is_empty() {
+                thunderlook_calendar::write::update(conn, dir, id, &import::edit_of(e))?;
+            }
+        }
+    }
+    Ok(report)
 }
 
 #[cfg(test)]
