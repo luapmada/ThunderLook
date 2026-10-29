@@ -31,6 +31,13 @@
   dossier de données ont été remplis par les fichiers du S23 : avant le premier essai S20, décider avec Paul (vider le
   S20 et le peupler de données de test ? repartir d'une base de comparaison vide ?). Rien n'a été lu ni exporté.
 - « Nouvelle réunion » retirée du ruban : Paul n'utilise pas les réunions.
+- **29/10 — S23 hors d'Outlook depuis le 26/10 13:09** : `mpe_s23_file.py` (25/10) avait passé le profil MPE du S23
+  sur la cible fichier (`mpe-s23`) ; la décision du 28/10 n'a coupé que la relecture ThunderLook, pas cette cible.
+  Retour arrière FAIT le 29/10 par `target/tl-scripts/mpe_s23_outlook.py` (cible Outlook, profil `pop-original` ;
+  copie d'avant : `mpe-backup/2026-10-25-s23/settings.dat.avant-retour-outlook`). Constat S20 du 29/10 : MPE a écrit « Rdv mum » dans
+  `mpe-test/calendrier.ics`, ThunderLook ne l'a pas lu (relecture coupée) ; en mode « fichiers seuls » ThunderLook
+  n'écrit jamais vers le téléphone ; le calendrier affiche 3 copies de PST figées qui se recouvrent (Calendrier 377,
+  Calendar Annexe 466, archive Calendar 3 098) : doublons et anniversaires supprimés viennent de là.
 
 # Passation — état au 2026-10-24 (nuit)
 

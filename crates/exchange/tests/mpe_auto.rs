@@ -293,6 +293,40 @@ fn conflit_modifie_des_deux_cotes_reste_de_cote() {
 }
 
 #[test]
+fn modification_faite_ici_part_dans_le_fichier_de_mpe_fiche_par_fiche() {
+    let mut w = world("mpe-retour");
+    let dir = w.dir.clone();
+    fs::create_dir_all(&w.out).unwrap();
+    let both = format!("{}{}", card(GUID[0], "Léa", "Martin", "0612345678"), card(GUID[1], "Paul", "Durand", "0687654321"));
+    write(&w, "contacts.vcf", &both);
+    assert_eq!(tick(&mut w, &quick()).created, 2);
+    let paul_before = read(&w, "contacts.vcf").split("BEGIN:VCARD").find(|c| c.contains("Durand")).unwrap().to_string();
+    let lea = contacts_of(&w).into_iter().find(|c| c.surname == "Martin").unwrap();
+    let n: i64 = lea.id.unwrap()[1..].parse().unwrap();
+    let mut f = thunderlook_contacts::write::form_of(&w.conn, &dir, n).unwrap();
+    f.mobile = "0700000000".into();
+    thunderlook_contacts::write::update(&mut w.conn, &dir, n, &f).unwrap();
+
+    // Fichiers inchangés : la modification part quand même ; l'autre fiche reste octet pour octet.
+    let rep = tick(&mut w, &quick());
+    assert_eq!(rep.exported, Some(true), "{rep:?}");
+    let text = read(&w, "contacts.vcf");
+    assert!(text.contains("0700000000") && !text.contains("0612345678"), "{text}");
+    assert!(text.contains(&format!("UID:{}", GUID[0])), "même identifiant pour MPE : {text}");
+    assert!(text.contains(&paul_before), "fiche non touchée réécrite : {text}");
+    // Relu ensuite : rien ne revient comme « modifié par le téléphone », rien à renvoyer.
+    let again = tick(&mut w, &Params { recheck: true, ..quick() });
+    assert_eq!((again.created, again.modified, again.aside.conflicts, again.exported), (0, 0, 0, None), "{again:?}");
+    assert_eq!(names(&w), ["Léa Martin 0700000000", "Paul Durand 0687654321"]);
+
+    // Supprimée ici : retirée du fichier.
+    thunderlook_contacts::write::delete(&mut w.conn, n).unwrap();
+    let rep = tick(&mut w, &quick());
+    assert_eq!(rep.exported, Some(true), "{rep:?}");
+    assert!(!read(&w, "contacts.vcf").contains(GUID[0]));
+}
+
+#[test]
 fn modification_faite_ici_seulement_n_est_pas_ecrasee_par_le_fichier_inchange() {
     let mut w = world("mpe-ici");
     let dir = w.dir.clone();

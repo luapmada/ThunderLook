@@ -17,6 +17,7 @@ pub mod mpe_files;
 mod phone;
 mod sha256;
 pub mod vcal10;
+pub mod writeback;
 
 use std::{
     collections::HashMap,
@@ -30,6 +31,7 @@ use thunderlook_store::rusqlite::Connection;
 
 pub use conflict::{Origin, Resolution};
 pub use import::{ApplyReport, apply, import_changes, import_changes_with, last_undo, undo};
+pub use writeback::{WriteReport, write_back};
 pub use phone::{files_signature, foreign_files, last_signature, set_signature, settle};
 
 pub type Result<T> = std::result::Result<T, String>;

@@ -15,8 +15,10 @@
 //!    écraserait ce qui est mis de côté).
 //!
 //! **Dossier écrit par MPE** (aucun `manifest.json`, `contacts.vcf` / `calendrier.ics` / `notes.vnt` seuls) : mode
-//! « fichiers seuls ». ThunderLook n'y écrit JAMAIS (ni export, ni manifeste) ; il compare chaque élément à la base qu'il
-//! tient lui-même (`phone`, `mpe-baseline.json`) : créé ou modifié sur le téléphone → appliqué ; supprimé → mis de côté.
+//! « fichiers seuls ». ThunderLook n'y écrit jamais d'export complet ni de manifeste ; il compare chaque élément à la base
+//! qu'il tient lui-même (`phone`, `mpe-baseline.json`) : créé ou modifié sur le téléphone → appliqué ; supprimé → mis de
+//! côté. Avec `auto_export`, il reporte ensuite SES modifications fiche par fiche dans ces fichiers ([`crate::write_back`]),
+//! que MPE renvoie au téléphone à la synchro suivante.
 //! Tant que les fichiers n'ont pas changé depuis un passage sans reste, le passage suivant ne relit rien.
 //!
 //! Le verrou anti-chevauchement avec le passage manuel est posé par l'appelant (commandes Tauri). Ce module n'écrit
@@ -202,7 +204,7 @@ pub struct PassReport {
     pub exported: Option<bool>,
     pub export_note: String,
     pub errors: Vec<String>,
-    /// Dossier écrit par MPE (sans manifeste) : relu seul, jamais écrit.
+    /// Dossier écrit par MPE (sans manifeste) : relu, puis seules les fiches modifiées ici y sont réécrites (`write_back`).
     pub files_only: bool,
     /// Champs d'une fiche que le format de ThunderLook ne reprend pas (télécopie, adresse en trop…) : informatif, ni
     /// mis de côté ni à traiter.
@@ -288,6 +290,20 @@ fn pass(conn: &mut Connection, data_dir: &Path, dir: &Path, p: &Params) -> Resul
     let signature = files_only.then(|| crate::files_signature(dir));
     if let Some(sig) = &signature {
         if !p.recheck && crate::last_signature(data_dir).as_ref() == Some(sig) {
+            // Rien à relire, mais ce qui a été modifié ici depuis part quand même vers le téléphone.
+            if p.auto_export {
+                match crate::write_back(conn, data_dir, dir, false) {
+                    Ok(w) if !w.is_empty() => {
+                        let mut note = format!("envoyé vers le téléphone : {} modifié(s), {} créé(s), {} supprimé(s)", w.modified, w.created, w.deleted);
+                        if !w.skipped.is_empty() {
+                            note.push_str(&format!(" ; non envoyé : {}", w.skipped.join(" ; ")));
+                        }
+                        return Ok(PassReport { files_only: true, exported: Some(true), export_note: note, ..Default::default() });
+                    }
+                    Ok(_) => {}
+                    Err(e) => return Ok(PassReport { files_only: true, exported: Some(false), export_note: format!("envoi vers le téléphone en échec : {e}"), ..Default::default() }),
+                }
+            }
             return Ok(skipped(format!("{UNCHANGED} depuis le dernier passage")));
         }
         if let Some(why) = incomplete(dir) {
@@ -356,6 +372,23 @@ fn pass(conn: &mut Connection, data_dir: &Path, dir: &Path, p: &Params) -> Resul
         crate::settle(conn, data_dir, &rep, &done_keys)?;
         // Rien ne reste à réessayer (échec d'application) : les mêmes fichiers n'ont plus à être relus.
         let _ = crate::set_signature(data_dir, if report.errors.is_empty() { signature.as_deref().unwrap_or("") } else { "" });
+        // Sens ThunderLook → téléphone : les modifications faites ici, reportées fiche par fiche dans les fichiers de MPE.
+        if p.auto_export && report.errors.is_empty() {
+            match crate::write_back(conn, data_dir, dir, false) {
+                Ok(w) if w.is_empty() => {}
+                Ok(w) => {
+                    report.exported = Some(true);
+                    report.export_note = format!("envoyé vers le téléphone : {} modifié(s), {} créé(s), {} supprimé(s)", w.modified, w.created, w.deleted);
+                    if !w.skipped.is_empty() {
+                        report.export_note.push_str(&format!(" ; non envoyé : {}", w.skipped.join(" ; ")));
+                    }
+                }
+                Err(e) => {
+                    report.exported = Some(false);
+                    report.export_note = format!("envoi vers le téléphone en échec : {e}");
+                }
+            }
+        }
     }
 
     if p.auto_export && !files_only {
