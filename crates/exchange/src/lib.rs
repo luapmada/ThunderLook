@@ -14,6 +14,7 @@ pub mod auto;
 mod conflict;
 mod import;
 pub mod mpe_files;
+pub mod outlook_diff;
 mod phone;
 mod sha256;
 pub mod vcal10;
