@@ -103,11 +103,29 @@ fn nids(conn: &Connection, source: i64) -> Result<BTreeMap<i64, (i64, String, i6
     rows.collect::<std::result::Result<_, _>>().map_err(sql)
 }
 
-/// Série : son VCALENDAR exporté, sans les horodatages de l'export.
+/// Série : son VCALENDAR exporté, sans les horodatages de l'export ; les occurrences modifiées (VEVENT après le
+/// premier) sont triées, leur ordre dans le PST n'ayant pas de sens.
 fn series_print(a: &thunderlook_calendar::Appointment, dir: &Path) -> String {
     let text = thunderlook_calendar::ics::export(&[a], "x", &|a| thunderlook_calendar::description(a, dir));
     let kept: Vec<&str> = text.lines().filter(|l| !l.starts_with("DTSTAMP") && !l.starts_with("PRODID")).collect();
-    kept.join("
+    let (mut events, mut other, mut inside): (Vec<Vec<&str>>, Vec<&str>, bool) = (vec![], vec![], false);
+    for l in kept {
+        if l == "BEGIN:VEVENT" {
+            events.push(vec![]);
+            inside = true;
+        }
+        match events.last_mut() {
+            Some(e) if inside => e.push(l),
+            _ => other.push(l),
+        }
+        if l == "END:VEVENT" {
+            inside = false;
+        }
+    }
+    if events.len() > 2 {
+        events[1..].sort();
+    }
+    [other, events.concat()].concat().join("
 ")
 }
 
