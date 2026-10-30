@@ -2,7 +2,7 @@
 //! arguments sans le rapport. Les conflits et les changements faits ici ne sont pas touchés ; annulation par le fichier
 //! `exchange-undo/<horodatage>.json` du dossier de données.
 //! Usage : `cargo run -p thunderlook-exchange --example outlook_align -- <données ThunderLook> <source PST> <base> <base
-//! des calendriers> <Outlook>`.
+//! des calendriers> <Outlook> [NID,…]` ; les NID facultatifs désignent des conflits tranchés pour Outlook.
 
 use std::{env, path::Path, process::ExitCode};
 
@@ -22,8 +22,12 @@ fn snap(conn: &Connection, dir: &str, source: i64) -> Snapshot {
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
-    let [here_dir, source, base, base_cal, outlook_dir] = args.as_slice() else {
-        eprintln!("usage : outlook_align <données ThunderLook> <source PST> <base> <base des calendriers> <Outlook>");
+    let (args, wins) = match args.as_slice() {
+        [a @ .., w] if args.len() == 6 => (a, w.split(',').filter_map(|n| n.trim().parse().ok()).collect::<Vec<i64>>()),
+        a => (a, vec![]),
+    };
+    let [here_dir, source, base, base_cal, outlook_dir] = args else {
+        eprintln!("usage : outlook_align <données ThunderLook> <source PST> <base> <base des calendriers> <Outlook> [NID,… des conflits tranchés pour Outlook]");
         return ExitCode::FAILURE;
     };
     let source: i64 = source.parse().expect("source");
@@ -32,7 +36,7 @@ fn main() -> ExitCode {
     let (base_conn, cal_conn, outlook_conn) = (read_only(Path::new(base)), read_only(Path::new(base_cal)), read_only(Path::new(outlook_dir)));
     let (base, base_cal, outlook) = (snap(&base_conn, base, 1), snap(&cal_conn, base_cal, 1), snap(&outlook_conn, outlook_dir, 1));
     let from = Side { conn: &outlook_conn, dir: Path::new(outlook_dir), source: 1 };
-    match align(&mut conn, Path::new(here_dir), source, &from, &|k| if k == ItemKind::Event { &base_cal } else { &base }, &outlook, &here) {
+    match align(&mut conn, Path::new(here_dir), source, &from, &|k| if k == ItemKind::Event { &base_cal } else { &base }, &outlook, &here, &wins) {
         Ok(r) => {
             println!("{}", serde_json::to_string_pretty(&r).unwrap_or_default());
             if r.errors.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }

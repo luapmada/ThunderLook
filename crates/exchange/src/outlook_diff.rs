@@ -246,7 +246,9 @@ pub fn compare<'a>(base: &dyn Fn(ItemKind) -> &'a Snapshot, outlook: &Snapshot, 
 
 /// Reporte ici les changements faits dans Outlook seul : modifiés, créés, supprimés (avec le fichier d'annulation de
 /// [`import::apply`]). Conflits, éléments modifiés ici et éléments créés dans la corbeille d'Outlook ne sont pas
-/// touchés. Un élément créé reprend le NID d'Outlook, pour être retrouvé à la comparaison suivante.
+/// touchés, sauf les éléments modifiés des deux côtés dont le NID est dans `outlook_wins` (conflit tranché pour Outlook).
+/// Un élément créé reprend le NID d'Outlook, pour être retrouvé à la comparaison suivante.
+#[allow(clippy::too_many_arguments)]
 pub fn align<'a>(
     conn: &mut Connection,
     dir: &Path,
@@ -255,6 +257,7 @@ pub fn align<'a>(
     base: &dyn Fn(ItemKind) -> &'a Snapshot,
     outlook: &Snapshot,
     here: &Snapshot,
+    outlook_wins: &[i64],
 ) -> Result<import::ApplyReport> {
     let sql = |e: thunderlook_store::rusqlite::Error| e.to_string();
     let folders: BTreeMap<i64, (i64, String)> = conn
@@ -292,7 +295,7 @@ pub fn align<'a>(
         };
         for (key, be) in b.iter().filter(|(key, _)| key.0 == k) {
             match (outlook.get(key), here.get(key)) {
-                (Some(o), Some(h)) if o.print != be.print && h.print == be.print => {
+                (Some(o), Some(h)) if o.print != be.print && (h.print == be.print || outlook_wins.contains(&key.2)) => {
                     changes.push(change(key, ChangeKind::Modified, h.id, &h.title, payload(o, folders.get(&key.1).map_or(0, |f| f.0))?));
                 }
                 (None, Some(h)) if h.print == be.print => changes.push(change(key, ChangeKind::Deleted, h.id, &h.title, Payload::None)),
@@ -314,12 +317,18 @@ pub fn align<'a>(
         if let Some(nid) = nid {
             conn.execute("UPDATE message SET nid = ?1 WHERE id = ?2", params![nid, id]).map_err(sql)?;
         }
-        // La création prête au rendez-vous sans catégorie celle que nomme son objet (règle du téléphone) : celui
-        // d'Outlook n'en a pas.
-        if let Some(Change { payload: Payload::Event(e), .. }) = changes.iter().find(|c| &c.key == key) {
-            if e.series.is_none() && e.categories.trim().is_empty() {
-                thunderlook_calendar::write::update(conn, dir, id, &import::edit_of(e))?;
-            }
+    }
+    // La création prête au rendez-vous sans catégorie celle que nomme son objet (règle du téléphone), le remplacement
+    // d'une série garde rappel et catégories de l'existant quand le fichier n'en porte pas : celui d'Outlook fait foi.
+    for c in changes.iter().filter(|c| report.done.contains(&c.key)) {
+        let Payload::Event(e) = &c.payload else { continue };
+        let local = match c.kind {
+            ChangeKind::New => report.created.iter().find(|(k, _)| k == &c.key).map(|(_, l)| l.clone()),
+            ChangeKind::Modified if e.series.is_some() => Some(c.id.clone()),
+            _ => None,
+        };
+        if let Some(id) = local.and_then(|l| l.get(1..).and_then(|n| n.parse::<i64>().ok())) {
+            thunderlook_calendar::write::update(conn, dir, id, &import::edit_of(e))?;
         }
     }
     Ok(report)
