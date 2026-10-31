@@ -38,6 +38,15 @@
   `data/store/mpe-baseline.json` et `exchange-map.json` (S23) RETIRÉS, copies `*.avant-s20-2026-10-29` (retour : les
   remettre). `auto-sync.json` NON modifié (activation refusée par le garde-fou, en attente de l'accord de Paul ;
   copie `auto-sync.json.avant-s20-2026-10-29`). Fichiers du S20 du 29/10 : `mpe-backup/2026-10-29-s20/`.
+- **30-31/10 — alignement Outlook → ThunderLook** (`outlook_diff.rs`, exemple `outlook_align`) : Outlook lu sur copie, jamais
+  modifié. L'alignement a recréé 14 doublons le 30/10, supprimés (annulation `exchange-undo/20261030T161719709.json`).
+  Depuis : un élément déjà ici sous un autre NID n'est plus recréé (`twin`, même dossier et même titre), et un rendez-vous
+  simple de même objet et même début qu'une occurrence de série présente ici non plus (`import::in_series`, à la synchro
+  téléphone et à l'alignement ; vérifié sur la base réelle pour BILAN ADI 08/02, SEOLIS 11/09 et 03/11).
+  Reste à faire : après la prochaine synchro S20, vérifier qu'ils ne reviennent pas en double ; doublons antérieurs à
+  l'alignement (anniversaires, OM, CDR à la CAF) ; « Rdv mum » et « Rdv mum apm » du 29/10 ; 42 conflits S20 ; ZZ-TEST.
+- Couleurs de catégories : perdues si la base est occupée au démarrage (« database is locked »), `load_categories`
+  réessaie désormais ; le blocage n'a pas été identifié. Objets du calendrier en graisse normale, comme Outlook.
   Reste : accord de Paul pour activer la lecture auto (5 min, envoi vers le téléphone) et faire la première lecture
   (`cargo run --release -p thunderlook-exchange --example pass_now -- <data/store> <mpe-test>`), puis une synchro MPE
   du S20 par Paul pour constater que MPE reprend les fiches modifiées par ThunderLook (non vérifié).
