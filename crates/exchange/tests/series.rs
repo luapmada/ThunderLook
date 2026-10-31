@@ -138,6 +138,21 @@ fn serie_modifiee_a_une_exception_changee_sur_le_telephone() {
     assert_stable(&mut w);
 }
 
+#[test]
+fn rendez_vous_simple_qui_double_une_occurrence_n_est_pas_cree() {
+    let mut w = world("aa-doublon-occurrence");
+    yoga(&mut w);
+    export_all(&w.conn, &w.dir, &w.out).unwrap();
+    // 2026-11-03 18:30 à Paris = 17:30Z : même objet, même début que l'exception. Une heure plus tard, c'est un autre rendez-vous.
+    let single = |uid: &str, start: &str, end: &str| format!("BEGIN:VEVENT\r\nUID:{uid}\r\nSUMMARY:Yoga  (déplacé)\r\nDTSTART:20261103T{start}Z\r\nDTEND:20261103T{end}Z\r\nEND:VEVENT\r\n");
+    add_to_phone(&w, &[single("mpe-2", "173000", "183000"), single("mpe-3", "183000", "193000")].concat());
+    let (rep, _) = apply_all(&mut w, false);
+    assert_eq!(rep.changes.len(), 1, "{:?}", rep.changes);
+    assert_eq!(rep.changes[0].kind, ChangeKind::New);
+    assert!(rep.changes[0].summary.contains("19:30"), "{:?}", rep.changes);
+    assert_eq!(calendar_len(&w), 2);
+}
+
 const PARIS: &str = "DTSTART;TZID=Europe/Paris:";
 
 fn phone_event(extra: &str) -> String {

@@ -43,7 +43,7 @@ async fn suggest(query: &str, limit: u32) -> Result<Vec<Sugg>, String> {
     serde_wasm_bindgen::from_value(out).map_err(|e| format!("address_suggest : {e}"))
 }
 
-async fn sleep(ms: i32) {
+pub(crate) async fn sleep(ms: i32) {
     let p = js_sys::Promise::new(&mut |resolve, _| {
         if let Some(w) = web_sys::window() {
             let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);

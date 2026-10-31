@@ -31,6 +31,32 @@
   dossier de données ont été remplis par les fichiers du S23 : avant le premier essai S20, décider avec Paul (vider le
   S20 et le peupler de données de test ? repartir d'une base de comparaison vide ?). Rien n'a été lu ni exporté.
 - « Nouvelle réunion » retirée du ruban : Paul n'utilise pas les réunions.
+- **29/10 — synchro S20 dans les deux sens (branche `feat/synchro-s20-deux-sens`)** : module `crates/exchange/src/writeback.rs`
+  (ThunderLook → fichiers de MPE, fiche par fiche) et comparaison sans faux écarts (`import.rs`). Mesure à blanc sur les
+  fichiers du S20 : 2 289 identiques, 223 compléments appliqués, 2 nouveaux, 42 vrais conflits. Aller-retour validé sur
+  copie (`A:\AI_related\Claude_Code_Work\tl-essai-s20`, exemple `roundtrip_files`). Réglages externes posés :
+  `data/store/mpe-baseline.json` et `exchange-map.json` (S23) RETIRÉS, copies `*.avant-s20-2026-10-29` (retour : les
+  remettre). `auto-sync.json` NON modifié (activation refusée par le garde-fou, en attente de l'accord de Paul ;
+  copie `auto-sync.json.avant-s20-2026-10-29`). Fichiers du S20 du 29/10 : `mpe-backup/2026-10-29-s20/`.
+- **30-31/10 — alignement Outlook → ThunderLook** (`outlook_diff.rs`, exemple `outlook_align`) : Outlook lu sur copie, jamais
+  modifié. L'alignement a recréé 14 doublons le 30/10, supprimés (annulation `exchange-undo/20261030T161719709.json`).
+  Depuis : un élément déjà ici sous un autre NID n'est plus recréé (`twin`, même dossier et même titre), et un rendez-vous
+  simple de même objet et même début qu'une occurrence de série présente ici non plus (`import::in_series`, à la synchro
+  téléphone et à l'alignement ; vérifié sur la base réelle pour BILAN ADI 08/02, SEOLIS 11/09 et 03/11).
+  Reste à faire : après la prochaine synchro S20, vérifier qu'ils ne reviennent pas en double ; doublons antérieurs à
+  l'alignement (anniversaires, OM, CDR à la CAF) ; « Rdv mum » et « Rdv mum apm » du 29/10 ; 42 conflits S20 ; ZZ-TEST.
+- Couleurs de catégories : perdues si la base est occupée au démarrage (« database is locked »), `load_categories`
+  réessaie désormais ; le blocage n'a pas été identifié. Objets du calendrier en graisse normale, comme Outlook.
+  Reste : accord de Paul pour activer la lecture auto (5 min, envoi vers le téléphone) et faire la première lecture
+  (`cargo run --release -p thunderlook-exchange --example pass_now -- <data/store> <mpe-test>`), puis une synchro MPE
+  du S20 par Paul pour constater que MPE reprend les fiches modifiées par ThunderLook (non vérifié).
+- **29/10 — S23 hors d'Outlook depuis le 26/10 13:09** : `mpe_s23_file.py` (25/10) avait passé le profil MPE du S23
+  sur la cible fichier (`mpe-s23`) ; la décision du 28/10 n'a coupé que la relecture ThunderLook, pas cette cible.
+  Retour arrière FAIT le 29/10 par `target/tl-scripts/mpe_s23_outlook.py` (cible Outlook, profil `pop-original` ;
+  copie d'avant : `mpe-backup/2026-10-25-s23/settings.dat.avant-retour-outlook`). Constat S20 du 29/10 : MPE a écrit « Rdv mum » dans
+  `mpe-test/calendrier.ics`, ThunderLook ne l'a pas lu (relecture coupée) ; en mode « fichiers seuls » ThunderLook
+  n'écrit jamais vers le téléphone ; le calendrier affiche 3 copies de PST figées qui se recouvrent (Calendrier 377,
+  Calendar Annexe 466, archive Calendar 3 098) : doublons et anniversaires supprimés viennent de là.
 
 # Passation — état au 2026-10-24 (nuit)
 

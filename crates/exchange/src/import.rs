@@ -169,7 +169,12 @@ impl Ctx<'_> {
 
     /// Classe une modification venue du téléphone (le fichier diffère de la base) : modification à appliquer, élément
     /// intact côté téléphone (ThunderLook fait foi, rien à proposer) ou conflit (proposé à part).
-    fn propose(&self, rep: &mut ImportReport, id: &str, summary: String, uid: Option<&str>, payload: Payload, canon: &impl Serialize, phone: &impl Serialize) {
+    ///
+    /// `fills` : le téléphone ne fait que remplir des champs vides ici. En mode « fichiers seuls », pour un élément que la
+    /// base de comparaison ne connaît pas encore (premier rapprochement), c'est appliqué au lieu d'être un conflit : rien
+    /// de ThunderLook n'est écrasé.
+    #[allow(clippy::too_many_arguments)]
+    fn propose(&self, rep: &mut ImportReport, id: &str, summary: String, uid: Option<&str>, payload: Payload, canon: &impl Serialize, phone: &impl Serialize, fills: bool) {
         let phone_fp = conflict::fingerprint(phone);
         let here_fp = conflict::fingerprint(canon);
         let verdict = match &self.base {
@@ -178,6 +183,7 @@ impl Ctx<'_> {
                 Some(p) if p.phone == phone_fp => Verdict::Intact,
                 Some(p) if p.here == here_fp => Verdict::PhoneEdit,
                 Some(_) => Verdict::Conflict(Origin::Both),
+                None if fills => Verdict::PhoneEdit,
                 None => Verdict::Conflict(Origin::Unknown),
             },
             None => conflict::classify(self.values.and_then(|v| v.get(id)).map(String::as_str), &phone_fp, &here_fp),
@@ -298,7 +304,69 @@ fn norm_contact(mut f: ContactForm) -> ContactForm {
     f.id = None;
     f.folder_id.clear();
     f.photo = None;
+    f.categories = own_categories(&f.categories);
     f
+}
+
+/// Catégories sans les groupes système qu'Android ajoute à chaque fiche (« My Contacts », « System Group: … ») : ce ne
+/// sont pas des catégories de Paul, et MPE les écrit dans le fichier.
+fn own_categories(s: &str) -> String {
+    s.split([',', ';'])
+        .map(str::trim)
+        .filter(|c| !c.is_empty() && !c.eq_ignore_ascii_case("My Contacts") && !c.to_ascii_lowercase().starts_with("system group:"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Chiffres d'un numéro, indicatif français ramené au 0 : « +33 6 12… » et « 06.12… » sont le même numéro.
+fn phone_digits(s: &str) -> String {
+    let d: String = s.chars().filter(char::is_ascii_digit).collect();
+    match d.strip_prefix("0033").or_else(|| d.strip_prefix("33").filter(|r| r.len() == 9)) {
+        Some(r) => format!("0{r}"),
+        None => d,
+    }
+}
+
+/// La fiche du téléphone telle qu'elle se compare à celle de la base : un numéro écrit autrement, des catégories dans un
+/// autre ordre ne sont pas des modifications. Sert à la comparaison seulement (l'empreinte retenue reste celle du fichier).
+fn contact_as_compared(phone: &ContactForm, canon: &ContactForm) -> ContactForm {
+    let mut f = phone.clone();
+    for (p, c) in [
+        (&mut f.mobile, &canon.mobile),
+        (&mut f.business, &canon.business),
+        (&mut f.home_phone, &canon.home_phone),
+        (&mut f.business_fax, &canon.business_fax),
+        (&mut f.home_fax, &canon.home_fax),
+        (&mut f.business2, &canon.business2),
+        (&mut f.home2, &canon.home2),
+        (&mut f.car_phone, &canon.car_phone),
+        (&mut f.pager, &canon.pager),
+        (&mut f.other_phone, &canon.other_phone),
+    ] {
+        if *p != *c && !p.is_empty() && phone_digits(p) == phone_digits(c) {
+            p.clone_from(c);
+        }
+    }
+    // Notes : le téléphone réécrit les fins de ligne et les blancs.
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if f.notes != canon.notes && squash(&f.notes) == squash(&canon.notes) {
+        f.notes.clone_from(&canon.notes);
+    }
+    let set = |s: &str| s.split(", ").filter(|c| !c.is_empty()).map(str::to_lowercase).collect::<std::collections::BTreeSet<_>>();
+    if set(&f.categories) == set(&canon.categories) {
+        f.categories.clone_from(&canon.categories);
+    }
+    f
+}
+
+/// Tous les champs qui diffèrent sont vides dans la base : le téléphone ne fait que compléter.
+fn only_fills<T: Serialize>(canon: &T, fields: &[String]) -> bool {
+    let a = json(canon);
+    fields.iter().all(|f| match a.get(f) {
+        None | Some(Value::Null) => true,
+        Some(Value::String(s)) => s.trim().is_empty(),
+        _ => false,
+    })
 }
 
 pub(crate) fn canon_contact(f: &ContactForm) -> ContactForm {
@@ -328,14 +396,15 @@ fn contacts(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Impo
             Some(i) => {
                 let id = m.exs[i].id.clone();
                 let (canon, existing) = &data[&id];
-                let fields = diff_fields(canon, &phone);
+                let fields = diff_fields(canon, &contact_as_compared(&phone, canon));
                 if fields.is_empty() {
                     rep.unchanged += 1;
                     ctx.see(rep, p.uid.as_deref(), Some(&id), ctx.fp(&phone), None);
                 } else {
                     let merged = overlay(existing, &phone, &fields);
                     let summary = format!("{} : {}", m.exs[i].title, fields.join(", "));
-                    ctx.propose(rep, &id, summary, p.uid.as_deref(), Payload::Contact(merged), canon, &phone);
+                    let fills = only_fills(canon, &fields);
+                    ctx.propose(rep, &id, summary, p.uid.as_deref(), Payload::Contact(merged), canon, &phone, fills);
                 }
             }
             None => {
@@ -390,7 +459,7 @@ fn tasks(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut ImportR
                     ctx.see(rep, p.uid.as_deref(), Some(&id), ctx.fp(&phone), None);
                 } else {
                     let summary = format!("{} : {}", m.exs[i].title, fields.join(", "));
-                    ctx.propose(rep, &id, summary, p.uid.as_deref(), Payload::Task(overlay(existing, &phone, &fields)), canon, &phone);
+                    ctx.propose(rep, &id, summary, p.uid.as_deref(), Payload::Task(overlay(existing, &phone, &fields)), canon, &phone, false);
                 }
             }
             None => {
@@ -447,7 +516,7 @@ fn notes(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, forced: bool, rep
                         // Le téléphone fait foi : remplacement coché d'office, la couleur existante est gardée (`..existing`).
                         ctx.modified(rep, &id, summary, uid.as_deref(), Payload::Note(merged), ctx.fp(&body));
                     } else {
-                        ctx.propose(rep, &id, summary, uid.as_deref(), Payload::Note(merged), canon, &body);
+                        ctx.propose(rep, &id, summary, uid.as_deref(), Payload::Note(merged), canon, &body, false);
                     }
                 }
             }
@@ -518,6 +587,12 @@ fn series_event(a: &Appointment, ics: String) -> EventData {
     EventData { series: Some(ics), ..norm_event(event_of(a, a.description.clone())) }
 }
 
+/// La série a une occurrence de même objet au même instant : le rendez-vous simple qui porte cet objet et ce début la double.
+pub(crate) fn in_series(series: &Appointment, subject: &str, start_ms: i64) -> bool {
+    let norm = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    series.recurrence.is_some() && thunderlook_calendar::expand::occurrences(series, start_ms, start_ms + 1).iter().any(|o| o.start_ms == start_ms && norm(&o.subject) == norm(subject))
+}
+
 fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut ImportReport) -> Result<()> {
     let cal = thunderlook_calendar::load(conn)?;
     let describe = |a: &Appointment| thunderlook_calendar::description(a, dir);
@@ -549,6 +624,7 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
     } else {
         text
     };
+    let carries_categories = text.lines().any(|l| l.to_ascii_uppercase().starts_with("CATEGORIES"));
     let split = ics_series::split(text);
     let (_, phone) = thunderlook_calendar::ics::parse(&split.rest, 0, 0)?;
     for (n, a) in phone.iter().enumerate() {
@@ -564,15 +640,20 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
             Some(i) => {
                 let id = m.exs[i].id.clone();
                 let (canon, existing) = &data[&id];
-                let fields = diff_fields(canon, &e);
+                // Fichier sans aucune catégorie (MPE n'en écrit pas) : celles de la base ne sont pas « retirées par le téléphone ».
+                let compared = if carries_categories { e.clone() } else { EventData { categories: canon.categories.clone(), ..e.clone() } };
+                let fields = diff_fields(canon, &compared);
                 if fields.is_empty() {
                     rep.unchanged += 1;
                     ctx.see(rep, a.uid.as_deref(), Some(&id), ctx.fp(&e), None);
                 } else {
                     let summary = format!("{} : {}", m.exs[i].title, fields.join(", "));
-                    ctx.propose(rep, &id, summary, a.uid.as_deref(), Payload::Event(overlay(existing, &e, &fields)), canon, &e);
+                    let fills = only_fills(canon, &fields);
+                    ctx.propose(rep, &id, summary, a.uid.as_deref(), Payload::Event(overlay(existing, &e, &fields)), canon, &e, fills);
                 }
             }
+            // Occurrence portée par le fichier en rendez-vous simple : elle est déjà ici, dans sa série.
+            None if cal.appointments.iter().any(|s| in_series(s, &a.subject, a.start_ms)) => rep.unchanged += 1,
             None => {
                 let (fp, summary) = (ctx.fp(&e), format!("{} ({})", e.subject, e.start.replace('T', " ")));
                 ctx.created(rep, &format!("#{n}"), summary, a.uid.as_deref(), Payload::Event(e), fp);
@@ -686,13 +767,16 @@ pub struct ApplyReport {
     /// Clés des changements réglés (appliqués, ou conflits tranchés en gardant ThunderLook) : à donner à [`crate::settle`].
     #[serde(default)]
     pub done: Vec<String>,
+    /// (clé du changement, identifiant local) des éléments créés.
+    #[serde(default)]
+    pub created: Vec<(String, String)>,
 }
 
 fn num(id: &str, prefix: char) -> Result<i64> {
     id.strip_prefix(prefix).and_then(|n| n.parse().ok()).ok_or_else(|| format!("identifiant inconnu : {id}"))
 }
 
-fn prefix(item: ItemKind) -> char {
+pub(crate) fn prefix(item: ItemKind) -> char {
     match item {
         ItemKind::Contact => 'p',
         ItemKind::Task => 't',
@@ -702,7 +786,7 @@ fn prefix(item: ItemKind) -> char {
 }
 
 /// Dossier des nouveaux éléments : celui qui en contient le plus, sinon le premier dossier de la bonne classe.
-fn default_folder(conn: &Connection, item: ItemKind) -> Result<i64> {
+pub(crate) fn default_folder(conn: &Connection, item: ItemKind) -> Result<i64> {
     let from_items = |msg: &str| thunderlook_items::default_folder(conn, msg).ok().flatten().and_then(|f| num(&f, 'f').ok());
     let by_class = |class: &str| conn.query_row("SELECT id FROM folder WHERE container_class LIKE ?1 ORDER BY id LIMIT 1", [class], |r| r.get::<_, i64>(0)).ok();
     let found = match item {
@@ -725,7 +809,7 @@ pub fn subject_category(conn: &Connection, subject: &str) -> Option<String> {
     names.into_iter().find(|n| n.trim().to_lowercase() == first)
 }
 
-fn edit_of(e: &EventData) -> thunderlook_calendar::write::Edit {
+pub(crate) fn edit_of(e: &EventData) -> thunderlook_calendar::write::Edit {
     thunderlook_calendar::write::Edit {
         subject: e.subject.clone(),
         location: e.location.clone(),
@@ -747,7 +831,7 @@ fn recurrence_of(ics: &str) -> Result<thunderlook_calendar::recur::Recurrence> {
 }
 
 /// État actuel d'un élément, pour pouvoir le rétablir.
-fn snapshot(conn: &Connection, dir: &Path, item: ItemKind, id: &str) -> Result<Payload> {
+pub(crate) fn snapshot(conn: &Connection, dir: &Path, item: ItemKind, id: &str) -> Result<Payload> {
     Ok(match item {
         ItemKind::Contact => Payload::Contact(thunderlook_contacts::write::form_of(conn, dir, num(id, 'p')?)?),
         ItemKind::Task => Payload::Task(thunderlook_items::task_form(conn, dir, num(id, 't')?)?),
@@ -871,6 +955,7 @@ pub fn apply(conn: &mut Connection, data_dir: &Path, changes: &[Change]) -> Resu
         let result = match c.kind {
             ChangeKind::New => create(conn, data_dir, &c.payload).map(|id| {
                 rec.created.push(Created { item: c.item, id: id.clone() });
+                report.created.push((c.key.clone(), id.clone()));
                 Some(id)
             }),
             ChangeKind::Modified => update(conn, data_dir, &c.id, &c.payload).map(|()| Some(c.id.clone())),

@@ -8,7 +8,7 @@
 //! fichier → suppression proposée (jamais appliquée seule).
 //!
 //! La base n'avance que pour ce qui a été réglé ([`settle`]) : un conflit, une suppression ou un échec restent proposés
-//! au passage suivant. Ce module n'écrit jamais dans le dossier d'échange.
+//! au passage suivant. Ce module n'écrit jamais dans le dossier d'échange (c'est `writeback` qui le fait).
 
 use std::{
     collections::{HashMap, HashSet},
@@ -41,6 +41,9 @@ pub(crate) struct Base {
     pub items: HashMap<String, Prints>,
     /// Signature des fichiers lus au dernier passage sans reste (voir [`files_signature`]) ; vide : à relire.
     pub signature: String,
+    /// Mise en route du report ThunderLook → téléphone (RFC 3339) : seuls les éléments créés ici après cet instant sont
+    /// ajoutés aux fichiers (voir `writeback`). Vide : jamais mis en route.
+    pub since: String,
 }
 
 fn path(data_dir: &Path) -> std::path::PathBuf {
@@ -51,7 +54,7 @@ pub(crate) fn read_base(data_dir: &Path) -> Base {
     fs::read_to_string(path(data_dir)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 
-fn write_base(data_dir: &Path, base: &Base) -> Result<()> {
+pub(crate) fn write_base(data_dir: &Path, base: &Base) -> Result<()> {
     write_atomic(&path(data_dir), serde_json::to_string(base).map_err(|e| e.to_string())?.as_bytes())
 }
 

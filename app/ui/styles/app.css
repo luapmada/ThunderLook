@@ -1781,8 +1781,9 @@ input {
   background: color-mix(in srgb, var(--c) 32%, var(--bg));
 }
 
+/* Comme Outlook : objet en graisse normale. */
 .cal-subject {
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .cal-loc,

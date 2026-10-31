@@ -226,10 +226,17 @@ pub fn refresh_tree(ui: Ui) {
 }
 
 pub fn load_categories(ui: Ui) {
+    // Au démarrage la base peut être occupée : sans nouvel essai, aucun rendez-vous n'aurait sa couleur de catégorie.
     spawn_local(async move {
-        match ipc::categories().await {
-            Ok(c) => ui.categories.set(c),
-            Err(e) => ui.error.set(Some(e)),
+        for attempt in 0..10 {
+            match ipc::categories().await {
+                Ok(c) => {
+                    ui.categories.set(c);
+                    return;
+                }
+                Err(e) if attempt == 9 => ui.error.set(Some(e)),
+                Err(_) => crate::address_book::sleep(3000).await,
+            }
         }
     });
 }
