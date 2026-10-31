@@ -545,13 +545,16 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// Exécute `f` sur la boîte aux lettres, en l'ouvrant au besoin (l'indexation démarre alors).
 fn with_mailbox<T>(app: &AppHandle, store: &Store, f: impl FnOnce(&mut Mailbox) -> Result<T, String>) -> Result<T, String> {
     let mut guard = store.0.lock().map_err(|_| "verrou de la base empoisonné".to_string())?;
-    let mailbox = guard.get_or_insert_with(|| {
+    // Un échec d'ouverture (base occupée au démarrage, par exemple) n'est pas gardé : on réessaie à l'appel suivant,
+    // sinon catégories et couleurs restent absentes jusqu'au redémarrage.
+    if !matches!(*guard, Some(Ok(_))) {
         let mb = data_dir(app).and_then(|d| Mailbox::open(&d));
         if let Ok(mb) = &mb {
             app.state::<Indexer>().ensure(mb.data_dir());
         }
-        mb
-    });
+        *guard = Some(mb);
+    }
+    let mailbox = guard.as_mut().expect("ouverte ci-dessus");
     match mailbox {
         Ok(mb) => f(mb),
         Err(e) => Err(e.clone()),
