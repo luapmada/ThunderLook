@@ -28,6 +28,8 @@ pub struct Entry {
     pub folder: String,
     /// Forme comparée, pour nommer les champs qui diffèrent.
     pub value: Value,
+    /// Le rendez-vous lui-même, pour retrouver une occurrence de série.
+    pub event: Option<thunderlook_calendar::Appointment>,
 }
 
 /// (type, NID du dossier, NID de l'élément) ; le type est son nom (`ItemKind` n'est pas ordonné).
@@ -162,12 +164,14 @@ const LOCAL_NID: i64 = 0x7000_0000;
 pub fn snapshot(side: &Side) -> Result<Snapshot> {
     let map = nids(side.conn, side.source)?;
     let mut out = Snapshot::new();
-    let mut put = |kind: ItemKind, id: i64, value: Value, title: String| {
+    let mut put_event = |kind: ItemKind, id: i64, value: Value, title: String, event: Option<thunderlook_calendar::Appointment>| {
         if let Some((f, name, n)) = map.get(&id) {
             let print = conflict::fingerprint(&value);
-            out.insert((kind_name(kind), *f, *n), Entry { print, title, id, folder: name.clone(), value });
+            out.insert((kind_name(kind), *f, *n), Entry { print, title, id, folder: name.clone(), value, event });
         }
-    };    let (conn, dir) = (side.conn, side.dir);
+    };
+    let mut put = |kind: ItemKind, id: i64, value: Value, title: String| put_event(kind, id, value, title, None);
+    let (conn, dir) = (side.conn, side.dir);
     for c in thunderlook_contacts::load(conn, None, None)?.contacts {
         let f = thunderlook_contacts::write::form_from(&c, dir);
         put(ItemKind::Contact, c.id, to_value(&import::canon_contact(&f)), c.title());
@@ -187,17 +191,22 @@ pub fn snapshot(side: &Side) -> Result<Snapshot> {
         let value = if a.recurrence.is_some() { Value::String(series_print(a, dir)) } else { to_value(&import::canon_event(a, dir)) };
         let day = chrono::DateTime::from_timestamp_millis(a.start_ms).map(|t| t.format("%Y-%m-%d").to_string()).unwrap_or_default();
         let title = format!("{} ({day}{})", a.subject, if a.recurrence.is_some() { ", série" } else { "" });
-        put(ItemKind::Event, a.id, value, title);
+        put_event(ItemKind::Event, a.id, value, title, Some(a.clone()));
     }
     Ok(out)
 }
 
 /// Élément créé dans Outlook et déjà ici sous un autre NID (le téléphone l'a porté dans les deux, chacun lui donnant son
-/// NID) : même dossier, même titre (date comprise pour un rendez-vous), et absent d'Outlook sous ce NID-là.
+/// NID) : même dossier, même titre (date comprise pour un rendez-vous), et absent d'Outlook sous ce NID-là. Un rendez-vous
+/// simple l'est aussi d'une série du même dossier qui a une occurrence de même objet au même instant.
 fn twin<'a>(key: &Key, o: &Entry, outlook: &Snapshot, here: &'a Snapshot) -> Option<&'a Entry> {
     let norm = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
     let title = norm(&o.title);
-    here.iter().find(|(k, h)| k.0 == key.0 && k.1 == key.1 && !outlook.contains_key(*k) && norm(&h.title) == title).map(|(_, h)| h)
+    let occurrence = |h: &Entry| match (&o.event, &h.event) {
+        (Some(a), Some(s)) if a.recurrence.is_none() => import::in_series(s, &a.subject, a.start_ms),
+        _ => false,
+    };
+    here.iter().find(|(k, h)| k.0 == key.0 && k.1 == key.1 && ((!outlook.contains_key(*k) && norm(&h.title) == title) || occurrence(h))).map(|(_, h)| h)
 }
 
 /// Compare les trois états. `base` : par type, l'état importé dans ThunderLook (les calendriers peuvent venir d'une
@@ -366,7 +375,7 @@ mod tests {
     use super::*;
 
     fn e(print: &str) -> Entry {
-        Entry { print: print.into(), title: print.into(), id: 1, folder: "Contacts".into(), value: Value::String(print.into()) }
+        Entry { print: print.into(), title: print.into(), id: 1, folder: "Contacts".into(), value: Value::String(print.into()), event: None }
     }
 
     #[test]

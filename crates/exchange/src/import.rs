@@ -587,6 +587,12 @@ fn series_event(a: &Appointment, ics: String) -> EventData {
     EventData { series: Some(ics), ..norm_event(event_of(a, a.description.clone())) }
 }
 
+/// La série a une occurrence de même objet au même instant : le rendez-vous simple qui porte cet objet et ce début la double.
+pub(crate) fn in_series(series: &Appointment, subject: &str, start_ms: i64) -> bool {
+    let norm = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    series.recurrence.is_some() && thunderlook_calendar::expand::occurrences(series, start_ms, start_ms + 1).iter().any(|o| o.start_ms == start_ms && norm(&o.subject) == norm(subject))
+}
+
 fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut ImportReport) -> Result<()> {
     let cal = thunderlook_calendar::load(conn)?;
     let describe = |a: &Appointment| thunderlook_calendar::description(a, dir);
@@ -646,6 +652,8 @@ fn events(conn: &Connection, dir: &Path, text: &str, ctx: &Ctx, rep: &mut Import
                     ctx.propose(rep, &id, summary, a.uid.as_deref(), Payload::Event(overlay(existing, &e, &fields)), canon, &e, fills);
                 }
             }
+            // Occurrence portée par le fichier en rendez-vous simple : elle est déjà ici, dans sa série.
+            None if cal.appointments.iter().any(|s| in_series(s, &a.subject, a.start_ms)) => rep.unchanged += 1,
             None => {
                 let (fp, summary) = (ctx.fp(&e), format!("{} ({})", e.subject, e.start.replace('T', " ")));
                 ctx.created(rep, &format!("#{n}"), summary, a.uid.as_deref(), Payload::Event(e), fp);
