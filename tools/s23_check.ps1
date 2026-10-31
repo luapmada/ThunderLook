@@ -42,7 +42,7 @@ function Calendars($root) {
 
 $gaps = 0
 function Report($title, $lines) {
-    $lines = @($lines)
+    $lines = @($lines | Where-Object { $_ })
     "$title : $($lines.Count)"
     $lines | Sort-Object | ForEach-Object { "  $_" }
     $script:gaps += $lines.Count
