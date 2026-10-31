@@ -192,6 +192,14 @@ pub fn snapshot(side: &Side) -> Result<Snapshot> {
     Ok(out)
 }
 
+/// Élément créé dans Outlook et déjà ici sous un autre NID (le téléphone l'a porté dans les deux, chacun lui donnant son
+/// NID) : même dossier, même titre (date comprise pour un rendez-vous), et absent d'Outlook sous ce NID-là.
+fn twin<'a>(key: &Key, o: &Entry, outlook: &Snapshot, here: &'a Snapshot) -> Option<&'a Entry> {
+    let norm = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    let title = norm(&o.title);
+    here.iter().find(|(k, h)| k.0 == key.0 && k.1 == key.1 && !outlook.contains_key(*k) && norm(&h.title) == title).map(|(_, h)| h)
+}
+
 /// Compare les trois états. `base` : par type, l'état importé dans ThunderLook (les calendriers peuvent venir d'une
 /// copie plus récente que le reste).
 pub fn compare<'a>(base: &dyn Fn(ItemKind) -> &'a Snapshot, outlook: &Snapshot, here: &Snapshot) -> Diff {
@@ -249,6 +257,7 @@ pub fn compare<'a>(base: &dyn Fn(ItemKind) -> &'a Snapshot, outlook: &Snapshot, 
         for (key, o) in outlook.iter().filter(|(key, _)| key.0 == k && !b.contains_key(key)) {
             // Déjà reporté ici (même NID) : identique, ou conflit si le contenu diffère.
             let (what, fields) = match here.get(key) {
+                None if twin(key, o, outlook, here).is_some() => ("modifié des deux côtés à l'identique", vec![]),
                 None => ("créé dans Outlook", vec![]),
                 Some(h) if h.print == o.print => ("modifié des deux côtés à l'identique", vec![]),
                 Some(h) => ("conflit : créé des deux côtés", changed(&o.value, &h.value)),
@@ -322,7 +331,7 @@ pub fn align<'a>(
         }
         for (key, o) in outlook.iter().filter(|(key, _)| key.0 == k && !b.contains_key(key) && !here.contains_key(key)) {
             let Some((folder, role)) = folders.get(&key.1) else { continue };
-            if role == "deleted" {
+            if role == "deleted" || twin(key, o, outlook, here).is_some() {
                 continue;
             }
             changes.push(change(key, ChangeKind::New, o.id, &o.title, payload(o, *folder)?));
@@ -373,5 +382,19 @@ mod tests {
             (1, 1, 1, 1, 1, 1, 1),
             "{n:?}"
         );
+    }
+
+    #[test]
+    fn un_element_deja_ici_sous_un_autre_nid_n_est_pas_cree() {
+        let c = "contacts";
+        let base = Snapshot::new();
+        let outlook: Snapshot = [((c, 1, 7), e("ADI retour Daumand ")), ((c, 1, 8), e("nouveau"))].into();
+        let here: Snapshot = [((c, 1, LOCAL_NID), e("adi  retour daumand"))].into();
+        let d = compare(&|_| &base, &outlook, &here);
+        assert_eq!(d.by_kind["contacts"].outlook_created, 1);
+        assert!(twin(&(c, 1, 7), &outlook[&(c, 1, 7)], &outlook, &here).is_some());
+        // Deux éléments dans Outlook : ce ne sont pas des jumeaux.
+        let outlook: Snapshot = [((c, 1, 7), e("a")), ((c, 1, LOCAL_NID), e("a"))].into();
+        assert!(twin(&(c, 1, 7), &outlook[&(c, 1, 7)], &outlook, &[((c, 1, LOCAL_NID), e("a"))].into()).is_none());
     }
 }
