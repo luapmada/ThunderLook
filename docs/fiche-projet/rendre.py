@@ -1,14 +1,15 @@
-"""Rend la fiche projet en PNG (3200 x 2262, comme les autres fiches) et en PDF (proportions A4 paysage), avec Edge
-en mode headless (déjà présent sous Windows ; Playwright n'est pas installé sur BE).
+"""Rend la fiche projet en PNG (3200 x 2262, comme les autres fiches) et en PDF (A4 paysage, pour l'impression).
 usage : python docs/fiche-projet/rendre.py"""
-import subprocess
 from pathlib import Path
+from playwright.sync_api import sync_playwright
 
 ICI = Path(__file__).resolve().parent
-EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-PAGE = (ICI / "fiche-projet-thunderlook.html").as_uri()
-COMMUN = [EDGE, "--headless", "--disable-gpu", "--hide-scrollbars", "--virtual-time-budget=3000"]
-subprocess.run(COMMUN + ["--window-size=1600,1131", "--force-device-scale-factor=2",
-                         f"--screenshot={ICI / 'fiche-projet-thunderlook.png'}", PAGE], check=True)
-subprocess.run(COMMUN + ["--no-pdf-header-footer", f"--print-to-pdf={ICI / 'fiche-projet-thunderlook.pdf'}", PAGE], check=True)
+with sync_playwright() as p:
+    b = p.chromium.launch()
+    pg = b.new_page(viewport={"width": 1600, "height": 1131}, device_scale_factor=2)
+    pg.goto((ICI / "fiche-projet-thunderlook.html").as_uri())
+    pg.wait_for_load_state("networkidle"); pg.evaluate("document.fonts.ready")
+    pg.screenshot(path=str(ICI / "fiche-projet-thunderlook.png"))
+    pg.pdf(path=str(ICI / "fiche-projet-thunderlook.pdf"), width="1600px", height="1131px", print_background=True)
+    b.close()
 print("fiche rendue :", ICI)
