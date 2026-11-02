@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Fiche projet – ThunderLook</title>
+<!-- Fiche projet au format des fiches Orbites / Relais Santé (paysage A4), version pour l'impression : fonds clairs,
+     cartes en filet, aucun aplat sombre. Captures de l'application réelle, textes remplacés par des données fictives
+     dans la page avant la capture (aucune donnée réelle dans le dépôt). Polices EB Garamond et Source Sans 3 (OFL).
+     Rendu PNG + PDF : python docs/fiche-projet/rendre.py -->
+<style>
+@font-face { font-family: "EB Garamond"; font-weight: 600; src: url("fonts/eb-garamond-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "EB Garamond"; font-weight: 400; src: url("fonts/eb-garamond-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "EB Garamond"; font-weight: 400; font-style: italic; src: url("fonts/eb-garamond-latin-400-italic.woff2") format("woff2"); }
+@font-face { font-family: "Source Sans 3"; font-weight: 400; src: url("fonts/source-sans-3-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Source Sans 3"; font-weight: 600; src: url("fonts/source-sans-3-latin-600-normal.woff2") format("woff2"); }
+:root {
+  --papier: #F7F5F0; --carte: #FFFFFF; --filet: #DDD8CC; --encre: #1E2422; --doux: #5D6662; --pale: #8A928E;
+  --accent: #2B67CE; --accent-pale: #E6EEFB; --fait: #2E7D4F; --encours: #C98A12; --afaire: #B42318; --avenir: #9AA19D;
+  --mono: "DejaVu Sans Mono", "Consolas", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+@page { size: 1600px 1131px; margin: 0; }
+html, body { width: 1600px; height: 1131px; }
+body { background: var(--papier); color: var(--encre); font: 15px/1.45 "Source Sans 3", sans-serif; position: relative; overflow: hidden;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: var(--accent); }
+.page { position: absolute; inset: 34px 52px 30px 62px; display: flex; flex-direction: column; }
+
+/* en-tête */
+.tete { display: flex; align-items: flex-end; justify-content: space-between; padding-bottom: 14px; border-bottom: 2px solid var(--encre); }
+.surtitre { font: 12px var(--mono); letter-spacing: .14em; color: var(--doux); margin-bottom: 6px; }
+.surtitre b { color: var(--accent); font-weight: 400; }
+.titre { display: flex; align-items: baseline; gap: 18px; }
+.titre h1 { font: 600 76px/1 "EB Garamond", serif; letter-spacing: -.01em; }
+.titre em { font: italic 400 38px "EB Garamond", serif; color: var(--accent); }
+.etat { display: flex; align-items: center; gap: 22px; }
+.etat-txt { text-align: right; }
+.etat-txt .date { font: 12px var(--mono); letter-spacing: .12em; color: var(--doux); margin-bottom: 8px; }
+.pastille { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; border: 1px solid var(--accent); border-radius: 999px;
+  font: 12.5px var(--mono); color: var(--accent); background: var(--accent-pale); }
+.pastille::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.anneau { position: relative; width: 96px; height: 96px; }
+.anneau svg { transform: rotate(-90deg); }
+.anneau div { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.anneau b { font: 600 26px "EB Garamond", serif; }
+.anneau small { font: 8.5px var(--mono); letter-spacing: .12em; color: var(--doux); }
+
+/* grille */
+.grille { flex: 1; display: grid; grid-template-columns: 372px 1fr 362px; gap: 26px; padding-top: 20px; min-height: 0; }
+.rubrique { display: flex; align-items: center; gap: 10px; font: 12px var(--mono); letter-spacing: .16em; margin-bottom: 10px; }
+.rubrique span { display: grid; place-items: center; width: 22px; height: 22px; border: 1.5px solid var(--accent); color: var(--accent); border-radius: 4px; font-size: 11px; letter-spacing: 0; }
+.carte { background: var(--carte); border: 1px solid var(--filet); border-radius: 10px; }
+
+.objectif { padding: 18px 20px; font-size: 16.5px; line-height: 1.5; margin-bottom: 22px; }
+.objectif small { display: block; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--filet); font-size: 13px; color: var(--doux); line-height: 1.45; }
+
+.plan { list-style: none; position: relative; }
+.plan::before { content: ""; position: absolute; left: 8px; top: 10px; bottom: 16px; width: 2px; background: var(--filet); }
+.plan li { position: relative; padding: 0 0 13px 32px; }
+.plan li::before { content: ""; position: absolute; left: 0; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--c); border: 2px solid var(--c); box-sizing: border-box; }
+.plan li.encours::before, .plan li.avenir::before { background: var(--papier); }
+.plan li.fait { --c: var(--fait); } .plan li.encours { --c: var(--encours); } .plan li.avenir { --c: var(--avenir); }
+.plan b { display: flex; justify-content: space-between; font-weight: 600; font-size: 15.5px; }
+.plan b i { font: normal 11.5px var(--mono); color: var(--c); letter-spacing: .06em; padding-top: 3px; }
+.plan p { color: var(--doux); font-size: 13.5px; line-height: 1.35; }
+
+/* captures */
+.captures { display: grid; grid-template-rows: 1.35fr 1fr; gap: 16px; min-height: 0; }
+.captures .bas { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-height: 0; }
+.ecran { position: relative; border: 1px solid #C9C3B5; border-radius: 10px; overflow: hidden; background: #FFFFFF; display: flex; flex-direction: column; }
+.ecran .barre { flex: none; height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 12px; background: #EEEAE1; border-bottom: 1px solid #DDD8CC;
+  font: 11px var(--mono); color: var(--doux); }
+.ecran .barre i { width: 9px; height: 9px; border-radius: 50%; border: 1px solid #B8B1A2; }
+.ecran .barre i:nth-child(3) { margin-right: 8px; }
+.ecran img { flex: 1; min-height: 0; width: 100%; object-fit: cover; object-position: top left; display: block; }
+.ecran figcaption { position: absolute; left: 12px; bottom: 12px; background: #FFFFFF; border: 1px solid var(--filet); border-radius: 6px;
+  padding: 4px 10px; font-weight: 600; font-size: 13px; }
+
+/* avancement */
+.barres { padding: 16px 18px 12px; margin-bottom: 14px; }
+.barres .l { margin-bottom: 11px; }
+.barres .l div { display: flex; justify-content: space-between; font-size: 14.5px; margin-bottom: 4px; }
+.barres .l div span:last-child { font: 12.5px var(--mono); }
+.barres .jauge { height: 9px; border-radius: 5px; background: #ECE8DF; overflow: hidden; }
+.barres .jauge i { display: block; height: 100%; border-radius: 5px; background: var(--accent); }
+.barres .jauge i.moyen { background: var(--encours); } .barres .jauge i.bas { background: var(--afaire); }
+.barres p { font-style: italic; font-size: 12px; color: var(--doux); margin-top: 4px; }
+.chiffres { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.chiffres div { padding: 10px 12px; }
+.chiffres b { display: block; font: 600 30px/1.05 "EB Garamond", serif; white-space: nowrap; }
+.chiffres span { font-size: 12.5px; color: var(--doux); line-height: 1.25; display: block; }
+.chiffres .alerte b { color: var(--accent); }
+.chiffres .rouge b { color: var(--afaire); }
+
+/* tâches */
+.taches { padding-top: 18px; }
+.taches .entete { display: flex; justify-content: space-between; align-items: center; }
+.legende { display: flex; gap: 16px; font: 11.5px var(--mono); color: var(--doux); }
+.legende i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.cartes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.tache { position: relative; padding: 14px 16px 14px; border: 1.5px solid var(--encre); border-radius: 10px; background: var(--carte); min-height: 112px; }
+.tache.premiere { border: 2.5px solid var(--accent); background: var(--accent-pale); }
+.tache b { display: block; font-weight: 600; font-size: 15.5px; line-height: 1.25; padding-right: 26px; margin-bottom: 6px; }
+.tache p { font-size: 13.2px; color: var(--doux); line-height: 1.38; }
+.tache .n { position: absolute; right: 14px; top: 8px; font: italic 400 30px "EB Garamond", serif; color: var(--pale); }
+.tache.premiere .n, .tache.premiere b { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="tete">
+    <div>
+      <div class="surtitre"><b>FICHE PROJET V</b> · BE (BLUE-ESCAPE) · LUAPMADA/THUNDERLOOK · V0.10.0</div>
+      <div class="titre"><h1>ThunderLook</h1><em>Outlook, en local et en Rust</em></div>
+    </div>
+    <div class="etat">
+      <div class="etat-txt">
+        <div class="date">ÉTAT AU 02 NOVEMBRE 2026</div>
+        <span class="pastille">Fonctionnel au banc · Outlook reste la référence</span>
+      </div>
+      <div class="anneau">
+        <svg width="96" height="96" viewBox="0 0 96 96"><circle cx="48" cy="48" r="41" fill="none" stroke="#E4DFD4" stroke-width="9"/>
+          <circle cx="48" cy="48" r="41" fill="none" stroke="#2B67CE" stroke-width="9" stroke-dasharray="159.7 257.6" stroke-linecap="butt"/></svg>
+        <div><b>62 %</b><small>AVANCEMENT</small></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="grille">
+    <section>
+      <div class="rubrique"><span>01</span>OBJECTIF DE L'OUTIL</div>
+      <div class="carte objectif">
+        Remplacer <b>Outlook 2021</b> par un clone autonome : <b>courrier, calendrier, contacts, tâches et notes</b>, 100 % local, sans compte Microsoft, avec la même ergonomie, et <b>synchronisé avec les téléphones</b> par MyPhoneExplorer.
+        <small>Les PST ne sont lus que sur copie, jamais modifiés. Aucune donnée réelle dans le dépôt. Le S23 reste sur Outlook tant que ThunderLook n'est pas la référence ; les essais se font sur le S20.</small>
+      </div>
+      <div class="rubrique"><span>02</span>PLAN D'ACTION</div>
+      <ul class="plan">
+        <li class="fait"><b>Import PST et lecture <i>19/10</i></b><p>217 257 éléments (15 Go) en 170 s, 0 perte ; dossier de 22 000 mails ouvert en 145 ms</p></li>
+        <li class="fait"><b>Recherche, rédaction, règles <i>20/10</i></b><p>Index plein texte sous 300 ms, réponses identiques à Outlook, 60 règles rejouées</p></li>
+        <li class="fait"><b>Comptes IMAP et SMTP <i>21/10</i></b><p>Relève, envoi, IDLE, hors connexion ; mots de passe dans Windows</p></li>
+        <li class="fait"><b>Calendrier et contacts <i>23/10</i></b><p>4 198 rendez-vous, occurrences identiques à Outlook ; 10 649 contacts</p></li>
+        <li class="encours"><b>Synchro téléphone et Outlook <i>EN COURS</i></b><p>S20 dans les deux sens écrit et testé sur copie ; alignement Outlook sans doublon</p></li>
+        <li class="avenir"><b>Remplacer Outlook <i>À VENIR</i></b><p>Usage quotidien, bascule du S23, lien avec ADI Facturation</p></li>
+      </ul>
+    </section>
+
+    <section class="captures">
+      <figure class="ecran"><div class="barre"><i></i><i></i><i></i>ThunderLook · Courrier</div>
+        <img src="img/courrier.png" alt="Courrier"><figcaption>Courrier : trois volets, ruban et dossiers d'Outlook</figcaption></figure>
+      <div class="bas">
+        <figure class="ecran"><div class="barre"><i></i><i></i><i></i>Calendrier</div>
+          <img src="img/calendrier.png" alt="Calendrier"><figcaption>Calendrier : vue Mois</figcaption></figure>
+        <figure class="ecran"><div class="barre"><i></i><i></i><i></i>Contacts</div>
+          <img src="img/contacts.png" alt="Contacts"><figcaption>Contacts : liste et fiche</figcaption></figure>
+      </div>
+    </section>
+
+    <section>
+      <div class="rubrique"><span>03</span>ÉTAT D'AVANCEMENT</div>
+      <div class="carte barres">
+        <div class="l"><div><span>Courrier, recherche et règles</span><span>90 %</span></div><div class="jauge"><i style="width:90%"></i></div></div>
+        <div class="l"><div><span>Calendrier</span><span>80 %</span></div><div class="jauge"><i style="width:80%"></i></div></div>
+        <div class="l"><div><span>Contacts, tâches et notes</span><span>75 %</span></div><div class="jauge"><i style="width:75%"></i></div></div>
+        <div class="l"><div><span>Fiabilité de la saisie</span><span>70 %</span></div><div class="jauge"><i style="width:70%"></i></div></div>
+        <div class="l"><div><span>Synchro téléphones (MPE)</span><span>40 %</span></div><div class="jauge"><i class="moyen" style="width:40%"></i></div></div>
+        <div class="l"><div><span>Remplacement d'Outlook</span><span>15 %</span></div><div class="jauge"><i class="bas" style="width:15%"></i></div></div>
+        <p>Estimation par chantier au 02 novembre 2026.</p>
+      </div>
+      <div class="chiffres">
+        <div class="carte"><b>252 846</b><span>éléments importés</span></div>
+        <div class="carte"><b>59 462</b><span>lignes de Rust</span></div>
+        <div class="carte"><b>373</b><span>tests automatiques</span></div>
+        <div class="carte alerte"><b>284</b><span>commits en 16 jours</span></div>
+        <div class="carte alerte"><b>0,3 s</b><span>recherche maximale sur 217 000 mails</span></div>
+        <div class="carte rouge"><b>42</b><span>conflits S20 à trancher</span></div>
+      </div>
+    </section>
+  </main>
+
+  <section class="taches">
+    <div class="entete">
+      <div class="rubrique"><span>04</span>TÂCHES PRIORITAIRES</div>
+      <div class="legende"><span><i style="background:var(--fait)"></i>fait</span><span><i style="background:var(--encours)"></i>en cours</span><span><i style="background:var(--afaire)"></i>à faire</span><span><i style="background:var(--avenir)"></i>à venir</span></div>
+    </div>
+    <div class="cartes">
+      <div class="tache premiere"><span class="n">1</span><b>Synchro S23 sans écart</b><p>Bilan <code>s23_check</code> à zéro ; dédoublonner Calendar Annexe (92 doublons) avant de le synchroniser.</p></div>
+      <div class="tache"><span class="n">2</span><b>Activer la synchro S20</b><p>Lecture auto toutes les 5 min, première passe, puis contrôle que MPE reprend les fiches.</p></div>
+      <div class="tache"><span class="n">3</span><b>Trancher les conflits S20</b><p>42 conflits, doublons d'anniversaires, « Rdv mum », éléments ZZ-TEST.</p></div>
+      <div class="tache"><span class="n">4</span><b>Une semaine d'usage réel</b><p>Courrier du jour et saisie de contacts par Paul, défauts relevés et corrigés.</p></div>
+      <div class="tache"><span class="n">5</span><b>Lien avec ADI Facturation</b><p>Facture jointe en un clic, fiche client lue dans le volet de lecture.</p></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>
